@@ -456,8 +456,29 @@ export class ChatService {
       return this.handleApprove(projectId);
     }
 
-    // If pipeline is gated, any non-approve message is treated as change-request feedback
+    // If pipeline is gated, check for envisioning selection messages before treating as change request
     if (pipeline.status === 'gated') {
+      const selectionIds = this.extractSelectionIds(message);
+      if (selectionIds !== null) {
+        // Store selections in envisioning output so the architect can use them
+        const existing = this.projectEnvisioningOutputs.get(projectId) as Record<string, unknown> | undefined;
+        this.projectEnvisioningOutputs.set(projectId, {
+          ...(existing ?? {}),
+          selectedItems: selectionIds,
+        });
+        // Also update the envisioning stage output in the pipeline if present
+        const envIdx = pipeline.stages.findIndex((s) => s.agentId === 'envisioning');
+        if (envIdx >= 0) {
+          const prevOutput = (pipeline.stages[envIdx].output ?? {}) as Record<string, unknown>;
+          pipeline.stages[envIdx] = {
+            ...pipeline.stages[envIdx],
+            output: { ...prevOutput, selectedItems: selectionIds },
+          };
+          this.projectPipelines.set(projectId, pipeline);
+        }
+        // Treat selection as approval so the pipeline advances
+        return this.handleApprove(projectId);
+      }
       return this.handleRequestChanges(projectId, message);
     }
 
@@ -484,6 +505,19 @@ export class ChatService {
       'continue',
     ];
     return approveTerms.includes(msg);
+  }
+
+  /**
+   * Detect a selection message from the frontend SelectableList component.
+   * Returns the array of selected IDs, or null if the message is not a selection.
+   * Frontend sends: "I selected these items: id1, id2, id3. Please proceed with these selections."
+   * This format is defined in handleSelectableListProceed() in project/[id]/page.tsx.
+   */
+  private extractSelectionIds(message: string): string[] | null {
+    const match = /i selected these items:\s*(.+?)\.\s*please proceed/i.exec(message);
+    if (!match) return null;
+    const ids = match[1].split(',').map((s) => s.trim()).filter(Boolean);
+    return ids.length > 0 ? ids : null;
   }
 
   private async handleApprove(projectId: string): Promise<ChatMessage[]> {

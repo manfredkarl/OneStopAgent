@@ -56,7 +56,7 @@ router.patch('/:id/agents/:agentId', validateBody(AgentControlSchema), async (re
     await projectService.getById(projectId, userId);
 
     // Toggle agent state
-    const result = await agentControlService.toggleAgent({
+    await agentControlService.toggleAgent({
       projectId,
       userId,
       agentId,
@@ -64,7 +64,9 @@ router.patch('/:id/agents/:agentId', validateBody(AgentControlSchema), async (re
       confirm: confirm === true,
     });
 
-    res.json(result);
+    // Return the full agent list so the frontend can update its state in one request
+    const agents: AgentStatus[] = agentControlService.getAgentStatuses(projectId);
+    res.json({ agents });
   } catch (err) {
     next(err);
   }

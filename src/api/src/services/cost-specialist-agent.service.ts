@@ -387,8 +387,11 @@ export class CostSpecialistAgentService {
     // Fetch with retry (falls back to mock in MVP)
     try {
       const result = await this.fetchPricingWithFallbacks(service);
+      // Mock prices are approximate — do not label them as live API data
+      const source: PricingSource = result.isMock ? 'approximate' : 'live';
       this.cache.set(cacheKey, { data: result.price, timestamp: Date.now() });
-      return { ...result, source: 'live' };
+      const { isMock: _discarded, ...priceResult } = result;
+      return { ...priceResult, source };
     } catch {
       if (cached) {
         return { price: cached.data, source: 'approximate' };
@@ -407,6 +410,7 @@ export class CostSpecialistAgentService {
     service: ServiceSelection,
   ): Promise<{
     price: number;
+    isMock?: boolean;
     zeroResults?: boolean;
     fallbackRegion?: string;
     skuFallback?: string;
@@ -420,10 +424,11 @@ export class CostSpecialistAgentService {
     }
 
     // 2. Check mock prices before broader queries (preserves MVP behavior)
+    // Mark as mock so resolvePrice can label them as 'approximate', not 'live'
     const mockKey = `${service.serviceName}-${service.sku}`;
     const mockPrice = MOCK_PRICES[mockKey];
     if (mockPrice !== undefined) {
-      return { price: mockPrice };
+      return { price: mockPrice, isMock: true };
     }
 
     // 3. §9.2 Unknown SKU: retry without SKU filter, pick cheapest non-zero
