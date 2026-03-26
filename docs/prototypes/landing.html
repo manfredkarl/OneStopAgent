@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneStopAgent — Landing</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    background: #FAF9F8;
+    color: #323130;
+    min-height: 100vh;
+  }
+  /* ── Header ── */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 48px;
+    background: #0078D4;
+    color: #fff;
+  }
+  .top-bar .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .top-bar .brand .icon {
+    width: 28px; height: 28px;
+    background: rgba(255,255,255,.2);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: #005A9E;
+    border: 2px solid rgba(255,255,255,.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+  }
+  /* ── Hero / Create Card ── */
+  .hero {
+    max-width: 640px;
+    margin: 48px auto 0;
+    padding: 0 24px;
+    text-align: center;
+  }
+  .hero h1 { font-size: 26px; font-weight: 600; }
+  .hero p { font-size: 14px; color: #605E5C; margin-top: 6px; }
+  .create-card {
+    background: #fff;
+    border: 1px solid #E1DFDD;
+    border-radius: 8px;
+    padding: 28px;
+    margin-top: 24px;
+    text-align: left;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  .create-card label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #323130;
+  }
+  .create-card textarea {
+    width: 100%;
+    min-height: 100px;
+    border: 1px solid #C8C6C4;
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    transition: border-color .2s;
+  }
+  .create-card textarea:focus { outline: none; border-color: #0078D4; box-shadow: 0 0 0 1px #0078D4; }
+  .char-count { font-size: 11px; color: #A19F9D; text-align: right; margin-top: 4px; }
+  .create-card input[type="text"] {
+    width: 100%;
+    height: 36px;
+    border: 1px solid #C8C6C4;
+    border-radius: 4px;
+    padding: 0 12px;
+    font-family: inherit;
+    font-size: 14px;
+    margin-top: 4px;
+    transition: border-color .2s;
+  }
+  .create-card input[type="text"]:focus { outline: none; border-color: #0078D4; box-shadow: 0 0 0 1px #0078D4; }
+  .field-group { margin-top: 16px; }
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 20px;
+    padding: 0 24px;
+    height: 40px;
+    background: #0078D4;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    width: 100%;
+    justify-content: center;
+  }
+  .btn-primary:hover { background: #106EBE; }
+  .btn-primary:disabled { background: #C8C6C4; cursor: default; }
+  .btn-primary:focus-visible { outline: 2px solid #0078D4; outline-offset: 2px; }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* ── Error banner ── */
+  .error-banner {
+    display: none;
+    background: #FDE7E9;
+    color: #A4262C;
+    border: 1px solid #F1707B;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-top: 16px;
+    align-items: center;
+    gap: 8px;
+  }
+  /* ── Recent Projects ── */
+  .recent {
+    max-width: 640px;
+    margin: 40px auto;
+    padding: 0 24px;
+  }
+  .recent h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  .project-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: #fff;
+    border: 1px solid #E1DFDD;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: box-shadow .2s, transform .15s;
+    text-decoration: none;
+    color: inherit;
+  }
+  .project-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,.08); transform: translateY(-1px); }
+  .project-card:focus { outline: 2px solid #0078D4; outline-offset: 2px; }
+  .project-info { flex: 1; min-width: 0; }
+  .project-info .title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .project-info .meta {
+    font-size: 12px;
+    color: #A19F9D;
+    margin-top: 3px;
+  }
+  .status-badge {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .status-in_progress { background: #DEECF9; color: #0078D4; }
+  .status-completed { background: #DFF6DD; color: #107C10; }
+  .status-error { background: #FDE7E9; color: #A4262C; }
+  .empty-state {
+    text-align: center;
+    padding: 32px;
+    color: #A19F9D;
+    font-size: 14px;
+    display: none;
+  }
+  .empty-state svg { margin-bottom: 12px; }
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: #107C10;
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    transition: transform .3s ease;
+    z-index: 100;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="top-bar">
+    <div class="brand">
+      <div class="icon">OS</div>
+      <span>OneStopAgent</span>
+    </div>
+    <div class="avatar" title="Alex Johnson" aria-label="User menu">AJ</div>
+  </div>
+
+  <!-- Hero / Create -->
+  <div class="hero">
+    <h1>Scope Azure solutions in minutes</h1>
+    <p>Describe a customer scenario and let AI agents build architecture, estimates, and a presentation deck.</p>
+    <div class="create-card" role="form" aria-label="Create a new project">
+      <label for="desc">Describe your customer's scenario or need</label>
+      <textarea id="desc" placeholder="e.g. The customer wants to modernise their on-premises .NET monolith to Azure, serving 50k concurrent users across EMEA..." maxlength="5000" aria-describedby="charCount"></textarea>
+      <div class="char-count" id="charCount">0 / 5,000</div>
+      <div class="field-group">
+        <label for="cust">Customer name <span style="font-weight:400;color:#A19F9D;">(optional)</span></label>
+        <input type="text" id="cust" placeholder="e.g. Contoso Ltd" maxlength="200">
+      </div>
+      <div class="error-banner" id="errorBanner" role="alert">
+        <span>⚠️</span>
+        <span id="errorText"></span>
+      </div>
+      <button class="btn-primary" id="createBtn" disabled aria-label="Create project">
+        <span class="spinner" id="createSpinner"></span>
+        <span id="createLabel">Create Project</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Recent Projects -->
+  <div class="recent" id="recentSection">
+    <h2>Recent Projects</h2>
+    <div id="projectList"></div>
+    <div class="empty-state" id="emptyState">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="8" y="12" width="32" height="24" rx="3" stroke="#C8C6C4" stroke-width="2"/><path d="M8 18h32" stroke="#C8C6C4" stroke-width="2"/><circle cx="13" cy="15" r="1.5" fill="#C8C6C4"/><circle cx="18" cy="15" r="1.5" fill="#C8C6C4"/></svg>
+      <p>No projects yet. Start by describing a customer scenario above.</p>
+    </div>
+  </div>
+
+  <!-- Success toast -->
+  <div class="toast" id="toast">✓ Project created — opening chat…</div>
+
+<script>
+const desc = document.getElementById('desc');
+const cust = document.getElementById('cust');
+const charCount = document.getElementById('charCount');
+const createBtn = document.getElementById('createBtn');
+const createSpinner = document.getElementById('createSpinner');
+const createLabel = document.getElementById('createLabel');
+const errorBanner = document.getElementById('errorBanner');
+const errorText = document.getElementById('errorText');
+const toast = document.getElementById('toast');
+const projectList = document.getElementById('projectList');
+const emptyState = document.getElementById('emptyState');
+
+// Mock project data
+const projects = [
+  { id: '1', title: 'Modernise on-premises .NET monolith to Azure, serving 50k concurrent users across EMEA with high availability and disaster recovery...', customer: 'Contoso Ltd', status: 'in_progress', updated: '2 hours ago' },
+  { id: '2', title: 'AI-powered customer support chatbot for retail using Azure OpenAI Service and Cognitive Search with multi-language support...', customer: 'Fabrikam Inc', status: 'completed', updated: '1 day ago' },
+  { id: '3', title: 'IoT telemetry platform for manufacturing with real-time dashboards, anomaly detection, and predictive maintenance capabilities...', customer: 'Northwind Traders', status: 'in_progress', updated: '3 days ago' },
+  { id: '4', title: 'Data lakehouse migration from on-premises Hadoop to Azure Synapse Analytics with incremental data loading and governance...', customer: 'Adventure Works', status: 'error', updated: '5 days ago' },
+  { id: '5', title: 'E-commerce platform with 10,000 concurrent users, Azure Kubernetes Service, Cosmos DB, and CDN for global delivery...', customer: null, status: 'completed', updated: '1 week ago' }
+];
+
+let showEmpty = false;
+
+function renderProjects() {
+  const data = showEmpty ? [] : projects;
+  if (data.length === 0) {
+    projectList.innerHTML = '';
+    emptyState.style.display = 'block';
+    return;
+  }
+  emptyState.style.display = 'none';
+  projectList.innerHTML = data.map(p => `
+    <a class="project-card" href="chat.html" tabindex="0" role="link" aria-label="Open project: ${p.customer || 'Unnamed'}">
+      <div class="project-info">
+        <div class="title">${p.title}</div>
+        <div class="meta">${p.customer || '—'} · ${p.updated}</div>
+      </div>
+      <span class="status-badge status-${p.status}">${p.status === 'in_progress' ? 'In Progress' : p.status === 'completed' ? 'Completed' : 'Error'}</span>
+    </a>
+  `).join('');
+}
+
+// Character counter
+desc.addEventListener('input', () => {
+  const len = desc.value.length;
+  charCount.textContent = `${len.toLocaleString()} / 5,000`;
+  createBtn.disabled = desc.value.trim().length === 0;
+});
+
+// Create project simulation
+createBtn.addEventListener('click', () => {
+  if (desc.value.trim().length === 0) return;
+  errorBanner.style.display = 'none';
+  createBtn.disabled = true;
+  createSpinner.style.display = 'inline-block';
+  createLabel.textContent = 'Creating…';
+
+  setTimeout(() => {
+    createSpinner.style.display = 'none';
+    createLabel.textContent = 'Create Project';
+    createBtn.disabled = false;
+    toast.classList.add('show');
+    setTimeout(() => {
+      toast.classList.remove('show');
+      window.location.href = 'chat.html';
+    }, 1500);
+  }, 1800);
+});
+
+// Toggle empty state demo
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'e' && e.altKey) {
+    showEmpty = !showEmpty;
+    renderProjects();
+  }
+});
+
+renderProjects();
+</script>
+</body>
+</html>

@@ -1,0 +1,1353 @@
+openapi: 3.0.3
+info:
+  title: OneStopAgent API
+  description: |
+    API for the OneStopAgent platform — a multi-agent system that helps Microsoft sellers
+    scope Azure solutions, estimate costs, and generate customer-ready deliverables.
+
+    All endpoints require a valid JWT Bearer token obtained via Microsoft Entra ID (OAuth 2.0 / OIDC).
+    Projects are scoped to the authenticated user; cross-user access returns 403.
+    Rate limiting is enforced at 60 requests per minute per user.
+  version: 1.0.0
+  contact:
+    name: OneStopAgent Team
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://onestopagent.azurewebsites.net
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Projects
+    description: Project lifecycle management
+  - name: Chat
+    description: Agent conversation and chat history
+  - name: Agents
+    description: Agent status and management
+
+paths:
+  # ──────────────────────────────────────────────
+  # POST /api/projects — Create project
+  # ──────────────────────────────────────────────
+  /api/projects:
+    post:
+      operationId: createProject
+      summary: Create a new project
+      description: |
+        Creates a new project workspace. A `Project` record is persisted with
+        `status: 'in_progress'`, all agents activated, and an empty context.
+        The PM Agent generates an initial acknowledgement message.
+      tags: [Projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+            example:
+              description: >-
+                The customer wants to modernise their on-premises .NET monolith
+                to Azure, serving 50k concurrent users across EMEA.
+              customerName: Contoso Ltd
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProjectResponse'
+              example:
+                projectId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          description: Storage or agent initialisation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Project creation failed. Please try again.
+
+    # ──────────────────────────────────────────────
+    # GET /api/projects — List projects
+    # ──────────────────────────────────────────────
+    get:
+      operationId: listProjects
+      summary: List user's projects
+      description: |
+        Returns all projects for the authenticated user, ordered by `updatedAt`
+        descending. The `description` field is truncated to the first 200 characters;
+        use `GET /api/projects/{id}` for the full text. An authenticated user with
+        no projects receives `200` with an empty array.
+      tags: [Projects]
+      responses:
+        '200':
+          description: List of projects (may be empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSummary'
+              example:
+                - projectId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  description: Modernise on-premises .NET monolith to Azure...
+                  customerName: Contoso Ltd
+                  status: in_progress
+                  updatedAt: '2025-01-15T14:30:00.000Z'
+                - projectId: b2c3d4e5-f6a7-8901-bcde-f12345678901
+                  description: AI-powered customer support chatbot for retail...
+                  customerName: null
+                  status: completed
+                  updatedAt: '2025-01-14T09:15:00.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ──────────────────────────────────────────────
+  # GET /api/projects/{id} — Get project
+  # ──────────────────────────────────────────────
+  /api/projects/{id}:
+    get:
+      operationId: getProject
+      summary: Get project with full state
+      description: |
+        Retrieves the full project state including all agent outputs
+        (architecture, services, cost estimate, business value, etc.).
+      tags: [Projects]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Full project object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+              example:
+                id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                userId: user-oid-from-entra
+                description: >-
+                  Modernise on-premises .NET monolith to Azure, serving 50k
+                  concurrent users across EMEA.
+                customerName: Contoso Ltd
+                activeAgents:
+                  - pm
+                  - envisioning
+                  - architect
+                  - azure-specialist
+                  - cost
+                  - business-value
+                  - presentation
+                context:
+                  requirements:
+                    targetUsers: '50,000 concurrent users'
+                    geography: EMEA
+                  architecture: null
+                  services: null
+                  costEstimate: null
+                  businessValue: null
+                  envisioningSelections: null
+                status: in_progress
+                createdAt: '2025-01-15T14:00:00.000Z'
+                updatedAt: '2025-01-15T14:30:00.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ──────────────────────────────────────────────
+  # POST /api/projects/{id}/chat — Send message
+  # GET  /api/projects/{id}/chat — Chat history
+  # ──────────────────────────────────────────────
+  /api/projects/{id}/chat:
+    post:
+      operationId: sendChatMessage
+      summary: Send a chat message
+      description: |
+        Sends a user message to the orchestrator (PM Agent) or a specific agent
+        via `targetAgent`. The user message and agent response are both persisted
+        as `ChatMessage` records. The project `context.requirements` may be updated
+        based on extracted information and `updatedAt` is refreshed.
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            example:
+              message: >-
+                The customer needs HIPAA compliance and the solution must be
+                deployed in US East.
+              targetAgent: null
+      responses:
+        '200':
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+              example:
+                id: msg-uuid-001
+                projectId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                role: agent
+                agentId: pm
+                content: >-
+                  Thank you! I've noted that HIPAA compliance is required and
+                  the deployment region is US East. Let me ask a few more
+                  questions to refine the scope.
+
+                  What is the expected data volume (in GB) that the application
+                  will process monthly?
+                metadata:
+                  questionIndex: 3
+                  totalQuestions: 10
+                  category: scale
+                timestamp: '2025-01-15T14:32:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Target agent is inactive or invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Agent 'cost' is not active in this project.
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '504':
+          description: Agent did not respond within timeout (120s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: Agent response timed out. Please try again.
+
+    get:
+      operationId: getChatHistory
+      summary: Get chat history
+      description: |
+        Retrieves chat history for a project with cursor-based pagination.
+        Messages are returned in reverse chronological order (newest first).
+        Pass the `nextCursor` value from the response as the `before` query
+        parameter to fetch the next page.
+      tags: [Chat]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: limit
+          in: query
+          description: Maximum number of messages to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: before
+          in: query
+          description: >-
+            Cursor for pagination — return messages older than this message UUID.
+            Use the `nextCursor` value from a previous response.
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Paginated chat messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHistoryResponse'
+              example:
+                messages:
+                  - id: msg-uuid-002
+                    projectId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    role: agent
+                    agentId: pm
+                    content: >-
+                      Welcome! I'm your Project Manager Agent. I've reviewed
+                      your description...
+                    metadata: null
+                    timestamp: '2025-01-15T14:00:05.000Z'
+                  - id: msg-uuid-001
+                    projectId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    role: user
+                    agentId: null
+                    content: Modernise on-premises .NET monolith to Azure...
+                    metadata: null
+                    timestamp: '2025-01-15T14:00:00.000Z'
+                hasMore: false
+                nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ──────────────────────────────────────────────
+  # GET /api/projects/{id}/agents — List agents
+  # ──────────────────────────────────────────────
+  /api/projects/{id}/agents:
+    get:
+      operationId: listAgents
+      summary: List agents and their status
+      description: |
+        Returns all agents and their current execution status for the given project.
+        Includes metadata about whether each agent can be deactivated.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Agent status list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agents]
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentStatus'
+              example:
+                agents:
+                  - agentId: pm
+                    displayName: Project Manager
+                    status: idle
+                    active: true
+                    canDeactivate: false
+                    deactivateReason: null
+                  - agentId: architect
+                    displayName: System Architect
+                    status: working
+                    active: true
+                    canDeactivate: false
+                    deactivateReason: >-
+                      System Architect is required for all downstream agents
+                      to function.
+                  - agentId: envisioning
+                    displayName: Envisioning
+                    status: idle
+                    active: true
+                    canDeactivate: true
+                    deactivateReason: null
+                  - agentId: azure-specialist
+                    displayName: Azure Specialist
+                    status: idle
+                    active: true
+                    canDeactivate: true
+                    deactivateReason: null
+                  - agentId: cost
+                    displayName: Cost Specialist
+                    status: idle
+                    active: false
+                    canDeactivate: true
+                    deactivateReason: null
+                  - agentId: business-value
+                    displayName: Business Value
+                    status: idle
+                    active: true
+                    canDeactivate: true
+                    deactivateReason: null
+                  - agentId: presentation
+                    displayName: Presentation
+                    status: error
+                    active: true
+                    canDeactivate: true
+                    deactivateReason: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ──────────────────────────────────────────────
+  # PATCH /api/projects/{id}/agents/{agentId} — Toggle agent
+  # ──────────────────────────────────────────────
+  /api/projects/{id}/agents/{agentId}:
+    patch:
+      operationId: toggleAgent
+      summary: Activate or deactivate an agent
+      description: |
+        Activates or deactivates an agent within a project. Protected agents
+        (e.g., System Architect) cannot be deactivated — the response returns
+        `409 Conflict`. If the agent is currently working, the client must set
+        `confirm: true` to cancel its task and deactivate it.
+      tags: [Agents]
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/AgentIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active:
+                  type: boolean
+                  description: '`true` to activate, `false` to deactivate'
+                confirm:
+                  type: boolean
+                  description: >-
+                    Set to `true` to confirm deactivation of a currently-working
+                    agent (cancels its in-progress task).
+            example:
+              active: false
+      responses:
+        '200':
+          description: Agent state updated — returns the updated agent status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+              example:
+                agentId: cost
+                displayName: Cost Specialist
+                status: idle
+                active: false
+                canDeactivate: true
+                deactivateReason: null
+        '400':
+          description: Missing or invalid `active` field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Field 'active' (boolean) is required."
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Cannot deactivate a protected agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: >-
+                  System Architect cannot be deactivated. It is required for
+                  all downstream agents.
+        '422':
+          description: Agent is currently working — confirmation required
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, agentStatus]
+                properties:
+                  error:
+                    type: string
+                  agentStatus:
+                    type: string
+                    enum: [working]
+              example:
+                error: "Agent 'cost' is currently working. Set 'confirm: true' to cancel its task and deactivate."
+                agentStatus: working
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+# ════════════════════════════════════════════════
+# Components
+# ════════════════════════════════════════════════
+components:
+  # ── Security ──────────────────────────────────
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        JWT obtained via Microsoft Entra ID (OAuth 2.0 / OpenID Connect).
+        All endpoints require a valid Bearer token in the Authorization header.
+
+  # ── Parameters ────────────────────────────────
+  parameters:
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      description: Project UUID
+      schema:
+        type: string
+        format: uuid
+        example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+    AgentIdParam:
+      name: agentId
+      in: path
+      required: true
+      description: Agent identifier
+      schema:
+        $ref: '#/components/schemas/AgentId'
+
+  # ── Reusable responses ────────────────────────
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 'description is required and must be 1–5,000 characters.'
+
+    Unauthorized:
+      description: Missing or expired Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Authentication required.
+
+    Forbidden:
+      description: Ownership violation — user does not own this project
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: You do not have access to this project.
+
+    NotFound:
+      description: Project not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Project not found.
+
+    TooManyRequests:
+      description: Rate limit exceeded (60 req/min per user)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Rate limit exceeded. Try again in 42 seconds.
+
+  # ── Schemas ───────────────────────────────────
+  schemas:
+    # ── Error ─────────────────────────────────
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: Validation failed.
+
+    # ── Request / Response DTOs ───────────────
+    CreateProjectRequest:
+      type: object
+      required: [description]
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Free-text description of the customer opportunity (trimmed)
+          example: >-
+            The customer wants to modernise their on-premises .NET monolith
+            to Azure, serving 50k concurrent users across EMEA.
+        customerName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          nullable: true
+          description: Optional customer or account name (trimmed)
+          example: Contoso Ltd
+
+    CreateProjectResponse:
+      type: object
+      required: [projectId]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: Unique identifier for the newly created project
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+    SendMessageRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: The user's chat message (trimmed)
+          example: >-
+            The customer needs HIPAA compliance and the solution must be
+            deployed in US East.
+        targetAgent:
+          type: string
+          nullable: true
+          description: >-
+            Routes the message to a specific agent instead of the PM orchestrator.
+            When null or omitted, the PM Agent handles routing.
+          enum:
+            - pm
+            - envisioning
+            - architect
+            - azure-specialist
+            - cost
+            - business-value
+            - presentation
+          example: null
+
+    ChatHistoryResponse:
+      type: object
+      required: [messages, hasMore, nextCursor]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          description: Chat messages in reverse chronological order (newest first)
+        hasMore:
+          type: boolean
+          description: Whether additional older messages exist
+        nextCursor:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Pass as the `before` query parameter to fetch the next page.
+            Null when `hasMore` is false.
+
+    # ── Domain models ─────────────────────────
+    ProjectSummary:
+      type: object
+      required: [projectId, description, status, updatedAt]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: Project identifier
+        description:
+          type: string
+          maxLength: 200
+          description: >-
+            Free-text description, truncated to 200 chars in list responses.
+            Use GET /api/projects/{id} for full text.
+        customerName:
+          type: string
+          nullable: true
+          description: Customer or account name
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of last modification
+
+    Project:
+      type: object
+      required:
+        - id
+        - userId
+        - description
+        - activeAgents
+        - context
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique project identifier (UUID v4)
+        userId:
+          type: string
+          description: User OID from Microsoft Entra ID
+          example: user-oid-from-entra
+        description:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Free-text description of the customer opportunity
+        customerName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          nullable: true
+          description: Optional customer or account name
+        activeAgents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentId'
+          description: List of currently active agent identifiers
+          example:
+            - pm
+            - envisioning
+            - architect
+            - azure-specialist
+            - cost
+            - business-value
+            - presentation
+        context:
+          $ref: '#/components/schemas/ProjectContext'
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO 8601 creation timestamp (immutable)
+        updatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp, auto-updated on modifications
+
+    ProjectContext:
+      type: object
+      required: [requirements]
+      description: Structured project data populated by agents as the workflow progresses
+      properties:
+        requirements:
+          type: object
+          additionalProperties:
+            type: string
+          description: Key-value pairs of extracted customer requirements
+          example:
+            targetUsers: '50,000 concurrent users'
+            geography: EMEA
+        architecture:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ArchitectureOutput'
+          description: System architecture definition (null until architect agent completes)
+        services:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ServiceSelection'
+          description: Selected Azure services (null until Azure specialist completes)
+        costEstimate:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CostEstimate'
+          description: Cost analysis (null until cost agent completes)
+        businessValue:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ValueAssessment'
+          description: Business value assessment (null until business-value agent completes)
+        envisioningSelections:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EnvisioningSelections'
+          description: >-
+            Structured selections from the Envisioning agent (null until the
+            seller completes the envisioning flow)
+
+    ArchitectureOutput:
+      type: object
+      required: [mermaidCode, components, narrative]
+      description: Architecture definition produced by the Architect agent
+      properties:
+        mermaidCode:
+          type: string
+          description: Valid Mermaid diagram syntax (max 30 nodes)
+          example: |
+            graph TD
+              A[Web App] --> B[API Gateway]
+              B --> C[App Service]
+              C --> D[(Cosmos DB)]
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArchitectureComponent'
+          description: List of architecture components
+        narrative:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Human-readable architecture explanation
+
+    ArchitectureComponent:
+      type: object
+      required: [name, azureService, description]
+      properties:
+        name:
+          type: string
+          description: Component identifier
+          example: API Gateway
+        azureService:
+          type: string
+          description: Mapped Azure service name
+          example: Azure API Management
+        description:
+          type: string
+          description: What this component does in the architecture
+          example: Manages API traffic, rate limiting, and authentication
+
+    ServiceSelection:
+      type: object
+      required: [componentName, serviceName, sku, region, capabilities]
+      description: Azure service selection for an architecture component
+      properties:
+        componentName:
+          type: string
+          description: Maps to an ArchitectureOutput component name
+          example: API Gateway
+        serviceName:
+          type: string
+          description: Azure service name
+          example: Azure API Management
+        sku:
+          type: string
+          description: Service SKU / pricing tier identifier
+          example: Standard
+        region:
+          type: string
+          description: Azure region code
+          example: eastus
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: List of service capabilities provided
+          example:
+            - Rate limiting
+            - OAuth 2.0 integration
+            - Request/response transformation
+        alternatives:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ServiceAlternative'
+          description: Alternative service options with trade-off explanations
+
+    ServiceAlternative:
+      type: object
+      required: [serviceName, tradeOff]
+      properties:
+        serviceName:
+          type: string
+          description: Alternative Azure service name
+          example: Azure Front Door
+        tradeOff:
+          type: string
+          description: Trade-off explanation versus the selected service
+          example: >-
+            Better for global load balancing but lacks fine-grained API
+            management features like request transformation.
+
+    CostEstimate:
+      type: object
+      required:
+        - currency
+        - items
+        - totalMonthly
+        - totalAnnual
+        - assumptions
+        - generatedAt
+        - pricingSource
+      description: Itemised cost analysis produced by the Cost agent
+      properties:
+        currency:
+          type: string
+          enum: [USD]
+          description: Currency code (only USD supported in MVP)
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CostItem'
+          description: Itemised service costs
+        totalMonthly:
+          type: number
+          format: double
+          minimum: 0
+          description: Sum of all monthly costs (2 decimal places)
+          example: 4250.00
+        totalAnnual:
+          type: number
+          format: double
+          minimum: 0
+          description: totalMonthly × 12 (2 decimal places)
+          example: 51000.00
+        assumptions:
+          type: array
+          items:
+            type: string
+          description: Assumptions made in the cost calculation
+          example:
+            - 50,000 concurrent users with average 5 requests/min
+            - Data transfer estimated at 500 GB/month outbound
+        generatedAt:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when the cost estimate was generated
+        pricingSource:
+          type: string
+          enum: [live, cached, approximate]
+          description: |
+            Source of pricing data:
+            - `live` — fetched from Azure Retail Prices API
+            - `cached` — from cache with 24h TTL
+            - `approximate` — agent's built-in knowledge
+
+    CostItem:
+      type: object
+      required: [serviceName, sku, region, monthlyCost]
+      properties:
+        serviceName:
+          type: string
+          description: Azure service name
+          example: Azure App Service
+        sku:
+          type: string
+          description: SKU / pricing tier
+          example: P2v3
+        region:
+          type: string
+          description: Azure region code
+          example: eastus
+        monthlyCost:
+          type: number
+          format: double
+          minimum: 0
+          description: Monthly cost in USD (2 decimal places)
+          example: 730.00
+
+    ValueAssessment:
+      type: object
+      required: [drivers, executiveSummary, benchmarks]
+      description: Business value assessment produced by the Business Value agent
+      properties:
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValueDriver'
+          description: Business value drivers
+        executiveSummary:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Executive summary of business value
+          example: >-
+            Migration to Azure will reduce operational costs by 30%, improve
+            scalability to handle 3× current load, and enable HIPAA-compliant
+            data handling across EMEA.
+        benchmarks:
+          type: array
+          items:
+            type: string
+          description: Industry benchmarks or reference points
+          example:
+            - Gartner reports 25-40% cost savings in cloud migrations
+            - Similar EMEA deployments achieved 99.95% uptime on Azure
+
+    ValueDriver:
+      type: object
+      required: [name, impact]
+      properties:
+        name:
+          type: string
+          description: 'Value driver name (e.g., "Operational Efficiency")'
+          example: Operational Efficiency
+        impact:
+          type: string
+          description: Qualitative impact description
+          example: >-
+            Automated scaling and managed services reduce manual ops by
+            an estimated 60%.
+        quantifiedEstimate:
+          type: string
+          nullable: true
+          description: 'Quantified estimate (e.g., "30% cost reduction")'
+          example: 30% cost reduction
+
+    ChatMessage:
+      type: object
+      required: [id, projectId, role, content, timestamp]
+      description: A single message in the project chat history
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique message identifier
+        projectId:
+          type: string
+          format: uuid
+          description: Foreign key to the parent project
+        role:
+          type: string
+          enum: [user, agent]
+          description: 'Message originator: user or agent'
+        agentId:
+          type: string
+          nullable: true
+          description: >-
+            Agent identifier (required when role is 'agent', null for user messages)
+          enum:
+            - pm
+            - envisioning
+            - architect
+            - azure-specialist
+            - cost
+            - business-value
+            - presentation
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: Message body
+        metadata:
+          nullable: true
+          description: >-
+            Optional structured metadata attached to an agent message. The
+            shape depends on the `type` discriminator field.
+          oneOf:
+            - $ref: '#/components/schemas/QuestionMetadata'
+            - $ref: '#/components/schemas/EnvisioningMetadata'
+            - $ref: '#/components/schemas/GuidedQuestionMetadata'
+            - $ref: '#/components/schemas/ActionButtonMetadata'
+          discriminator:
+            propertyName: type
+            mapping:
+              question: '#/components/schemas/QuestionMetadata'
+              envisioningOutput: '#/components/schemas/EnvisioningMetadata'
+              guidedQuestion: '#/components/schemas/GuidedQuestionMetadata'
+              actionButton: '#/components/schemas/ActionButtonMetadata'
+          example:
+            type: question
+            questionIndex: 3
+            totalQuestions: 10
+            category: scale
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 creation timestamp (immutable)
+
+    AgentStatus:
+      type: object
+      required: [agentId, displayName, status, active, canDeactivate]
+      description: Current status of an agent within a project
+      properties:
+        agentId:
+          $ref: '#/components/schemas/AgentId'
+        displayName:
+          type: string
+          description: Human-readable agent name
+          example: Project Manager
+        status:
+          type: string
+          enum: [idle, working, error]
+          description: Current execution status
+        active:
+          type: boolean
+          description: Whether the agent is activated for this project
+        canDeactivate:
+          type: boolean
+          description: Whether the UI should allow deactivation of this agent
+        deactivateReason:
+          type: string
+          nullable: true
+          description: Tooltip text explaining why deactivation is blocked (null when allowed)
+          example: >-
+            System Architect is required for all downstream agents to function.
+
+    # ── Chat metadata variants ───────────────
+    QuestionMetadata:
+      type: object
+      required: [type, questionIndex, totalQuestions, category]
+      description: Metadata for guided-question chat messages (Increment 1 format)
+      properties:
+        type:
+          type: string
+          enum: [question]
+        questionIndex:
+          type: integer
+          description: Current question number (1-based)
+        totalQuestions:
+          type: integer
+          description: Total number of questions in the guided flow
+        category:
+          type: string
+          description: Question category (e.g., scale, compliance, region)
+
+    EnvisioningMetadata:
+      type: object
+      required: [type, envisioningOutput]
+      description: Metadata carrying the Envisioning agent's output
+      properties:
+        type:
+          type: string
+          enum: [envisioningOutput]
+        envisioningOutput:
+          $ref: '#/components/schemas/EnvisioningOutput'
+
+    GuidedQuestionMetadata:
+      type: object
+      required: [type, guidedQuestion]
+      description: Metadata carrying a guided-question prompt for the seller
+      properties:
+        type:
+          type: string
+          enum: [guidedQuestion]
+        guidedQuestion:
+          $ref: '#/components/schemas/GuidedQuestion'
+
+    ActionButtonMetadata:
+      type: object
+      required: [type, label, action]
+      description: Metadata for rendering an action button in the chat UI
+      properties:
+        type:
+          type: string
+          enum: [actionButton]
+        label:
+          type: string
+          description: Button display text
+          example: Proceed with Selected Items (3)
+        action:
+          type: string
+          description: Action identifier for the frontend to handle
+          example: submitEnvisioningSelections
+        disabled:
+          type: boolean
+          description: Whether the button should be disabled
+          default: false
+
+    # ── Envisioning schemas ──────────────────
+    EnvisioningOutput:
+      type: object
+      required: [scenarios, sampleEstimates, referenceArchitectures]
+      description: >-
+        Structured response from the Envisioning agent containing ranked
+        suggestions across three categories.
+      properties:
+        scenarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectableItem'
+          description: Relevant scenario suggestions (max 5, ranked by relevance)
+        sampleEstimates:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectableItem'
+          description: Past engagement references (max 5, ranked by relevance)
+        referenceArchitectures:
+          type: array
+          items:
+            $ref: '#/components/schemas/SelectableItem'
+          description: Proven Azure architecture patterns (max 5, ranked by relevance)
+        fallbackMessage:
+          type: string
+          nullable: true
+          description: >-
+            Explanation shown to the seller when no suggestions match. Present
+            only when all three categories are empty.
+          example: >-
+            I couldn't find matching scenarios, estimates, or reference
+            architectures for your description. Could you provide more details
+            about the customer's industry or the business problem?
+
+    SelectableItem:
+      type: object
+      required: [id, title, description]
+      description: A knowledge-base item presented as a selectable option
+      properties:
+        id:
+          type: string
+          description: Knowledge-base item identifier (e.g., "SCN-001")
+          example: SCN-001
+        title:
+          type: string
+          description: Display title
+          example: Digital Commerce Platform
+        description:
+          type: string
+          description: Brief description of the item
+          example: >-
+            A full-stack Azure e-commerce solution supporting omnichannel
+            retail with real-time inventory management.
+        link:
+          type: string
+          format: uri
+          nullable: true
+          description: URL to supporting material (Microsoft Learn, case study)
+          example: https://learn.microsoft.com/azure/architecture/example-scenario/commerce
+        industry:
+          type: string
+          nullable: true
+          description: Primary industry for this item
+          example: Retail
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: Keywords for matching
+          example:
+            - e-commerce
+            - omnichannel
+            - digital storefront
+
+    GuidedQuestion:
+      type: object
+      required: [questionId, questionText, category]
+      description: A structured question posed by an agent during the guided flow
+      properties:
+        questionId:
+          type: string
+          description: Unique identifier for this question
+          example: q-region-01
+        questionText:
+          type: string
+          description: The question displayed to the seller
+          example: What Azure region should the solution be deployed in?
+        category:
+          type: string
+          description: Question category for grouping and progress tracking
+          example: infrastructure
+        defaultValue:
+          type: string
+          nullable: true
+          description: Pre-filled default answer (null if none)
+          example: East US
+        required:
+          type: boolean
+          description: Whether the seller must answer before proceeding
+          default: true
+
+    QuestionAnswer:
+      type: object
+      required: [questionId, answer]
+      description: A seller's response to a guided question
+      properties:
+        questionId:
+          type: string
+          description: Matches the `questionId` from the originating GuidedQuestion
+          example: q-region-01
+        answer:
+          type: string
+          description: The seller's answer text
+          example: East US
+        isDefault:
+          type: boolean
+          description: Whether the seller accepted the default value
+          default: false
+        isAssumed:
+          type: boolean
+          description: Whether the answer was inferred by an agent without explicit seller input
+          default: false
+
+    EnvisioningSelections:
+      type: object
+      required: [selectedItems]
+      description: >-
+        Persisted selections from the Envisioning agent flow, stored in
+        `ProjectContext.envisioningSelections`.
+      properties:
+        selectedItems:
+          type: array
+          items:
+            type: object
+            required: [id, title, category]
+            properties:
+              id:
+                type: string
+                description: Knowledge-base item ID
+              title:
+                type: string
+                description: Display title of the selected item
+              category:
+                type: string
+                enum: [scenario, estimate, architecture]
+                description: Which category the item belongs to
+          description: Items selected by the seller
+        sellerDirection:
+          type: string
+          nullable: true
+          description: >-
+            Free-text provided by the seller if they rejected all suggestions
+            and described their own direction.
+        enrichedContext:
+          type: object
+          nullable: true
+          description: Context inferred by the Envisioning agent
+          properties:
+            inferredIndustry:
+              type: string
+            inferredKeywords:
+              type: array
+              items:
+                type: string
+            selectedScenarioTitles:
+              type: array
+              items:
+                type: string
+            selectedEstimateTitles:
+              type: array
+              items:
+                type: string
+            selectedArchitectureTitles:
+              type: array
+              items:
+                type: string
+
+    # ── Enums / primitives ────────────────────
+    ProjectStatus:
+      type: string
+      enum: [in_progress, completed, error]
+      description: Current project lifecycle state
+
+    AgentId:
+      type: string
+      enum:
+        - pm
+        - envisioning
+        - architect
+        - azure-specialist
+        - cost
+        - business-value
+        - presentation
+      description: Valid agent identifiers

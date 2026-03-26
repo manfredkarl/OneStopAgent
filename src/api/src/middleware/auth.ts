@@ -1,50 +1,32 @@
 import { type Request, type Response, type NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 
-interface JwtPayload {
-  sub: string;
-  username: string;
-  role: string;
-}
-
+/**
+ * Extended Express Request with userId attached by auth middleware.
+ * In production this will be populated from a validated Entra ID JWT.
+ * For MVP we use the x-user-id header as a stub.
+ */
 declare global {
   namespace Express {
     interface Request {
-      user?: JwtPayload;
+      userId?: string;
     }
   }
 }
 
-const getSecret = (): string => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is required');
-  }
-  return secret;
-};
-
+/**
+ * Auth middleware (MVP stub).
+ * Extracts userId from the `x-user-id` header.
+ * In production, this will validate an Entra ID JWT Bearer token and
+ * extract the user OID from the token claims.
+ */
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const token = req.cookies?.token;
-  if (!token) {
-    res.status(401).json({ error: 'Not authenticated' });
+  const userId = req.headers['x-user-id'];
+
+  if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+    res.status(401).json({ error: 'Authentication required.' });
     return;
   }
 
-  try {
-    const decoded = jwt.verify(token, getSecret()) as JwtPayload;
-    req.user = decoded;
-    next();
-  } catch {
-    res.status(401).json({ error: 'Not authenticated' });
-  }
-}
-
-export function requireRole(role: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    if (req.user?.role !== role) {
-      res.status(403).json({ error: 'Forbidden' });
-      return;
-    }
-    next();
-  };
+  req.userId = userId.trim();
+  next();
 }

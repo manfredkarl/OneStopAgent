@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Project, ProjectContext } from '../models/index.js';
 import { AGENT_REGISTRY } from '../models/index.js';
-import { NotFoundError, ForbiddenError, ValidationError } from './errors.js';
+import { NotFoundError, ForbiddenError, ValidationError, ServiceUnavailableError } from './errors.js';
 
 interface CreateProjectParams {
   description: string;
@@ -15,7 +15,7 @@ export class ProjectService {
   async create(params: CreateProjectParams): Promise<{ projectId: string }> {
     const { description, userId, customerName } = params;
 
-    // Validation
+    // Validation — EC-3: accept at exactly 5000, EC-4: reject at 5001
     if (!description || description.trim().length === 0) {
       throw new ValidationError('Description must not be empty');
     }
@@ -47,17 +47,30 @@ export class ProjectService {
       updatedAt: now,
     };
 
-    this.store.set(projectId, project);
+    // Storage failure simulation — try/catch around Map operations (EC chat §8)
+    try {
+      this.store.set(projectId, project);
+    } catch (err) {
+      throw new ServiceUnavailableError(
+        `Storage failure: unable to persist project — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     return { projectId };
   }
 
   async list(userId: string): Promise<Project[]> {
     const projects: Project[] = [];
-    for (const project of this.store.values()) {
-      if (project.userId === userId) {
-        projects.push(project);
+    try {
+      for (const project of this.store.values()) {
+        if (project.userId === userId) {
+          projects.push(project);
+        }
       }
+    } catch (err) {
+      throw new ServiceUnavailableError(
+        `Storage failure: unable to list projects — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     // Sort by updatedAt descending
     projects.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
@@ -65,7 +78,14 @@ export class ProjectService {
   }
 
   async getById(projectId: string, userId: string): Promise<Project> {
-    const project = this.store.get(projectId);
+    let project: Project | undefined;
+    try {
+      project = this.store.get(projectId);
+    } catch (err) {
+      throw new ServiceUnavailableError(
+        `Storage failure: unable to retrieve project — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     if (!project) {
       throw new NotFoundError(`Project not found: ${projectId}`);
     }
@@ -79,7 +99,13 @@ export class ProjectService {
     const project = await this.getById(projectId, userId);
     project.context = { ...project.context, ...updates };
     project.updatedAt = new Date();
-    this.store.set(projectId, project);
+    try {
+      this.store.set(projectId, project);
+    } catch (err) {
+      throw new ServiceUnavailableError(
+        `Storage failure: unable to update project — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return project;
   }
 

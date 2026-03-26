@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, KeyboardEvent } from 'react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
-  disabled: boolean;
+  disabled?: boolean;
 }
 
 export default function ChatInput({ onSend, disabled }: ChatInputProps) {
@@ -15,7 +15,7 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
 
   const handleSend = useCallback(() => {
     if (isEmpty || disabled) return;
-    onSend(value);
+    onSend(value.trim());
     setValue('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -29,50 +29,42 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend],
   );
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
-    // Auto-resize
     const ta = e.target;
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, 150)}px`;
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
   };
 
   return (
-    <div className="flex items-end gap-2 p-4 border-t border-gray-200 bg-white">
+    <div className="flex items-end gap-3 px-4 sm:px-6 py-3 bg-[var(--bg-card)] border-t border-[var(--border)] shrink-0">
       <textarea
         ref={textareaRef}
-        role="textbox"
-        aria-label="Message"
-        tabIndex={1}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder="Type a message..."
+        placeholder="Message OneStopAgent..."
+        aria-label="Type your message"
         rows={1}
-        className="flex-1 resize-none rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+        className="flex-1 min-h-[42px] max-h-[120px] resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] px-4 py-2.5 text-sm font-[inherit] leading-snug transition-all focus:outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-light)] focus:bg-[var(--bg-primary)] disabled:bg-[var(--bg-hover)] disabled:cursor-not-allowed placeholder:text-[var(--text-muted)]"
       />
       <button
+        data-testid="send-button"
         type="button"
         onClick={handleSend}
+        disabled={disabled || isEmpty}
         aria-label="Send"
-        tabIndex={2}
-        aria-disabled={disabled || isEmpty}
-        className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+        className={`flex h-10 w-10 items-center justify-center rounded-full transition-all shrink-0 ${
           disabled || isEmpty
-            ? 'bg-gray-300 cursor-not-allowed text-white'
-            : 'bg-blue-600 text-white hover:bg-blue-700'
+            ? 'bg-[var(--disabled-bg)] cursor-not-allowed text-[var(--disabled-text)]'
+            : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] hover:shadow-[var(--shadow-sm)] active:scale-95'
         }`}
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className="h-5 w-5"
-        >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-[18px] w-[18px]">
           <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
         </svg>
       </button>

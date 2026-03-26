@@ -5,68 +5,63 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { logger } from './logger.js';
 import { mapHealthEndpoints } from './routes/health.js';
-import { mapChatEndpoints } from './routes/chat.js';
-import { mapAuthEndpoints } from './routes/auth.js';
-import { mapAdminEndpoints } from './routes/admin.js';
-import { clearUsers, addUser, getUserByUsername, deleteUser } from './models/user-store.js';
+import { authMiddleware } from './middleware/auth.js';
+import { auditLogger } from './middleware/audit-logger.js';
+import { rateLimiter, clearRateLimiterState } from './middleware/rate-limiter.js';
+import { sanitizer } from './middleware/sanitizer.js';
+import {
+  projectConcurrencyLimiter,
+  agentConcurrencyLimiter,
+  clearConcurrencyState,
+} from './middleware/concurrency-limiter.js';
+import { errorHandler } from './middleware/error-handler.js';
+import { projectRouter, projectService } from './routes/projects.js';
+import { chatRouter, chatService } from './routes/chat.js';
+import { agentRouter, agentControlService, agentCapabilitiesRouter } from './routes/agents.js';
+import { exportRouter } from './routes/export.js';
 
 export function createApp(): express.Express {
   const app = express();
 
-  // Middleware
+  // Middleware — core
   app.use(helmet());
-  app.use(cors());
+  app.use(cors({
+    origin: ['http://localhost:3000', 'http://localhost:4200', 'http://127.0.0.1:3000', 'http://127.0.0.1:4200'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'x-user-id'],
+  }));
   app.use(express.json());
   app.use(cookieParser());
   app.use(pinoHttp({ logger }));
 
-  // Routes
-  mapHealthEndpoints(app);
-  mapChatEndpoints(app);
-  mapAuthEndpoints(app);
-  mapAdminEndpoints(app);
+  // Middleware — audit logging (before auth so all requests are logged)
+  app.use(auditLogger);
 
-  // Test-only: reset endpoint for e2e test isolation
+  // Routes — health + agent discovery (no auth required)
+  mapHealthEndpoints(app);
+  app.use('/api/agents', agentCapabilitiesRouter);
+
+  // Middleware — auth + rate limit + sanitiser for /api/ routes
+  // Order: audit-logger (above) → rate-limiter → sanitizer → auth → routes
+  app.use('/api/projects', authMiddleware, rateLimiter, sanitizer, projectConcurrencyLimiter, projectRouter);
+  app.use('/api/projects', authMiddleware, rateLimiter, sanitizer, agentConcurrencyLimiter, chatRouter);
+  app.use('/api/projects', authMiddleware, rateLimiter, sanitizer, agentRouter);
+  app.use('/api/projects', authMiddleware, rateLimiter, sanitizer, exportRouter);
+
+  // Test-only:reset endpoint for e2e test isolation
   if (process.env.NODE_ENV !== 'production') {
     app.post('/api/test/reset', (_req, res) => {
-      clearUsers();
+      projectService.clear();
+      chatService.clear();
+      agentControlService.clear();
+      clearRateLimiterState();
+      clearConcurrencyState();
       res.json({ message: 'Store cleared' });
     });
-
-    app.post('/api/test/create-user', async (req, res) => {
-      const { username, password, role, createdAt } = req.body;
-      const bcrypt = await import('bcryptjs');
-      const crypto = await import('node:crypto');
-      const passwordHash = await bcrypt.default.hash(password, 10);
-      addUser({
-        id: crypto.randomUUID(),
-        username,
-        passwordHash,
-        role: role || 'user',
-        createdAt: createdAt ? new Date(createdAt) : new Date(),
-      });
-      res.json({ message: 'User created' });
-    });
-
-    app.get('/api/test/user-hash/:username', (req, res) => {
-      const user = getUserByUsername(req.params.username);
-      if (!user) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
-      res.json({ passwordHash: user.passwordHash });
-    });
-
-    app.delete('/api/test/users/:username', (req, res) => {
-      const user = getUserByUsername(req.params.username);
-      if (!user) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
-      deleteUser(user.id);
-      res.json({ message: 'User deleted' });
-    });
   }
+
+  // Error handler (must be last)
+  app.use(errorHandler);
 
   return app;
 }

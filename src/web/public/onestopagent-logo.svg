@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Hexagon shield -->
+  <path d="M24 2L43.05 13v22L24 46 4.95 35V13z" fill="#0078D4" />
+  <path d="M24 6L39.59 15v18L24 42 8.41 33V15z" fill="#FFFFFF" fill-opacity="0.15" />
+  <!-- Agent node icon: central circle with 3 orbiting dots connected by lines -->
+  <circle cx="24" cy="24" r="6" fill="#FFFFFF" />
+  <circle cx="24" cy="24" r="3.5" fill="#0078D4" />
+  <!-- Orbiting nodes -->
+  <line x1="24" y1="18" x2="24" y2="12" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" />
+  <circle cx="24" cy="11" r="2.5" fill="#FFFFFF" />
+  <line x1="29" y1="27" x2="34" y2="31" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" />
+  <circle cx="35" cy="32" r="2.5" fill="#FFFFFF" />
+  <line x1="19" y1="27" x2="14" y2="31" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" />
+  <circle cx="13" cy="32" r="2.5" fill="#FFFFFF" />
+</svg>

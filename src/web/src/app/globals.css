@@ -1,33 +1,235 @@
 @import "tailwindcss";
 
+/* ── Fluent 2 Design System ── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F5;
+  --bg-card: #FFFFFF;
+  --bg-hover: #F0F0F0;
+  --bg-subtle: #FAFAFA;
+
+  /* Text */
+  --text-primary: #242424;
+  --text-secondary: #616161;
+  --text-muted: #8A8A8A;
+
+  /* Borders */
+  --border: #E0E0E0;
+  --border-subtle: #F0F0F0;
+
+  /* Accent (Fluent Blue) */
+  --accent: #0F6CBD;
+  --accent-hover: #115EA3;
+  --accent-light: #EBF3FC;
+  --accent-bg: #EBF3FC;
+
+  /* Semantic */
+  --error: #BC2F32;
+  --error-bg: #FDF3F4;
+  --error-border: #EEACB2;
+  --error-hover: #8B1F24;
+  --success: #0E7A0D;
+  --success-bg: #F1FAF1;
+  --warning: #8A6914;
+  --warning-bg: #FFF8E1;
+  --warning-text: #8A6914;
+  --orange: #C4420A;
+  --orange-bg: #FDF0E9;
+
+  /* Neutrals */
+  --disabled-bg: #D1D1D1;
+  --disabled-text: #ABABAB;
+  --code-bg: #F5F5F5;
+  --table-header: #FAFAFA;
+  --table-border: #E8E8E8;
+  --avatar-default: #0F6CBD;
+
+  /* Legacy aliases */
+  --blue: #0F6CBD;
+  --blue-dark: #115EA3;
+  --blue-light: #EBF3FC;
+  --grey-bg: #F5F5F5;
+  --grey-border: #E0E0E0;
+  --grey-text: #616161;
+  --grey-muted: #8A8A8A;
+  --dark: #242424;
+  --green: #0E7A0D;
+  --red: #BC2F32;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+  --shadow-card: 0 1px 4px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Theme bridge */
+  --background: var(--bg-secondary);
+  --foreground: var(--text-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1B1A19;
+    --bg-secondary: #202020;
+    --bg-card: #292929;
+    --bg-hover: #333333;
+    --bg-subtle: #252525;
+    --text-primary: #F0F0F0;
+    --text-secondary: #B3B3B3;
+    --text-muted: #757575;
+    --border: #404040;
+    --border-subtle: #333333;
+    --accent: #479EF5;
+    --accent-hover: #62ABF5;
+    --accent-light: #1A3352;
+    --accent-bg: #1A3352;
+    --error: #E87979;
+    --error-bg: #3D2020;
+    --error-border: #6B2D2D;
+    --error-hover: #D13438;
+    --success: #54B054;
+    --success-bg: #1A3A1A;
+    --warning: #F2C661;
+    --warning-bg: #3A3520;
+    --warning-text: #F2C661;
+    --orange: #F7894A;
+    --orange-bg: #3A2A1A;
+    --disabled-bg: #484644;
+    --disabled-text: #6B6B6B;
+    --code-bg: #333333;
+    --table-header: #333333;
+    --table-border: #404040;
+    --avatar-default: #479EF5;
+    --blue: #479EF5;
+    --blue-dark: #62ABF5;
+    --blue-light: #1A3352;
+    --grey-bg: #202020;
+    --grey-border: #404040;
+    --grey-text: #B3B3B3;
+    --grey-muted: #757575;
+    --dark: #F0F0F0;
+    --green: #6ccf6c;
+    --red: #E87979;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 2px 8px rgba(0,0,0,0.24);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.32);
+    --shadow-card: 0 1px 4px rgba(0,0,0,0.16), 0 1px 2px rgba(0,0,0,0.12);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
 }
 
-/* Hide Next.js route announcer so it doesn't interfere with aria-live assertions */
+/* ── Skip to content ── */
+.skip-to-content {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 0 0 var(--radius-md) 0;
+  text-decoration: none;
+}
+.skip-to-content:focus {
+  left: 0;
+}
+
+/* ── Focus visible ── */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Hide Next.js route announcer */
 #__next-route-announcer__ {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
+}
+
+/* ── Animations ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-message-enter { animation: fadeInUp 250ms cubic-bezier(0.33, 0, 0.1, 1); }
+
+/* Sidebar transition */
+.sidebar-transition { transition: width 200ms cubic-bezier(0.33, 0, 0.1, 1), transform 200ms cubic-bezier(0.33, 0, 0.1, 1); }
+
+/* Skeleton pulse */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-hover) 25%, var(--border-subtle) 50%, var(--bg-hover) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* Agent working pulse */
+@keyframes agentPulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: var(--accent-light); }
+}
+.agent-working-pulse {
+  animation: agentPulse 2s ease-in-out infinite;
+}
+
+/* Mermaid diagram container */
+.mermaid-container {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+/* Table container */
+.table-container {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 12px 0;
+}
+.table-container table {
+  margin: 0;
+}
+.table-container tr:nth-child(even) td {
+  background: var(--bg-subtle);
 }

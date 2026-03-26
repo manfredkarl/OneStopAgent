@@ -1,14 +1,6 @@
 import { type Express } from 'express';
-import { getAllUsers } from '../models/user-store.js';
-import { authMiddleware, requireRole } from '../middleware/auth.js';
 
-export function mapAdminEndpoints(app: Express): void {
-  app.get('/api/admin/users', authMiddleware, requireRole('admin'), (_req, res) => {
-    const users = getAllUsers().map(u => ({
-      username: u.username,
-      role: u.role,
-      createdAt: u.createdAt.toISOString(),
-    }));
-    res.status(200).json(users);
-  });
+export function mapAdminEndpoints(_app: Express): void {
+  // Admin endpoints will be re-implemented with Entra ID RBAC in a later increment
+  // Previously used UserAuth role checks; now superseded by project-scoped auth.
 }

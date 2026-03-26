@@ -1,6 +1,5 @@
 import { beforeEach } from 'vitest';
-import { clearUsers } from '../src/models/user-store.js';
 
 beforeEach(() => {
-  clearUsers();
+  // TODO: clear project store once implemented
 });

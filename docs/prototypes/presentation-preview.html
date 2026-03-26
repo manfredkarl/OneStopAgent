@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OneStopAgent — Presentation Preview</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue: #0078D4;
+    --blue-dark: #106EBE;
+    --blue-light: #DEECF9;
+    --grey-bg: #FAF9F8;
+    --grey-border: #E1DFDD;
+    --grey-text: #605E5C;
+    --grey-muted: #A19F9D;
+    --dark: #323130;
+    --green: #107C10;
+  }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--grey-bg);
+    color: var(--dark);
+    min-height: 100vh;
+  }
+  /* Top Bar */
+  .topbar {
+    height: 48px;
+    background: var(--blue);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 12px;
+  }
+  .topbar .back-btn {
+    background: none; border: none; color: #fff;
+    font-size: 18px; cursor: pointer;
+    padding: 4px 8px; border-radius: 4px;
+    text-decoration: none;
+    display: flex; align-items: center;
+  }
+  .topbar .back-btn:hover { background: rgba(255,255,255,.15); }
+  .topbar .brand {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600; font-size: 14px;
+  }
+  .topbar .brand .icon {
+    width: 26px; height: 26px;
+    background: rgba(255,255,255,.2);
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .topbar .title { flex: 1; font-size: 14px; font-weight: 500; opacity: .9; }
+  .topbar .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #005A9E; border: 2px solid rgba(255,255,255,.3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600;
+  }
+
+  /* Page layout */
+  .page-content {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .page-header h1 { font-size: 22px; font-weight: 600; }
+  .page-header .meta { font-size: 13px; color: var(--grey-text); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 20px;
+    height: 38px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+    border: none;
+  }
+  .btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-secondary { background: #fff; color: var(--dark); border: 1px solid var(--grey-border); }
+  .btn-secondary:hover { background: #F3F2F1; }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-green:hover { background: #0B6A0B; }
+  .btn .icon-svg { width: 16px; height: 16px; }
+
+  /* Slide grid */
+  .slide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  .slide-card {
+    background: #fff;
+    border: 2px solid var(--grey-border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: box-shadow .2s, transform .15s, border-color .2s;
+    position: relative;
+  }
+  .slide-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.1);
+    transform: translateY(-2px);
+    border-color: var(--blue);
+  }
+  .slide-card:focus { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .slide-card.selected { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(0,120,212,.2); }
+  .slide-thumb {
+    aspect-ratio: 16 / 9;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    border-bottom: 1px solid #F3F2F1;
+  }
+  .slide-number {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,.5);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+  }
+  .slide-label {
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .slide-label .source {
+    font-size: 11px;
+    color: var(--grey-muted);
+    margin-top: 2px;
+  }
+
+  /* Slide content preview styles */
+  .slide-preview {
+    width: 100%;
+    height: 100%;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .sp-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--dark);
+    margin-bottom: 6px;
+  }
+  .sp-subtitle {
+    font-size: 10px;
+    color: var(--grey-text);
+  }
+  .sp-body {
+    font-size: 9px;
+    color: var(--grey-text);
+    line-height: 1.5;
+    margin-top: 6px;
+    flex: 1;
+  }
+  .sp-cover {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0078D4 0%, #005A9E 100%);
+    color: #fff;
+    text-align: center;
+    padding: 20px;
+  }
+  .sp-cover .sp-title { color: #fff; font-size: 16px; }
+  .sp-cover .sp-subtitle { color: rgba(255,255,255,.8); font-size: 11px; margin-top: 4px; }
+  .sp-cover .logo-mark {
+    width: 36px; height: 36px;
+    background: rgba(255,255,255,.2);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .sp-diagram {
+    background: #F3F2F1;
+    border-radius: 4px;
+    padding: 8px;
+    margin-top: 6px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sp-table {
+    width: 100%;
+    font-size: 8px;
+    margin-top: 6px;
+    border-collapse: collapse;
+  }
+  .sp-table th {
+    background: #F3F2F1;
+    padding: 3px 5px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid var(--grey-border);
+  }
+  .sp-table td {
+    padding: 3px 5px;
+    border-bottom: 1px solid #F3F2F1;
+  }
+  .sp-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .sp-metric {
+    background: var(--blue-light);
+    border-radius: 4px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .sp-metric .val { font-size: 12px; font-weight: 700; color: var(--blue); }
+  .sp-metric .lbl { font-size: 7px; color: var(--grey-text); }
+  .sp-end {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #005A9E 0%, #0078D4 100%);
+    color: #fff;
+    text-align: center;
+    padding: 20px;
+  }
+  .sp-bullet { margin: 2px 0; padding-left: 10px; text-indent: -10px; }
+  .sp-bullet::before { content: '• '; color: var(--blue); font-weight: 700; }
+
+  /* Lightbox */
+  .lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .lightbox.show { display: flex; }
+  .lightbox-content {
+    background: #fff;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 900px;
+    aspect-ratio: 16 / 9;
+    box-shadow: 0 12px 48px rgba(0,0,0,.3);
+    overflow: hidden;
+    cursor: default;
+    position: relative;
+  }
+  .lightbox-close {
+    position: absolute;
+    top: 12px; right: 16px;
+    background: rgba(0,0,0,.5);
+    color: #fff;
+    border: none;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0,0,0,.4);
+    color: #fff;
+    border: none;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s;
+  }
+  .lightbox-nav:hover { background: rgba(0,0,0,.6); }
+  .lightbox-prev { left: 16px; }
+  .lightbox-next { right: 16px; }
+  .lightbox-slide-num {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,.5);
+    color: #fff;
+    font-size: 12px;
+    padding: 4px 14px;
+    border-radius: 12px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--green);
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    transition: transform .3s ease;
+    z-index: 200;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* Regeneration options */
+  .regen-panel {
+    background: #fff;
+    border: 1px solid var(--grey-border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-top: 28px;
+  }
+  .regen-panel h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .regen-panel p { font-size: 13px; color: var(--grey-text); margin-bottom: 16px; }
+  .regen-options {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .regen-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #F3F2F1;
+    border: 1px solid var(--grey-border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .15s;
+    font-size: 13px;
+  }
+  .regen-option:hover { border-color: var(--blue); background: var(--blue-light); }
+  .regen-option input[type="checkbox"] { accent-color: var(--blue); }
+
+  /* Spinner */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Info bar */
+  .info-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--blue-light);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--blue);
+    margin-bottom: 20px;
+  }
+  .info-bar .info-icon {
+    width: 20px; height: 20px;
+    background: var(--blue);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <div class="topbar">
+    <a class="back-btn" href="chat.html" aria-label="Back to chat">←</a>
+    <div class="brand">
+      <div class="icon">OS</div>
+      <span>OneStopAgent</span>
+    </div>
+    <span class="title">Presentation Preview</span>
+    <div class="avatar" title="Alex Johnson">AJ</div>
+  </div>
+
+  <div class="page-content">
+    <!-- Header -->
+    <div class="page-header">
+      <div>
+        <h1>Contoso E-Commerce Platform</h1>
+        <div class="meta">Generated by Presentation Agent · 8 slides · Last updated 2 minutes ago</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" id="regenBtn" onclick="regenerate()">
+          <span class="spinner" id="regenSpinner"></span>
+          <span id="regenLabel">↻ Regenerate</span>
+        </button>
+        <button class="btn btn-green" onclick="download()">
+          <svg class="icon-svg" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v9.5m0 0L4.5 7M8 10.5L11.5 7M2 13h12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download .pptx
+        </button>
+      </div>
+    </div>
+
+    <div class="info-bar">
+      <div class="info-icon">i</div>
+      <span>Click any slide to view it full-size. Use arrow keys or buttons to navigate between slides.</span>
+    </div>
+
+    <!-- Slide Grid -->
+    <div class="slide-grid" id="slideGrid">
+
+      <!-- Slide 1: Cover -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(0)" aria-label="Slide 1: Cover">
+        <div class="slide-thumb">
+          <div class="slide-number">1</div>
+          <div class="slide-preview sp-cover" style="width:100%;height:100%;">
+            <div class="logo-mark">OS</div>
+            <div class="sp-title">Contoso E-Commerce Platform</div>
+            <div class="sp-subtitle">Azure Solution Proposal</div>
+            <div class="sp-subtitle" style="margin-top:12px;font-size:9px;opacity:.7;">Prepared by OneStopAgent · January 2025</div>
+          </div>
+        </div>
+        <div class="slide-label">Cover Slide<div class="source">Auto-generated</div></div>
+      </div>
+
+      <!-- Slide 2: Executive Summary -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(1)" aria-label="Slide 2: Executive Summary">
+        <div class="slide-thumb">
+          <div class="slide-number">2</div>
+          <div class="slide-preview">
+            <div class="sp-title">Executive Summary</div>
+            <div class="sp-body">
+              <div class="sp-bullet">Full-stack e-commerce platform for Contoso Ltd</div>
+              <div class="sp-bullet">Serving 10,000 concurrent users across EMEA</div>
+              <div class="sp-bullet">GDPR-compliant architecture on Microsoft Azure</div>
+              <div class="sp-bullet">Estimated monthly cost: $5,640 USD</div>
+              <div class="sp-bullet">Projected 35% reduction in infrastructure overhead</div>
+            </div>
+          </div>
+        </div>
+        <div class="slide-label">Executive Summary<div class="source">Project Manager Agent</div></div>
+      </div>
+
+      <!-- Slide 3: Use Case -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(2)" aria-label="Slide 3: Use Case">
+        <div class="slide-thumb">
+          <div class="slide-number">3</div>
+          <div class="slide-preview">
+            <div class="sp-title">Use Case: Digital Commerce</div>
+            <div class="sp-body">
+              <div class="sp-bullet">Product catalog with search & filtering</div>
+              <div class="sp-bullet">Shopping cart & checkout with payment</div>
+              <div class="sp-bullet">Order management & fulfillment</div>
+              <div class="sp-bullet">User authentication & profile management</div>
+              <div class="sp-bullet">Scalable microservices on Azure Kubernetes</div>
+            </div>
+            <div style="margin-top:6px;">
+              <span style="background:#DEECF9;color:#0078D4;padding:2px 8px;border-radius:10px;font-size:8px;font-weight:600;">E-Commerce</span>
+              <span style="background:#DFF6DD;color:#107C10;padding:2px 8px;border-radius:10px;font-size:8px;font-weight:600;margin-left:4px;">Scalable</span>
+            </div>
+          </div>
+        </div>
+        <div class="slide-label">Use Case Description<div class="source">Envisioning Agent</div></div>
+      </div>
+
+      <!-- Slide 4: Architecture -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(3)" aria-label="Slide 4: Architecture Diagram">
+        <div class="slide-thumb">
+          <div class="slide-number">4</div>
+          <div class="slide-preview">
+            <div class="sp-title">Solution Architecture</div>
+            <div class="sp-diagram">
+              <svg viewBox="0 0 220 80" width="200" fill="none">
+                <rect x="5" y="25" width="40" height="28" rx="3" fill="#DEECF9" stroke="#0078D4" stroke-width="1"/>
+                <text x="25" y="42" text-anchor="middle" font-size="6" fill="#0078D4" font-weight="600">Users</text>
+                <rect x="60" y="5" width="40" height="28" rx="3" fill="#DEECF9" stroke="#0078D4" stroke-width="1"/>
+                <text x="80" y="22" text-anchor="middle" font-size="5" fill="#0078D4" font-weight="600">Front Door</text>
+                <rect x="60" y="45" width="40" height="28" rx="3" fill="#FFF3E0" stroke="#CA5010" stroke-width="1"/>
+                <text x="80" y="62" text-anchor="middle" font-size="5" fill="#CA5010" font-weight="600">App Svc</text>
+                <rect x="115" y="5" width="40" height="28" rx="3" fill="#DEECF9" stroke="#0078D4" stroke-width="1"/>
+                <text x="135" y="22" text-anchor="middle" font-size="5" fill="#0078D4" font-weight="600">SQL DB</text>
+                <rect x="115" y="45" width="40" height="28" rx="3" fill="#EDE7F6" stroke="#8764B8" stroke-width="1"/>
+                <text x="135" y="62" text-anchor="middle" font-size="5" fill="#8764B8" font-weight="600">Cosmos</text>
+                <rect x="170" y="25" width="40" height="28" rx="3" fill="#FDE7E9" stroke="#A4262C" stroke-width="1"/>
+                <text x="190" y="42" text-anchor="middle" font-size="5" fill="#A4262C" font-weight="600">Redis</text>
+                <line x1="45" y1="39" x2="58" y2="19" stroke="#C8C6C4" stroke-width="1"/>
+                <line x1="45" y1="39" x2="58" y2="59" stroke="#C8C6C4" stroke-width="1"/>
+                <line x1="102" y1="19" x2="113" y2="19" stroke="#C8C6C4" stroke-width="1"/>
+                <line x1="102" y1="59" x2="113" y2="59" stroke="#C8C6C4" stroke-width="1"/>
+                <line x1="157" y1="19" x2="168" y2="39" stroke="#C8C6C4" stroke-width="1"/>
+                <line x1="157" y1="59" x2="168" y2="39" stroke="#C8C6C4" stroke-width="1"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="slide-label">Architecture Diagram<div class="source">System Architect Agent</div></div>
+      </div>
+
+      <!-- Slide 5: Service Details -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(4)" aria-label="Slide 5: Azure Services">
+        <div class="slide-thumb">
+          <div class="slide-number">5</div>
+          <div class="slide-preview">
+            <div class="sp-title">Azure Service Selection</div>
+            <table class="sp-table">
+              <tr><th>Component</th><th>Service</th><th>SKU</th></tr>
+              <tr><td>Web Frontend</td><td>App Service</td><td>P2v3</td></tr>
+              <tr><td>Microservices</td><td>AKS</td><td>Standard</td></tr>
+              <tr><td>Database</td><td>Azure SQL</td><td>BC Gen5</td></tr>
+              <tr><td>Cache</td><td>Redis</td><td>Premium P1</td></tr>
+              <tr><td>NoSQL Store</td><td>Cosmos DB</td><td>Provisioned</td></tr>
+              <tr><td>Storage</td><td>Blob Storage</td><td>Hot</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="slide-label">Azure Services<div class="source">Azure Expert Agent</div></div>
+      </div>
+
+      <!-- Slide 6: Cost Breakdown -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(5)" aria-label="Slide 6: Cost Breakdown">
+        <div class="slide-thumb">
+          <div class="slide-number">6</div>
+          <div class="slide-preview">
+            <div class="sp-title">Cost Estimate</div>
+            <div class="sp-metrics">
+              <div class="sp-metric"><div class="val">$5,641</div><div class="lbl">Monthly</div></div>
+              <div class="sp-metric"><div class="val">$67,690</div><div class="lbl">Annual</div></div>
+            </div>
+            <table class="sp-table" style="margin-top:8px;">
+              <tr><th>Service</th><th style="text-align:right;">Monthly</th></tr>
+              <tr><td>Azure SQL</td><td style="text-align:right;">$2,210</td></tr>
+              <tr><td>AKS</td><td style="text-align:right;">$1,120</td></tr>
+              <tr><td>App Service</td><td style="text-align:right;">$876</td></tr>
+              <tr><td>Cosmos DB</td><td style="text-align:right;">$584</td></tr>
+              <tr><td>Other</td><td style="text-align:right;">$851</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="slide-label">Cost Breakdown<div class="source">Cost Specialist Agent</div></div>
+      </div>
+
+      <!-- Slide 7: Business Value -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(6)" aria-label="Slide 7: Business Value">
+        <div class="slide-thumb">
+          <div class="slide-number">7</div>
+          <div class="slide-preview">
+            <div class="sp-title">Business Value Assessment</div>
+            <div class="sp-metrics" style="margin-top:8px;">
+              <div class="sp-metric"><div class="val">35%</div><div class="lbl">Infra savings</div></div>
+              <div class="sp-metric"><div class="val">60%</div><div class="lbl">Faster deploy</div></div>
+              <div class="sp-metric"><div class="val">99.95%</div><div class="lbl">Availability</div></div>
+              <div class="sp-metric"><div class="val">2.1x</div><div class="lbl">ROI (3yr)</div></div>
+            </div>
+            <div class="sp-body" style="margin-top:8px;">
+              <div class="sp-bullet">Reduced operational overhead</div>
+              <div class="sp-bullet">Improved time-to-market</div>
+              <div class="sp-bullet">Enhanced security posture</div>
+            </div>
+          </div>
+        </div>
+        <div class="slide-label">Business Value<div class="source">Business Value Agent</div></div>
+      </div>
+
+      <!-- Slide 8: Next Steps -->
+      <div class="slide-card" tabindex="0" onclick="openLightbox(7)" aria-label="Slide 8: Next Steps">
+        <div class="slide-thumb">
+          <div class="slide-number">8</div>
+          <div class="slide-preview sp-end" style="width:100%;height:100%;">
+            <div class="sp-title" style="color:#fff;">Next Steps</div>
+            <div class="sp-subtitle" style="margin-top:8px;">
+              1. Technical deep-dive workshop<br>
+              2. Proof of concept (4 weeks)<br>
+              3. Pilot deployment<br>
+              4. Production rollout
+            </div>
+            <div class="sp-subtitle" style="margin-top:16px;opacity:.7;">Thank you — Contoso Ltd</div>
+          </div>
+        </div>
+        <div class="slide-label">Next Steps & Close<div class="source">Auto-generated</div></div>
+      </div>
+    </div>
+
+    <!-- Regeneration options -->
+    <div class="regen-panel">
+      <h3>Regeneration Options</h3>
+      <p>Select which sections to regenerate. Unselected sections will keep their current content.</p>
+      <div class="regen-options">
+        <label class="regen-option"><input type="checkbox"> Executive Summary</label>
+        <label class="regen-option"><input type="checkbox"> Architecture Diagram</label>
+        <label class="regen-option"><input type="checkbox" checked> Cost Breakdown</label>
+        <label class="regen-option"><input type="checkbox"> Business Value</label>
+        <label class="regen-option"><input type="checkbox"> Service Details</label>
+      </div>
+      <div style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="regenSelected()">Regenerate Selected Sections</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+    <div class="lightbox-content" id="lightboxContent">
+      <button class="lightbox-close" onclick="closeLightbox(event)" aria-label="Close preview">×</button>
+      <button class="lightbox-nav lightbox-prev" onclick="navSlide(-1, event)" aria-label="Previous slide">‹</button>
+      <button class="lightbox-nav lightbox-next" onclick="navSlide(1, event)" aria-label="Next slide">›</button>
+      <div id="lightboxSlide" style="width:100%;height:100%;"></div>
+      <div class="lightbox-slide-num" id="lightboxNum">1 / 8</div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast">✓ Download started — Contoso_E-Commerce.pptx</div>
+
+<script>
+const slideData = [
+  { title: 'Cover Slide', bg: 'linear-gradient(135deg, #0078D4 0%, #005A9E 100%)' },
+  { title: 'Executive Summary' },
+  { title: 'Use Case: Digital Commerce' },
+  { title: 'Solution Architecture' },
+  { title: 'Azure Service Selection' },
+  { title: 'Cost Estimate' },
+  { title: 'Business Value Assessment' },
+  { title: 'Next Steps', bg: 'linear-gradient(135deg, #005A9E 0%, #0078D4 100%)' }
+];
+
+let currentSlide = 0;
+const totalSlides = slideData.length;
+
+function openLightbox(idx) {
+  currentSlide = idx;
+  const cards = document.querySelectorAll('.slide-card');
+  const thumb = cards[idx].querySelector('.slide-thumb');
+  document.getElementById('lightboxSlide').innerHTML = thumb.innerHTML;
+  document.getElementById('lightboxSlide').querySelector('.slide-number')?.remove();
+  document.getElementById('lightboxNum').textContent = `${idx + 1} / ${totalSlides}`;
+  document.getElementById('lightbox').classList.add('show');
+}
+
+function closeLightbox(e) {
+  if (e.target === document.getElementById('lightbox') || e.currentTarget.classList.contains('lightbox-close')) {
+    document.getElementById('lightbox').classList.remove('show');
+  }
+}
+
+function navSlide(dir, e) {
+  e.stopPropagation();
+  currentSlide = (currentSlide + dir + totalSlides) % totalSlides;
+  const cards = document.querySelectorAll('.slide-card');
+  const thumb = cards[currentSlide].querySelector('.slide-thumb');
+  document.getElementById('lightboxSlide').innerHTML = thumb.innerHTML;
+  document.getElementById('lightboxSlide').querySelector('.slide-number')?.remove();
+  document.getElementById('lightboxNum').textContent = `${currentSlide + 1} / ${totalSlides}`;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('lightbox').classList.contains('show')) return;
+  if (e.key === 'Escape') document.getElementById('lightbox').classList.remove('show');
+  if (e.key === 'ArrowLeft') navSlide(-1, e);
+  if (e.key === 'ArrowRight') navSlide(1, e);
+});
+
+function download() {
+  const toast = document.getElementById('toast');
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+
+function regenerate() {
+  const btn = document.getElementById('regenBtn');
+  const spinner = document.getElementById('regenSpinner');
+  const label = document.getElementById('regenLabel');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  label.textContent = 'Regenerating…';
+  setTimeout(() => {
+    spinner.style.display = 'none';
+    label.textContent = '↻ Regenerate';
+    btn.disabled = false;
+    showToastMsg('✓ Presentation regenerated successfully');
+  }, 2500);
+}
+
+function regenSelected() {
+  const checked = document.querySelectorAll('.regen-options input:checked');
+  if (checked.length === 0) {
+    showToastMsg('⚠️ Select at least one section to regenerate');
+    return;
+  }
+  showToastMsg(`↻ Regenerating ${checked.length} section(s)…`);
+  setTimeout(() => {
+    showToastMsg(`✓ ${checked.length} section(s) regenerated`);
+  }, 2000);
+}
+
+function showToastMsg(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>

@@ -66,13 +66,7 @@ When('I register with username {string} and password {string}', async function (
 // ── When steps — GET requests ───────────────────────────────────
 
 When('I send a GET request to {string}', async function (this: CustomWorld, path: string) {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (this.cookies.length) headers['Cookie'] = this.cookies.join('; ');
-  const res = await fetch(`${this.apiBaseUrl}${path}`, { method: 'GET', headers });
-  const setCookies = res.headers.getSetCookie?.() || [];
-  if (setCookies.length) this.cookies = setCookies;
-  const responseBody = await res.json().catch(() => null);
-  this.response = { status: res.status, body: responseBody, headers: res.headers };
+  await this.apiRequest('GET', path);
 });
 
 When('I send a GET request to {string} without a JWT', async function (this: CustomWorld, path: string) {

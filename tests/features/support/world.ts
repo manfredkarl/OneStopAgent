@@ -22,15 +22,59 @@ export class CustomWorld extends World {
   storedPasswords: Record<string, string> = {};
   tamperedJwt: string | null = null;
 
+  // ── Increment 1: OneStopAgent fields ──────────────────────────
+  authToken: string | null = null;
+  currentProjectId: string | null = null;
+  currentProject: any = null;
+  otherUsersProjectId: string | null = null;
+  nextCursor: string | null = null;
+  projectDescription: string | null = null;
+  classificationResult: any = null;
+  architectureOutput: any = null;
+  pipelineState: any = null;
+  agentStates: Record<string, any> = {};
+  requestCount = 0;
+  skipAuth = false;
+
+  /** Replace {projectId}, {otherUsersProjectId}, {nextCursor} placeholders */
+  interpolateUrl(url: string): string {
+    let result = url;
+    if (this.currentProjectId) {
+      result = result.replace(/\{projectId\}/g, this.currentProjectId);
+    }
+    if (this.otherUsersProjectId) {
+      result = result.replace(/\{otherUsersProjectId\}/g, this.otherUsersProjectId);
+    }
+    if (this.nextCursor) {
+      result = result.replace(/\{nextCursor\}/g, this.nextCursor);
+    }
+    return result;
+  }
+
   async apiRequest(method: string, path: string, body?: object): Promise<void> {
+    const resolvedPath = this.interpolateUrl(path);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.cookies.length) headers['Cookie'] = this.cookies.join('; ');
+    if (!this.skipAuth) {
+      if (this.authToken) {
+        headers['Authorization'] = `Bearer ${this.authToken}`;
+      } else if (this.cookies.length) {
+        headers['Cookie'] = this.cookies.join('; ');
+      }
+    }
     const options: RequestInit = { method, headers };
     if (body) options.body = JSON.stringify(body);
-    const res = await fetch(`${this.apiBaseUrl}${path}`, options);
+    const res = await fetch(`${this.apiBaseUrl}${resolvedPath}`, options);
     const setCookies = res.headers.getSetCookie?.() || [];
     if (setCookies.length) this.cookies = setCookies;
-    const responseBody = await res.json().catch(() => null);
+    const contentType = res.headers.get('content-type') || '';
+    let responseBody: any = null;
+    if (contentType.includes('json')) {
+      responseBody = await res.json().catch(() => null);
+    } else if (contentType.includes('text')) {
+      responseBody = await res.text().catch(() => null);
+    } else {
+      responseBody = await res.arrayBuffer().catch(() => null);
+    }
     this.response = { status: res.status, body: responseBody, headers: res.headers };
   }
 

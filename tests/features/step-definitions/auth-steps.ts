@@ -53,7 +53,14 @@ Given('I am on the {string} page', async function (this: CustomWorld, pagePath: 
 
 When('I send a POST request to {string} with body:', async function (this: CustomWorld, path: string, dataTable: DataTable) {
   const rows = dataTable.hashes();
-  const body = rows[0]; // first data row is the body
+  let body: Record<string, string>;
+  // Detect field/value table format vs direct-keys format
+  if (rows.length > 0 && 'field' in rows[0] && 'value' in rows[0] && Object.keys(rows[0]).length === 2) {
+    body = {};
+    for (const row of rows) body[row.field] = row.value;
+  } else {
+    body = rows[0];
+  }
   await this.apiRequest('POST', path, body);
 });
 

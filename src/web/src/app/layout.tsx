@@ -1,21 +1,16 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import Link from "next/link";
 import "./globals.css";
-import NavBar from "./components/NavBar";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import ClientProviders from "./components/ClientProviders";
 
 export const metadata: Metadata = {
-  title: "UserAuth",
-  description: "A secure user authentication demo application.",
+  title: "OneStopAgent",
+  description: "Scope Azure solutions in minutes with AI agents.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -40,11 +35,39 @@ export default function RootLayout({
           })();
         `}} />
       </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <NavBar />
-        {children}
+      <body className="antialiased">
+        {/* Skip to content */}
+        <a href="#main-content" className="skip-to-content">
+          Skip to content
+        </a>
+
+        {/* Top bar — Fluent 2 style */}
+        <nav className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center px-4 sm:px-5 gap-1 shrink-0 z-10" role="navigation" aria-label="Main navigation">
+          <Link href="/" className="flex items-center gap-2.5 text-[var(--text-primary)] no-underline font-semibold text-[14px] mr-6 hover:opacity-80 transition-opacity">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/onestopagent-logo.svg" alt="" width={24} height={24} className="rounded-md" aria-hidden="true" />
+            <span className="tracking-[-0.01em]">OneStopAgent</span>
+          </Link>
+
+          <Link href="/" className="text-[var(--text-secondary)] text-[13px] font-medium hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] no-underline px-3 py-1.5 rounded-md transition-colors hidden sm:inline-block">
+            Home
+          </Link>
+          <Link href="/projects" className="text-[var(--text-secondary)] text-[13px] font-medium hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] no-underline px-3 py-1.5 rounded-md transition-colors hidden sm:inline-block">
+            Projects
+          </Link>
+
+          <div className="flex-1" />
+
+          <div className="w-8 h-8 rounded-full bg-[var(--accent)] flex items-center justify-center text-[12px] font-semibold text-white cursor-pointer hover:opacity-90 transition-opacity" aria-label="User menu">
+            U
+          </div>
+        </nav>
+
+        <div id="main-content" className="flex flex-col" style={{ height: 'calc(100vh - 48px)' }}>
+          <ClientProviders>
+            {children}
+          </ClientProviders>
+        </div>
       </body>
     </html>
   );

@@ -14,6 +14,8 @@
     "test:integration": "vitest run tests/integration"
   },
   "dependencies": {
+    "@azure/identity": "^4.13.1",
+    "@azure/openai": "^2.0.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -21,7 +23,9 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "pino": "^9.7.0",
-    "pino-http": "^10.4.0"
+    "pino-http": "^10.4.0",
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
