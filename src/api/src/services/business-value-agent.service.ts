@@ -13,6 +13,8 @@ import { chatCompletion } from './llm-client.js';
 // ---------------------------------------------------------------------------
 
 interface ProjectContext {
+  description?: string;
+  customerName?: string;
   requirements: {
     industry?: string;
     companySize?: 'startup' | 'smb' | 'enterprise';
@@ -24,6 +26,7 @@ interface ProjectContext {
     diagramMermaid: string;
     components: string[];
     patterns: string[];
+    narrative?: string;
   };
   services: {
     name: string;
@@ -36,6 +39,10 @@ interface ProjectContext {
     annualCost: number;
     currency: string;
     lineItems: { service: string; monthlyCost: number }[];
+  };
+  scaleParameters?: {
+    concurrentUsers?: number;
+    dataVolumeGB?: number;
   };
 }
 
@@ -188,26 +195,54 @@ export class BusinessValueAgentService {
     try {
       const industry = context.requirements.industry || 'unknown';
       const monthlyCost = context.costEstimate?.monthlyCost ?? 0;
+      const annualCost = context.costEstimate?.annualCost ?? 0;
       const archComponents = context.architecture.components.join(', ');
-      const requirements = JSON.stringify(context.requirements);
+      const serviceList = context.services
+        .map((s) => `${s.name} (${s.sku}) — ${s.purpose}`)
+        .join('\n  - ');
+      const costBreakdown = context.costEstimate?.lineItems
+        ?.map((i) => `${i.service}: $${i.monthlyCost.toFixed(2)}/mo`)
+        .join('\n  - ') ?? 'Not available';
+      const description = context.description || 'Not provided';
+      const customerName = context.customerName || 'the customer';
+      const narrative = context.architecture.narrative || '';
+      const concurrentUsers = context.scaleParameters?.concurrentUsers ?? 0;
+      const painPoints = context.requirements.painPoints?.join(', ') || 'Not specified';
+      const objectives = context.requirements.objectives?.join(', ') || 'Not specified';
 
       const response = await chatCompletion([
         {
           role: 'system',
           content:
-            'You are a business value analyst for Azure solutions. Evaluate the business impact of this solution.\n' +
-            'Consider these value drivers: cost savings, revenue growth, operational efficiency, time-to-market, risk reduction.\n' +
-            'Return JSON: {\n' +
-            '  "drivers": [{ "name": "...", "impact": "...", "quantifiedEstimate": "..." }],\n' +
+            'You are a business value analyst for Azure solutions.\n\n' +
+            'SOLUTION DETAILS:\n' +
+            `Customer: ${customerName}\n` +
+            `Use Case: ${description}\n` +
+            `Industry: ${industry}\n` +
+            `Company Size: ${context.requirements.companySize || 'unknown'}\n` +
+            `Pain Points: ${painPoints}\n` +
+            `Objectives: ${objectives}\n` +
+            (narrative ? `Architecture Narrative: ${narrative}\n` : '') +
+            `Architecture Components: ${archComponents}\n` +
+            `Key Azure Services:\n  - ${serviceList}\n` +
+            `Estimated Monthly Cost: $${monthlyCost.toFixed(2)}/month ($${annualCost.toFixed(2)}/year)\n` +
+            `Cost Breakdown:\n  - ${costBreakdown}\n` +
+            (concurrentUsers > 0 ? `Scale: ${concurrentUsers.toLocaleString()} concurrent users\n` : '') +
+            '\nAnalyze the business value of THIS SPECIFIC solution. Be specific to the use case and industry.\n' +
+            'Reference the actual services, architecture, and costs in your analysis.\n' +
+            'For quantified estimates, use the actual cost data to calculate savings and ROI.\n\n' +
+            'Return JSON:\n' +
+            '{\n' +
+            '  "drivers": [{ "name": "...", "impact": "Specific to THIS use case", "quantifiedEstimate": "Use actual numbers" }],\n' +
             '  "customDrivers": [{ "name": "...", "impact": "..." }],\n' +
-            '  "executiveSummary": "100-200 word summary",\n' +
+            `  "executiveSummary": "A 100-200 word summary mentioning ${customerName} and the specific solution architecture",\n` +
             '  "confidenceLevel": "conservative|moderate|optimistic"\n' +
             '}\n' +
             'Respond ONLY with valid JSON.',
         },
         {
           role: 'user',
-          content: `Solution: ${archComponents}\nIndustry: ${industry}\nCost estimate: $${monthlyCost}/month\nRequirements: ${requirements}`,
+          content: `Evaluate the business value for: ${description}`,
         },
       ], { responseFormat: 'json_object', temperature: 0.7 });
 

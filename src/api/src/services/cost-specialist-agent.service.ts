@@ -50,13 +50,26 @@ interface RetailPriceItem {
   meterName?: string;
   armRegionName?: string;
   armSkuName?: string;
+  skuName?: string;
   serviceName?: string;
+  unitOfMeasure?: string;
 }
 
 interface RetailPriceResponse {
   Items: RetailPriceItem[];
   NextPageLink?: string | null;
 }
+
+// Maps azure-specialist service names to Azure Retail Prices API service names
+const SERVICE_NAME_MAP: Record<string, string> = {
+  'Azure SQL Database': 'SQL Database',
+  'Azure Cache for Redis': 'Redis Cache',
+  'Azure Blob Storage': 'Storage',
+  'Azure CDN': 'Content Delivery Network',
+  'Azure Key Vault': 'Key Vault',
+  'Azure Cognitive Search': 'Azure Cognitive Search',
+  'Azure AI Search': 'Azure AI Search',
+};
 
 // Region proximity map for nearest-region fallback (FRD §9.3)
 const REGION_PROXIMITY: Record<string, string[]> = {
@@ -122,6 +135,12 @@ const HOURLY_SERVICES = new Set([
   'Azure App Service',
   'Azure SQL Database',
   'Azure Virtual Machines',
+  'Azure Cache for Redis',
+]);
+
+// Services billed per day (e.g., SQL Database DTUs)
+const DAILY_SERVICES = new Set([
+  'Azure SQL Database',
 ]);
 
 const VOLUME_SERVICES = new Set(['Azure Blob Storage', 'Azure CDN']);
@@ -210,6 +229,7 @@ export class CostSpecialistAgentService {
             params,
             service.serviceName,
             service.sku,
+            meter.unitOfMeasure,
           );
           items.push({
             serviceName: `${service.serviceName} (${meter.meterName})`,
@@ -224,6 +244,7 @@ export class CostSpecialistAgentService {
           params,
           service.serviceName,
           service.sku,
+          priceResult.unitOfMeasure,
         );
         items.push({
           serviceName: service.serviceName,
@@ -296,11 +317,11 @@ export class CostSpecialistAgentService {
    * Build OData filter query URL for the Azure Retail Prices API.
    */
   buildQuery(service: ServiceSelection): string {
+    const apiServiceName = SERVICE_NAME_MAP[service.serviceName] ?? service.serviceName;
     const filter = [
-      `serviceName eq '${service.serviceName}'`,
-      `armSkuName eq '${service.sku}'`,
+      `serviceName eq '${apiServiceName}'`,
+      `skuName eq '${service.sku}'`,
       `armRegionName eq '${service.region}'`,
-      `priceType eq 'Consumption'`,
       `currencyCode eq 'USD'`,
     ].join(' and ');
     return `https://prices.azure.com/api/retail/prices?$filter=${filter}`;
@@ -361,10 +382,11 @@ export class CostSpecialistAgentService {
   ): Promise<{
     price: number;
     source: PricingSource;
+    unitOfMeasure?: string;
     zeroResults?: boolean;
     fallbackRegion?: string;
     skuFallback?: string;
-    meters?: Array<{ meterName: string; price: number }>;
+    meters?: Array<{ meterName: string; price: number; unitOfMeasure?: string }>;
   }> {
     const cacheKey = `${service.serviceName}-${service.sku}-${service.region}`;
 
@@ -405,16 +427,18 @@ export class CostSpecialistAgentService {
   /**
    * Fetch pricing with fallback strategies for unknown SKU (§9.2),
    * region unavailability (§9.3), multiple meters (§9.7), and pagination (§9.8).
+   * Fallback order: exact API → broader API (no SKU) → region fallback → mock → zero.
    */
   private async fetchPricingWithFallbacks(
     service: ServiceSelection,
   ): Promise<{
     price: number;
+    unitOfMeasure?: string;
     isMock?: boolean;
     zeroResults?: boolean;
     fallbackRegion?: string;
     skuFallback?: string;
-    meters?: Array<{ meterName: string; price: number }>;
+    meters?: Array<{ meterName: string; price: number; unitOfMeasure?: string }>;
   }> {
     // 1. Try exact query
     const items = await this.fetchAllPages(this.buildQuery(service));
@@ -423,15 +447,7 @@ export class CostSpecialistAgentService {
       return this.processApiItems(items);
     }
 
-    // 2. Check mock prices before broader queries (preserves MVP behavior)
-    // Mark as mock so resolvePrice can label them as 'approximate', not 'live'
-    const mockKey = `${service.serviceName}-${service.sku}`;
-    const mockPrice = MOCK_PRICES[mockKey];
-    if (mockPrice !== undefined) {
-      return { price: mockPrice, isMock: true };
-    }
-
-    // 3. §9.2 Unknown SKU: retry without SKU filter, pick cheapest non-zero
+    // 2. §9.2 Unknown SKU: retry without SKU filter, pick cheapest non-zero
     const broaderItems = await this.fetchAllPages(this.buildQueryWithoutSku(service));
     const nonZeroBroader = broaderItems.filter((i) => i.retailPrice > 0);
     if (nonZeroBroader.length > 0) {
@@ -440,11 +456,12 @@ export class CostSpecialistAgentService {
       );
       return {
         price: cheapest.retailPrice,
-        skuFallback: cheapest.armSkuName ?? 'default',
+        unitOfMeasure: cheapest.unitOfMeasure,
+        skuFallback: cheapest.skuName ?? cheapest.armSkuName ?? 'default',
       };
     }
 
-    // 4. §9.3 Region unavailability: try nearest regions
+    // 3. §9.3 Region unavailability: try nearest regions
     const nearestRegions = REGION_PROXIMITY[service.region] ?? [];
     for (const region of nearestRegions) {
       const regionItems = await this.fetchAllPages(
@@ -456,6 +473,13 @@ export class CostSpecialistAgentService {
       }
     }
 
+    // 4. Fall back to mock prices as last resort
+    const mockKey = `${service.serviceName}-${service.sku}`;
+    const mockPrice = MOCK_PRICES[mockKey];
+    if (mockPrice !== undefined) {
+      return { price: mockPrice, isMock: true };
+    }
+
     // 5. §9.1 Zero results — signal to caller
     return { price: 0, zeroResults: true };
   }
@@ -465,36 +489,38 @@ export class CostSpecialistAgentService {
    */
   private processApiItems(items: RetailPriceItem[]): {
     price: number;
-    meters?: Array<{ meterName: string; price: number }>;
+    unitOfMeasure?: string;
+    meters?: Array<{ meterName: string; price: number; unitOfMeasure?: string }>;
   } {
     // Group by unique meter names
-    const meterMap = new Map<string, number>();
+    const meterMap = new Map<string, { price: number; unitOfMeasure?: string }>();
     for (const item of items) {
       const name = item.meterName ?? 'default';
       if (!meterMap.has(name)) {
-        meterMap.set(name, item.retailPrice);
+        meterMap.set(name, { price: item.retailPrice, unitOfMeasure: item.unitOfMeasure });
       }
     }
 
     if (meterMap.size > 1) {
-      const meters = [...meterMap.entries()].map(([meterName, price]) => ({
+      const meters = [...meterMap.entries()].map(([meterName, data]) => ({
         meterName,
-        price,
+        price: data.price,
+        unitOfMeasure: data.unitOfMeasure,
       }));
-      return { price: meters[0].price, meters };
+      return { price: meters[0].price, unitOfMeasure: meters[0].unitOfMeasure, meters };
     }
 
-    return { price: items[0].retailPrice };
+    return { price: items[0].retailPrice, unitOfMeasure: items[0].unitOfMeasure };
   }
 
   /**
    * Build OData query URL without SKU filter for broader fallback (§9.2).
    */
   private buildQueryWithoutSku(service: ServiceSelection): string {
+    const apiServiceName = SERVICE_NAME_MAP[service.serviceName] ?? service.serviceName;
     const filter = [
-      `serviceName eq '${service.serviceName}'`,
+      `serviceName eq '${apiServiceName}'`,
       `armRegionName eq '${service.region}'`,
-      `priceType eq 'Consumption'`,
       `currencyCode eq 'USD'`,
     ].join(' and ');
     return `https://prices.azure.com/api/retail/prices?$filter=${filter}`;
@@ -553,22 +579,61 @@ export class CostSpecialistAgentService {
 
   /**
    * Calculate the monthly cost for a single service based on its billing model.
+   * Uses unitOfMeasure from the API when available for accurate billing.
    */
   private calculateMonthlyCost(
     retailPrice: number,
     params: ScaleParameters,
     serviceName: string,
     sku: string,
+    unitOfMeasure?: string,
   ): number {
     if (FREE_TIER_SERVICES.has(serviceName)) {
       return 0;
     }
 
+    // Use unitOfMeasure from API for accurate billing when available
+    if (unitOfMeasure) {
+      const uom = unitOfMeasure.toLowerCase();
+
+      if (uom.includes('/day') || uom === '1/day') {
+        // Per-day pricing (e.g., SQL Database DTUs)
+        let instances = 1;
+        if (COMPUTE_SERVICES.has(serviceName) && params.concurrentUsers > 0) {
+          const usersPerInstance = USERS_PER_INSTANCE[sku] || 100;
+          instances = Math.ceil(params.concurrentUsers / usersPerInstance);
+        }
+        return Math.round(retailPrice * 30 * instances * 100) / 100;
+      }
+
+      if (uom.includes('hour') || uom === '1 hour') {
+        let instances = 1;
+        if (COMPUTE_SERVICES.has(serviceName) && params.concurrentUsers > 0) {
+          const usersPerInstance = USERS_PER_INSTANCE[sku] || 100;
+          instances = Math.ceil(params.concurrentUsers / usersPerInstance);
+        }
+        return Math.round(retailPrice * params.hoursPerMonth * instances * 100) / 100;
+      }
+
+      if (uom.includes('gb/month') || uom.includes('gb')) {
+        return Math.round(retailPrice * params.dataVolumeGB * 100) / 100;
+      }
+
+      if (uom.includes('/month') || uom === '1/month') {
+        return Math.round(retailPrice * 100) / 100;
+      }
+    }
+
+    // Fallback to service-type-based billing model (for mock prices)
     if (HOURLY_SERVICES.has(serviceName)) {
       let instances = 1;
       if (COMPUTE_SERVICES.has(serviceName) && params.concurrentUsers > 0) {
         const usersPerInstance = USERS_PER_INSTANCE[sku] || 100;
         instances = Math.ceil(params.concurrentUsers / usersPerInstance);
+      }
+      // SQL Database mock prices are per-hour but real API uses per-day
+      if (DAILY_SERVICES.has(serviceName) && !unitOfMeasure) {
+        return Math.round(retailPrice * params.hoursPerMonth * instances * 100) / 100;
       }
       return Math.round(retailPrice * params.hoursPerMonth * instances * 100) / 100;
     }
@@ -577,7 +642,7 @@ export class CostSpecialistAgentService {
       return Math.round(retailPrice * params.dataVolumeGB * 100) / 100;
     }
 
-    // Monthly flat rate (e.g., Azure Cache for Redis)
+    // Monthly flat rate (e.g., Azure Cache for Redis mock prices)
     return Math.round(retailPrice * 100) / 100;
   }
 

@@ -92,33 +92,30 @@ interface AssembledContext {
   envisioningSelections?: string[];
 }
 
-const ORCHESTRATOR_PROMPT = `You are the Project Manager orchestrating an Azure solution scoping session.
+const ORCHESTRATOR_PROMPT = `You are orchestrating an Azure solution scoping pipeline.
 
-Available specialist agents (invoke by returning their ID):
-- architect: Designs Azure architecture (Mermaid diagrams). REQUIRES: requirements gathered.
-- azure-specialist: Selects Azure services, SKUs, regions. REQUIRES: architecture generated.
-- cost: Estimates Azure costs using pricing API. REQUIRES: service selections.
-- business-value: Analyzes ROI and business impact. REQUIRES: architecture + cost estimate.
-- presentation: Generates PowerPoint deck. REQUIRES: at least architecture. Better with all outputs.
+AVAILABLE AGENTS (in recommended order):
+1. architect - Designs Azure architecture (Mermaid diagrams)
+2. azure-specialist - Selects Azure services, SKUs, regions
+3. cost - Estimates Azure costs
+4. business-value - Analyzes ROI and business impact
+5. presentation - Generates final PowerPoint deck (ALWAYS LAST)
 
-Current state of the project:
+CURRENT PROJECT STATE:
 {stateDescription}
 
 Active agents (user has these enabled): {activeAgents}
 
-Rules:
-- Only invoke agents whose requirements are met (don't skip architect and go to cost)
-- If an agent was already completed AND its inputs haven't changed, don't re-run it
-- When all useful agents have completed, invoke "presentation" as the final step
-- After presentation, return "complete"
-- You can suggest skipping optional agents if the user seems to want speed
+RULES:
+- NEVER suggest an agent that is already COMPLETED
+- Follow the recommended order: architect → azure-specialist → cost → business-value → presentation
+- "presentation" is ALWAYS the final step — suggest it after business-value
+- If all agents before presentation are complete, suggest "presentation"
+- If all agents including presentation are complete, return "complete"
+- Only deviate from order if a required upstream agent is missing
 
-Respond with ONLY JSON:
-{
-  "nextAgent": "architect" | "azure-specialist" | "cost" | "business-value" | "presentation" | "complete",
-  "reasoning": "Why this agent should run next",
-  "contextSummary": "Brief summary to show the user about what's happening"
-}`;
+Return JSON only:
+{"nextAgent": "agent-id", "reasoning": "why", "contextSummary": "what user sees"}`;
 
 const VALID_ORCHESTRATOR_AGENTS = new Set([
   'architect', 'azure-specialist', 'cost', 'business-value', 'presentation', 'complete',
@@ -486,7 +483,7 @@ export class PMAgentService {
     requirements: Record<string, string>,
   ): Promise<{ nextAgent: string; reasoning: string; contextSummary: string }> {
     const stateDescription = completedStages
-      .map(s => `${s.agentId}: ${s.hasOutput ? 'COMPLETED with output' : 'NOT YET RUN'}`)
+      .map(s => `- ${s.agentId}: ${s.hasOutput ? '✅ COMPLETED' : '⏳ NOT YET RUN'}`)
       .join('\n');
 
     try {
@@ -514,6 +511,14 @@ export class PMAgentService {
 
       // Validate the decision
       const validated = this.validateDecision(decision, completedStages, activeAgents);
+
+      // Never re-run completed agents
+      const completed = new Set(completedStages.filter(s => s.hasOutput).map(s => s.agentId));
+      if (completed.has(validated.nextAgent) && validated.nextAgent !== 'complete') {
+        console.warn(`[PM] LLM suggested completed agent ${validated.nextAgent}, using fallback`);
+        return this.decideNextAgentFallback(completedStages, activeAgents);
+      }
+
       this.trackDecision(validated.nextAgent);
       return validated;
     } catch (error) {
