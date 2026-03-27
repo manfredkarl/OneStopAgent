@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -16,7 +15,7 @@ from models.schemas import (
     SendMessageRequest,
 )
 from services.project_store import store
-from agents.pm_agent import create_pm_agent
+from orchestrator import Orchestrator
 
 # ---------------------------------------------------------------------------
 # App
@@ -32,192 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Per-project agent sessions (in-memory)
-agent_sessions: dict[str, dict] = {}
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-AGENT_TOOL_MAP = {
-    "architect": "generate_architecture",
-    "azure-specialist": "select_azure_services",
-    "cost": "estimate_costs",
-    "business-value": "assess_business_value",
-    "presentation": "generate_presentation",
-    "envisioning": "suggest_scenarios",
-}
-
-AGENT_INFO = {
-    "generate_architecture": {"name": "System Architect", "emoji": "🏗️"},
-    "select_azure_services": {"name": "Azure Specialist", "emoji": "☁️"},
-    "estimate_costs": {"name": "Cost Specialist", "emoji": "💰"},
-    "assess_business_value": {"name": "Business Value", "emoji": "📊"},
-    "generate_presentation": {"name": "Presentation", "emoji": "📑"},
-    "suggest_scenarios": {"name": "Envisioning", "emoji": "💡"},
-}
-
-
-def _get_active_tool_names(active_agents: list[str]) -> list[str]:
-    return [AGENT_TOOL_MAP[a] for a in active_agents if a in AGENT_TOOL_MAP]
-
-
-def _format_tool_output(result: dict) -> str:
-    t = result.get("type", "")
-    if t == "architecture":
-        mermaid = result.get("mermaidCode", "")
-        narrative = result.get("narrative", "Architecture generated.")
-        components = result.get("components", [])
-        parts = [f"## 🏗️ Architecture Design\n\n{narrative}\n"]
-        if mermaid:
-            parts.append(f"```mermaid\n{mermaid}\n```\n")
-        if components:
-            parts.append("### Components\n")
-            for c in components[:15]:
-                name = c.get("name", "")
-                svc = c.get("azureService", "")
-                desc = c.get("description", "")
-                parts.append(f"- **{name}** ({svc}) — {desc}")
-        return "\n".join(parts)
-    if t == "serviceSelections":
-        sels = result.get("selections", [])
-        parts = [f"## ☁️ Azure Services ({len(sels)} mapped)\n"]
-        for s in sels[:15]:
-            parts.append(f"- **{s.get('componentName', '')}** → {s.get('serviceName', '')} ({s.get('sku', '')}) in {s.get('region', 'eastus')}")
-        return "\n".join(parts)
-    if t == "costEstimate":
-        est = result.get("estimate", {})
-        items = est.get("items", [])
-        monthly = est.get("totalMonthly", 0)
-        annual = est.get("totalAnnual", 0)
-        source = est.get("pricingSource", "unknown")
-        parts = [f"## 💰 Cost Estimate\n\n**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** — Source: {source}\n"]
-        parts.append("| Service | SKU | Monthly Cost |")
-        parts.append("|---------|-----|-------------|")
-        for item in items[:20]:
-            parts.append(f"| {item.get('serviceName', '')} | {item.get('sku', '')} | ${item.get('monthlyCost', 0):,.2f} |")
-        if est.get("assumptions"):
-            parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
-        return "\n".join(parts)
-    if t == "businessValue":
-        assessment = result.get("assessment", {})
-        summary = assessment.get("executiveSummary", "Business value assessed.")
-        drivers = assessment.get("drivers", [])
-        confidence = assessment.get("confidenceLevel", "moderate")
-        parts = [f"## 📊 Business Value Assessment\n\n{summary}\n\n**Confidence:** {confidence}\n"]
-        if drivers:
-            parts.append("### Value Drivers\n")
-            for d in drivers:
-                est_text = f" — *{d.get('quantifiedEstimate', '')}*" if d.get("quantifiedEstimate") else ""
-                parts.append(f"- **{d.get('name', '')}**: {d.get('impact', d.get('description', ''))}{est_text}")
-        return "\n".join(parts)
-    if t == "presentationReady":
-        return f"## 📑 Presentation Ready\n\nGenerated a PowerPoint deck with {result.get('metadata', {}).get('slideCount', 0)} slides. You can download it from the project."
-    if t == "envisioning":
-        count = len(result.get("scenarios", []))
-        return f"Found {count} matching reference scenarios."
-    return str(result)
-
-
-# ---------------------------------------------------------------------------
-# Agent runner
-# ---------------------------------------------------------------------------
-
-async def _run_agent(
-    project_id: str,
-    session: dict,
-    user_message: str,
-) -> AsyncGenerator[ChatMessage, None]:
-    """Run the LangGraph agent and yield ChatMessages for each step."""
-    agent = session["agent"]
-    thread_id = session["thread_id"]
-    config = {"configurable": {"thread_id": thread_id}}
-
-    current_text = ""
-    current_msg_id = str(uuid.uuid4())
-
-    async for event in agent.astream(
-        {"messages": [{"role": "user", "content": user_message}]},
-        config=config,
-        stream_mode="messages",
-    ):
-        msg, metadata = event
-
-        # AIMessage content tokens (PM text streaming)
-        if msg.type in ("ai", "AIMessageChunk") and msg.content and not getattr(msg, "tool_calls", None):
-            current_text += msg.content
-            yield ChatMessage(
-                id=current_msg_id,
-                project_id=project_id,
-                role="agent",
-                agent_id="pm",
-                content=current_text,
-                metadata={"type": "pm_response_chunk", "streaming": True},
-            )
-
-        # AIMessage with tool calls (PM decided to call a tool)
-        elif msg.type in ("ai", "AIMessageChunk") and getattr(msg, "tool_calls", None):
-            # Finalize any pending text
-            if current_text:
-                yield ChatMessage(
-                    id=current_msg_id,
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content=current_text,
-                    metadata={"type": "pm_response"},
-                )
-                current_text = ""
-                current_msg_id = str(uuid.uuid4())
-
-            # Announce each tool call — only if name is present (chunks may have partial data)
-            for tc in msg.tool_calls:
-                tool_name = tc.get("name", "")
-                if not tool_name:
-                    continue
-                agent_info = AGENT_INFO.get(tool_name, {"name": tool_name, "emoji": "🔧"})
-                yield ChatMessage(
-                    id=str(uuid.uuid4()),
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content=f"{agent_info['emoji']} {agent_info['name']} is working...",
-                    metadata={"type": "agent_announcement", "tool": tool_name},
-                )
-
-        # ToolMessage (tool completed)
-        elif msg.type in ("tool", "ToolMessage", "ToolMessageChunk"):
-            try:
-                tool_result = json.loads(msg.content)
-                yield ChatMessage(
-                    id=str(uuid.uuid4()),
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=tool_result.get("agentId", getattr(msg, "name", "tool")),
-                    content=_format_tool_output(tool_result),
-                    metadata=tool_result,
-                )
-            except json.JSONDecodeError:
-                yield ChatMessage(
-                    id=str(uuid.uuid4()),
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=getattr(msg, "name", "tool"),
-                    content=msg.content,
-                    metadata={"type": "tool_result"},
-                )
-
-    # Finalize any remaining text
-    if current_text:
-        yield ChatMessage(
-            id=current_msg_id,
-            project_id=project_id,
-            role="agent",
-            agent_id="pm",
-            content=current_text,
-            metadata={"type": "pm_response"},
-        )
-
+orchestrator = Orchestrator()
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -277,88 +91,26 @@ async def send_message(
     user_msg = ChatMessage(project_id=project_id, role="user", content=req.message)
     store.add_message(project_id, user_msg)
 
-    # Get or create agent for this project
-    if project_id not in agent_sessions:
-        tool_names = _get_active_tool_names(project.active_agents)
-        agent = create_pm_agent(tool_names)
-        agent_sessions[project_id] = {"agent": agent, "thread_id": project_id}
-
-    session = agent_sessions[project_id]
-
     # SSE streaming
     accept = request.headers.get("accept", "")
     if "text/event-stream" in accept:
-        return EventSourceResponse(_stream_sse(project_id, session, req.message))
+        async def stream() -> AsyncGenerator[dict, None]:
+            async for msg in orchestrator.handle_message(
+                project_id, req.message, project.active_agents, project.description
+            ):
+                store.add_message(project_id, msg)
+                yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
+            yield {"event": "done", "data": "[DONE]"}
+        return EventSourceResponse(stream())
 
-    # Run agent synchronously in a thread pool to avoid blocking the event loop
-    # (LangChain tools use synchronous llm.invoke internally)
-    import asyncio
-    import functools
-
-    def _run_sync():
-        return session["agent"].invoke(
-            {"messages": [{"role": "user", "content": req.message}]},
-            config={"configurable": {"thread_id": session["thread_id"]}},
-        )
-
+    # Non-streaming fallback
     messages: list[dict] = []
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, _run_sync)
-        # Extract messages from the result
-        for msg in result.get("messages", []):
-            # Skip the user's message
-            if msg.type == "human":
-                continue
-            # AI messages with tool_calls — skip (just routing decisions)
-            if msg.type == "ai" and getattr(msg, "tool_calls", None):
-                continue
-            # AI messages (PM text responses)
-            if msg.type == "ai" and msg.content:
-                content = msg.content.strip()
-                # Skip if it's raw JSON (PM echoing tool output)
-                if content.startswith("{") or content.startswith("["):
-                    try:
-                        json.loads(content)
-                        continue  # It's JSON — skip it
-                    except json.JSONDecodeError:
-                        pass  # Not valid JSON, keep it
-                # Skip very short/empty messages
-                if len(content) < 3:
-                    continue
-                chat_msg = ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content=content,
-                    metadata={"type": "pm_response"},
-                )
-                store.add_message(project_id, chat_msg)
-                messages.append(chat_msg.model_dump())
-            # Tool messages (agent outputs — format nicely)
-            elif msg.type == "tool" and msg.content:
-                try:
-                    tool_result = json.loads(msg.content)
-                    formatted = _format_tool_output(tool_result)
-                    chat_msg = ChatMessage(
-                        project_id=project_id,
-                        role="agent",
-                        agent_id=getattr(msg, "name", "tool"),
-                        content=formatted,
-                        metadata=tool_result,
-                    )
-                    store.add_message(project_id, chat_msg)
-                    messages.append(chat_msg.model_dump())
-                except json.JSONDecodeError:
-                    chat_msg = ChatMessage(
-                        project_id=project_id,
-                        role="agent",
-                        agent_id=getattr(msg, "name", "tool"),
-                        content=msg.content,
-                        metadata={"type": "tool_result"},
-                    )
-                    store.add_message(project_id, chat_msg)
-                    messages.append(chat_msg.model_dump())
+        async for msg in orchestrator.handle_message(
+            project_id, req.message, project.active_agents, project.description
+        ):
+            store.add_message(project_id, msg)
+            messages.append(msg.model_dump())
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -370,23 +122,6 @@ async def send_message(
         store.add_message(project_id, error_msg)
         messages.append(error_msg.model_dump())
     return messages
-
-
-
-
-async def _stream_sse(
-    project_id: str, session: dict, user_message: str
-) -> AsyncGenerator[dict, None]:
-    async for msg in _run_agent(project_id, session, user_message):
-        # Only persist final messages, not intermediate streaming chunks
-        is_chunk = msg.metadata and msg.metadata.get("streaming")
-        if not is_chunk:
-            store.add_message(project_id, msg)
-        yield {
-            "event": "message",
-            "data": json.dumps(msg.model_dump(), default=str),
-        }
-    yield {"event": "done", "data": "[DONE]"}
 
 
 @app.get("/api/projects/{project_id}/chat")
@@ -441,11 +176,6 @@ async def toggle_agent(
     elif not active and agent_id in project.active_agents:
         project.active_agents.remove(agent_id)
 
-    # Recreate agent with updated tools
-    if project_id in agent_sessions:
-        tool_names = _get_active_tool_names(project.active_agents)
-        agent_sessions[project_id]["agent"] = create_pm_agent(tool_names)
-
     return await get_agents(project_id, x_user_id)
 
 
@@ -453,7 +183,6 @@ async def toggle_agent(
 async def test_reset():
     """Clear all data (for testing)."""
     store.clear()
-    agent_sessions.clear()
     return {"message": "Store cleared"}
 
 
