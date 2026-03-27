@@ -29,8 +29,9 @@ export default function Landing() {
     if (!text) return;
     setLoading(true);
     try {
-      const project = await createProject(text, customerName || undefined);
-      navigate(`/project/${project.id}`);
+      const result = await createProject(text, customerName || undefined);
+      const projectId = result.projectId || result.id;
+      navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);
     } catch (err) {
       console.error('Failed to create project:', err);
       setLoading(false);

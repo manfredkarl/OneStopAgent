@@ -35,27 +35,58 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
     error: 'bg-[var(--error)]',
   };
 
+  const COLORS: Record<string, string> = {
+    pm: '#0F6CBD', envisioning: '#8764B8', architect: '#008272',
+    'azure-specialist': '#005A9E', cost: '#D83B01', 'business-value': '#107C10', presentation: '#B4009E',
+  };
+
   return (
-    <aside className="w-56 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] p-4 overflow-y-auto">
-      <h2 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider mb-3">Agents</h2>
-      <div className="space-y-1">
+    <aside className="w-60 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col overflow-y-auto">
+      <div className="px-4 pt-4 pb-2">
+        <h2 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Agents</h2>
+      </div>
+      <div className="flex-1 px-2 space-y-0.5">
         {agentList.map(agent => {
           const reg = AGENT_REGISTRY.find(r => r.agentId === agent.agentId);
+          const abbr = reg?.abbreviation || agent.agentId.slice(0, 2).toUpperCase();
+          const color = COLORS[agent.agentId] || '#0F6CBD';
           return (
-            <button
+            <div
               key={agent.agentId}
-              onClick={() => handleToggle(agent.agentId, agent.active)}
-              disabled={reg?.required}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-                agent.active
-                  ? 'text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
-                  : 'text-[var(--text-muted)] opacity-50 hover:opacity-75'
-              } ${reg?.required ? 'cursor-default' : 'cursor-pointer'}`}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors ${
+                agent.active ? 'hover:bg-[var(--bg-secondary)]' : 'opacity-50'
+              }`}
             >
-              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDot[agent.status] || statusDot.idle}`} />
-              <span className="truncate">{agent.displayName}</span>
-              {reg?.required && <span className="text-[10px] text-[var(--text-muted)] ml-auto">req</span>}
-            </button>
+              {/* Avatar */}
+              <div
+                className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] font-bold shrink-0 relative"
+                style={{ backgroundColor: color }}
+              >
+                {abbr}
+                <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[var(--bg-primary)] ${statusDot[agent.status] || statusDot.idle}`} />
+              </div>
+
+              {/* Name */}
+              <span className={`flex-1 text-sm truncate ${agent.active ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] line-through'}`}>
+                {agent.displayName}
+              </span>
+
+              {/* Toggle switch */}
+              {agent.agentId !== 'pm' && (
+                <button
+                  onClick={() => handleToggle(agent.agentId, agent.active)}
+                  disabled={reg?.required}
+                  title={reg?.required ? 'Required agent' : agent.active ? 'Deactivate' : 'Activate'}
+                  className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${
+                    reg?.required ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+                  } ${agent.active ? 'bg-[var(--accent)]' : 'bg-gray-300'}`}
+                >
+                  <span className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
+                    agent.active ? 'translate-x-[14px]' : ''
+                  }`} />
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
