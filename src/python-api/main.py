@@ -107,7 +107,7 @@ async def _run_agent(
         msg, metadata = event
 
         # AIMessage content tokens (PM text streaming)
-        if msg.type == "ai" and msg.content and not msg.tool_calls:
+        if msg.type in ("ai", "AIMessageChunk") and msg.content and not getattr(msg, "tool_calls", None):
             current_text += msg.content
             yield ChatMessage(
                 id=current_msg_id,
@@ -119,7 +119,7 @@ async def _run_agent(
             )
 
         # AIMessage with tool calls (PM decided to call a tool)
-        elif msg.type == "ai" and msg.tool_calls:
+        elif msg.type in ("ai", "AIMessageChunk") and getattr(msg, "tool_calls", None):
             # Finalize any pending text
             if current_text:
                 yield ChatMessage(
@@ -147,7 +147,7 @@ async def _run_agent(
                 )
 
         # ToolMessage (tool completed)
-        elif msg.type == "tool":
+        elif msg.type in ("tool", "ToolMessage", "ToolMessageChunk"):
             try:
                 tool_result = json.loads(msg.content)
                 yield ChatMessage(
@@ -251,11 +251,43 @@ async def send_message(
     if "text/event-stream" in accept:
         return EventSourceResponse(_stream_sse(project_id, session, req.message))
 
-    # Non-streaming: collect all
+    # Non-streaming: collect all — skip intermediate chunks, only keep final messages
     messages: list[dict] = []
-    async for msg in _run_agent(project_id, session, req.message):
-        store.add_message(project_id, msg)
-        messages.append(msg.model_dump())
+    last_chunk_id: str | None = None
+    last_chunk_msg: ChatMessage | None = None
+    try:
+        async for msg in _run_agent(project_id, session, req.message):
+            is_chunk = msg.metadata and msg.metadata.get("streaming")
+            if is_chunk:
+                # Keep updating the last chunk — only emit the final version
+                last_chunk_id = msg.id
+                last_chunk_msg = msg
+                continue
+            else:
+                # Emit the finalized chunk if any
+                if last_chunk_msg:
+                    last_chunk_msg.metadata = {"type": "pm_response"}
+                    store.add_message(project_id, last_chunk_msg)
+                    messages.append(last_chunk_msg.model_dump())
+                    last_chunk_msg = None
+                    last_chunk_id = None
+                store.add_message(project_id, msg)
+                messages.append(msg.model_dump())
+        # Emit any trailing chunk
+        if last_chunk_msg:
+            last_chunk_msg.metadata = {"type": "pm_response"}
+            store.add_message(project_id, last_chunk_msg)
+            messages.append(last_chunk_msg.model_dump())
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        error_msg = ChatMessage(
+            project_id=project_id, role="agent", agent_id="pm",
+            content=f"An error occurred: {str(e)}",
+            metadata={"type": "error"}
+        )
+        store.add_message(project_id, error_msg)
+        messages.append(error_msg.model_dump())
     return messages
 
 
