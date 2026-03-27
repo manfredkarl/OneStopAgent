@@ -307,29 +307,44 @@ async def send_message(
         result = await loop.run_in_executor(None, _run_sync)
         # Extract messages from the result
         for msg in result.get("messages", []):
-            # Skip the user's message (already stored)
+            # Skip the user's message
             if msg.type == "human":
                 continue
-            # AI messages (PM text or tool calls)
+            # AI messages with tool_calls — skip (just routing decisions)
+            if msg.type == "ai" and getattr(msg, "tool_calls", None):
+                continue
+            # AI messages (PM text responses)
             if msg.type == "ai" and msg.content:
+                content = msg.content.strip()
+                # Skip if it's raw JSON (PM echoing tool output)
+                if content.startswith("{") or content.startswith("["):
+                    try:
+                        json.loads(content)
+                        continue  # It's JSON — skip it
+                    except json.JSONDecodeError:
+                        pass  # Not valid JSON, keep it
+                # Skip very short/empty messages
+                if len(content) < 3:
+                    continue
                 chat_msg = ChatMessage(
                     project_id=project_id,
                     role="agent",
                     agent_id="pm",
-                    content=msg.content,
+                    content=content,
                     metadata={"type": "pm_response"},
                 )
                 store.add_message(project_id, chat_msg)
                 messages.append(chat_msg.model_dump())
-            # Tool messages (agent outputs)
+            # Tool messages (agent outputs — format nicely)
             elif msg.type == "tool" and msg.content:
                 try:
                     tool_result = json.loads(msg.content)
+                    formatted = _format_tool_output(tool_result)
                     chat_msg = ChatMessage(
                         project_id=project_id,
                         role="agent",
                         agent_id=getattr(msg, "name", "tool"),
-                        content=_format_tool_output(tool_result),
+                        content=formatted,
                         metadata=tool_result,
                     )
                     store.add_message(project_id, chat_msg)

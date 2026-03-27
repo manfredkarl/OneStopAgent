@@ -15,8 +15,8 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
     try {
       const updated = await toggleAgent(projectId, agentId, !currentActive);
       onAgentsChange(updated);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error('Toggle failed:', err);
     }
   };
 
