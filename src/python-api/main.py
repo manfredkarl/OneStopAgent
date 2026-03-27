@@ -26,7 +26,7 @@ app = FastAPI(title="OneStopAgent API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200", "http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -290,44 +290,73 @@ async def send_message(
     if "text/event-stream" in accept:
         return EventSourceResponse(_stream_sse(project_id, session, req.message))
 
-    # Non-streaming: collect all — skip intermediate chunks, only keep final messages
+    # Run agent synchronously in a thread pool to avoid blocking the event loop
+    # (LangChain tools use synchronous llm.invoke internally)
+    import asyncio
+    import functools
+
+    def _run_sync():
+        return session["agent"].invoke(
+            {"messages": [{"role": "user", "content": req.message}]},
+            config={"configurable": {"thread_id": session["thread_id"]}},
+        )
+
     messages: list[dict] = []
-    last_chunk_id: str | None = None
-    last_chunk_msg: ChatMessage | None = None
     try:
-        async for msg in _run_agent(project_id, session, req.message):
-            is_chunk = msg.metadata and msg.metadata.get("streaming")
-            if is_chunk:
-                # Keep updating the last chunk — only emit the final version
-                last_chunk_id = msg.id
-                last_chunk_msg = msg
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _run_sync)
+        # Extract messages from the result
+        for msg in result.get("messages", []):
+            # Skip the user's message (already stored)
+            if msg.type == "human":
                 continue
-            else:
-                # Emit the finalized chunk if any
-                if last_chunk_msg:
-                    last_chunk_msg.metadata = {"type": "pm_response"}
-                    store.add_message(project_id, last_chunk_msg)
-                    messages.append(last_chunk_msg.model_dump())
-                    last_chunk_msg = None
-                    last_chunk_id = None
-                store.add_message(project_id, msg)
-                messages.append(msg.model_dump())
-        # Emit any trailing chunk
-        if last_chunk_msg:
-            last_chunk_msg.metadata = {"type": "pm_response"}
-            store.add_message(project_id, last_chunk_msg)
-            messages.append(last_chunk_msg.model_dump())
+            # AI messages (PM text or tool calls)
+            if msg.type == "ai" and msg.content:
+                chat_msg = ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=msg.content,
+                    metadata={"type": "pm_response"},
+                )
+                store.add_message(project_id, chat_msg)
+                messages.append(chat_msg.model_dump())
+            # Tool messages (agent outputs)
+            elif msg.type == "tool" and msg.content:
+                try:
+                    tool_result = json.loads(msg.content)
+                    chat_msg = ChatMessage(
+                        project_id=project_id,
+                        role="agent",
+                        agent_id=getattr(msg, "name", "tool"),
+                        content=_format_tool_output(tool_result),
+                        metadata=tool_result,
+                    )
+                    store.add_message(project_id, chat_msg)
+                    messages.append(chat_msg.model_dump())
+                except json.JSONDecodeError:
+                    chat_msg = ChatMessage(
+                        project_id=project_id,
+                        role="agent",
+                        agent_id=getattr(msg, "name", "tool"),
+                        content=msg.content,
+                        metadata={"type": "tool_result"},
+                    )
+                    store.add_message(project_id, chat_msg)
+                    messages.append(chat_msg.model_dump())
     except Exception as e:
         import traceback
         traceback.print_exc()
         error_msg = ChatMessage(
             project_id=project_id, role="agent", agent_id="pm",
             content=f"An error occurred: {str(e)}",
-            metadata={"type": "error"}
+            metadata={"type": "error"},
         )
         store.add_message(project_id, error_msg)
         messages.append(error_msg.model_dump())
     return messages
+
+
 
 
 async def _stream_sse(

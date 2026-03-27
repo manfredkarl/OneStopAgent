@@ -1,18 +1,17 @@
 """Shared Azure OpenAI LLM instance."""
 
+import os
 from langchain_openai import AzureChatOpenAI
-from azure.identity import AzureCliCredential, get_bearer_token_provider
 
-# Use AzureCliCredential specifically — DefaultAzureCredential picks wrong tenant
-token_provider = get_bearer_token_provider(
-    AzureCliCredential(),
-    "https://cognitiveservices.azure.com/.default",
-)
+# Token passed via AZURE_OPENAI_TOKEN env var (set before starting the server)
+_token = os.environ.get("AZURE_OPENAI_TOKEN", "")
+if not _token:
+    raise RuntimeError("AZURE_OPENAI_TOKEN env var not set. Run: $env:AZURE_OPENAI_TOKEN = az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv")
 
 llm = AzureChatOpenAI(
     azure_endpoint="https://demopresentations.services.ai.azure.com",
     azure_deployment="gpt-4.1",
-    azure_ad_token_provider=token_provider,
+    azure_ad_token=_token,
     api_version="2024-10-21",
     temperature=0.7,
     streaming=True,
