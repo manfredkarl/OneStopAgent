@@ -1,10 +1,11 @@
 """Shared Azure OpenAI LLM instance."""
 
 from langchain_openai import AzureChatOpenAI
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import AzureCliCredential, get_bearer_token_provider
 
+# Use AzureCliCredential specifically — DefaultAzureCredential picks wrong tenant
 token_provider = get_bearer_token_provider(
-    DefaultAzureCredential(),
+    AzureCliCredential(),
     "https://cognitiveservices.azure.com/.default",
 )
 

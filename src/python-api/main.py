@@ -133,9 +133,11 @@ async def _run_agent(
                 current_text = ""
                 current_msg_id = str(uuid.uuid4())
 
-            # Announce each tool call
+            # Announce each tool call — only if name is present (chunks may have partial data)
             for tc in msg.tool_calls:
-                tool_name = tc["name"]
+                tool_name = tc.get("name", "")
+                if not tool_name:
+                    continue
                 agent_info = AGENT_INFO.get(tool_name, {"name": tool_name, "emoji": "🔧"})
                 yield ChatMessage(
                     id=str(uuid.uuid4()),
