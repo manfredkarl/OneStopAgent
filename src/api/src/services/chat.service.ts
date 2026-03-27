@@ -93,6 +93,60 @@ export class ChatService {
     return agentMsgs;
   }
 
+  /**
+   * Streaming version of sendMessage — calls onMessage for each ChatMessage as it arrives.
+   */
+  async sendMessageStreaming(
+    params: SendMessageParams & { onMessage: (msg: ChatMessage) => void },
+  ): Promise<void> {
+    const { projectId, message, onMessage } = params;
+
+    if (!message || message.trim().length === 0) {
+      throw new ValidationError('Message must not be empty');
+    }
+    if (message.length > 10_000) {
+      throw new ValidationError('Message must not exceed 10000 characters; too long');
+    }
+
+    const userMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      projectId,
+      role: 'user',
+      content: message.trim(),
+      timestamp: new Date(),
+    };
+
+    let messages: ChatMessage[];
+    try {
+      messages = this.store.get(projectId) ?? [];
+      messages.push(userMsg);
+      this.store.set(projectId, messages);
+    } catch (err) {
+      throw new Error(
+        `Storage failure: unable to access chat history — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Streaming callback that also persists each message
+    const wrappedOnMessage = (msg: ChatMessage) => {
+      try {
+        const current = this.store.get(projectId) ?? [];
+        if (!current.some(m => m.id === msg.id)) {
+          current.push(msg);
+          this.store.set(projectId, current);
+        }
+      } catch { /* best-effort storage */ }
+      onMessage(msg);
+    };
+
+    await this.orchestrator.processMessageStreaming(
+      projectId,
+      message.trim(),
+      this.agentControl,
+      wrappedOnMessage,
+    );
+  }
+
   async getHistory(
     projectId: string,
     _userId: string,

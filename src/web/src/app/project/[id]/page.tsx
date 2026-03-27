@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { getProject, getChatHistory, sendMessage, getAgents, modifyArchitecture, adjustCostParameters } from '@/lib/api';
+import { getProject, getChatHistory, sendMessage, sendMessageStreaming, getAgents, modifyArchitecture, adjustCostParameters } from '@/lib/api';
 import type { Project, ChatMessage, AgentStatus, CostParameters, CostDiff } from '@/types';
 import { AGENT_REGISTRY } from '@/types';
 import AgentSidebar from '../../components/AgentSidebar';
@@ -69,8 +69,9 @@ export default function ProjectChatPage() {
       setIsSending(true);
 
       try {
-        const agentResponses = await sendMessage(projectId, text);
-        setMessages((prev) => [...prev, ...agentResponses]);
+        await sendMessageStreaming(projectId, text, (msg) => {
+          setMessages((prev) => [...prev, msg]);
+        });
       } catch (err: unknown) {
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,

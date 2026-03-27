@@ -2,8 +2,9 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Markdown from 'react-markdown';
-import type { ChatMessage, EnvisioningOutput, GuidedQuestion, ServiceSelection, CostEstimate, CostParameters, CostDiff, ValueAssessment, DeckMetadata } from '@/types';
+import type { ChatMessage, EnvisioningOutput, GuidedQuestion, ServiceSelection, CostEstimate, CostParameters, CostDiff, ValueAssessment, DeckMetadata, PlanStep } from '@/types';
 import { AGENT_REGISTRY } from '@/types';
+import ExecutionPlan from './ExecutionPlan';
 import MermaidDiagram from './MermaidDiagram';
 import SelectableList from './SelectableList';
 import GuidedQuestions from './GuidedQuestions';
@@ -30,12 +31,24 @@ const AVATAR_COLORS: Record<string, string> = {
   presentation: '#B4009E',
 };
 
+const AVATAR_GRADIENTS: Record<string, string> = {
+  pm: 'linear-gradient(135deg, #0078D4, #005A9E)',
+  envisioning: 'linear-gradient(135deg, #8764B8, #6B4FA0)',
+  architect: 'linear-gradient(135deg, #008272, #006B5E)',
+  'azure-specialist': 'linear-gradient(135deg, #005A9E, #004578)',
+  cost: 'linear-gradient(135deg, #D83B01, #C43501)',
+  'business-value': 'linear-gradient(135deg, #107C10, #0E6B0E)',
+  presentation: 'linear-gradient(135deg, #B4009E, #9B0087)',
+};
+
 function getAgentInfo(agentId?: string) {
   const def = AGENT_REGISTRY.find((a) => a.agentId === agentId);
   return {
     name: def?.displayName ?? agentId ?? 'Agent',
     abbr: def?.abbreviation ?? 'AG',
     color: AVATAR_COLORS[agentId ?? ''] ?? 'var(--avatar-default)',
+    gradient: AVATAR_GRADIENTS[agentId ?? ''] ?? 'linear-gradient(135deg, var(--avatar-default), var(--accent-hover))',
+    role: def?.role ?? '',
   };
 }
 
@@ -81,6 +94,7 @@ interface ChatThreadProps {
   isModifyingArchitecture?: boolean;
   costDiff?: CostDiff;
   costParams?: CostParameters;
+  sendMessage?: (message: string) => void;
 }
 
 export default function ChatThread({
@@ -103,6 +117,7 @@ export default function ChatThread({
   isModifyingArchitecture,
   costDiff,
   costParams,
+  sendMessage,
 }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -190,11 +205,11 @@ export default function ChatThread({
             >
               {/* Agent header */}
               {!isUser && agent && !sameSender && (
-                <div className="flex items-center gap-2 mb-1.5">
+                <div className="flex items-center gap-2.5 mb-2">
                   <div
                     data-testid="agent-avatar"
-                    className="w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                    style={{ backgroundColor: agent.color }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shrink-0 shadow-[var(--shadow-sm)]"
+                    style={{ background: agent.gradient }}
                   >
                     {agent.abbr}
                   </div>
@@ -226,7 +241,7 @@ export default function ChatThread({
                 className={
                   isUser
                     ? 'user-bubble bg-[var(--accent)] text-white px-4 py-3 rounded-xl rounded-br-[4px] text-sm leading-relaxed shadow-[var(--shadow-sm)]'
-                    : 'bg-[var(--bg-card)] px-5 py-4 rounded-xl rounded-tl-[4px] text-sm leading-relaxed shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-md)] transition-shadow'
+                    : 'bg-[var(--bg-card)] px-5 py-4 rounded-xl rounded-tl-[4px] text-[14px] leading-[1.7] shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-md)] transition-shadow'
                 }
               >
                 {isUser ? (
@@ -326,6 +341,11 @@ export default function ChatThread({
                     softTimeout={msg.metadata.softTimeout as number ?? 30}
                     hardTimeout={msg.metadata.hardTimeout as number ?? 60}
                     isActive={msg.metadata.isActive as boolean ?? true}
+                  />
+                ) : msg.metadata?.type === 'execution_plan' ? (
+                  <ExecutionPlan
+                    plan={(msg.metadata as { type: 'execution_plan'; plan: PlanStep[] }).plan}
+                    onApprove={() => sendMessage?.('go')}
                   />
                 ) : (
                   <>

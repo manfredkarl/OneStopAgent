@@ -100,6 +100,16 @@ export interface BenchmarkReference {
   source: string;
 }
 
+// ── Execution Plan ───────────────────────────────────────────────────────────
+
+export interface PlanStep {
+  tool: string;
+  agentName: string;
+  emoji: string;
+  reason: string;
+  status: 'pending' | 'running' | 'done' | 'skipped';
+}
+
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
 export type ChatMetadata =
@@ -121,7 +131,8 @@ export type ChatMetadata =
   | { type: 'empty_response'; agentId: string }
   | { type: 'architecture'; mermaidCode: string; components: ArchitectureComponent[]; nodeCount: number; edgeCount: number; isModification?: boolean; sourceType?: 'ai' | 'fallback' }
   | { type: 'pipelineStopped'; pipelineState: unknown }
-  | { type: 'pipeline_complete'; pipelineState: unknown };
+  | { type: 'pipeline_complete'; pipelineState: unknown }
+  | { type: 'execution_plan'; plan: PlanStep[] };
 
 export interface ChatMessage {
   id: string;

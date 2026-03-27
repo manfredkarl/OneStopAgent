@@ -17,13 +17,24 @@ const AVATAR_COLORS: Record<string, string> = {
   presentation: '#B4009E',
 };
 
+const AVATAR_GRADIENTS: Record<string, string> = {
+  pm: 'linear-gradient(135deg, #0078D4, #005A9E)',
+  envisioning: 'linear-gradient(135deg, #8764B8, #6B4FA0)',
+  architect: 'linear-gradient(135deg, #008272, #006B5E)',
+  'azure-specialist': 'linear-gradient(135deg, #005A9E, #004578)',
+  cost: 'linear-gradient(135deg, #D83B01, #C43501)',
+  'business-value': 'linear-gradient(135deg, #107C10, #0E6B0E)',
+  presentation: 'linear-gradient(135deg, #B4009E, #9B0087)',
+};
+
 interface AgentSidebarProps {
   projectId: string;
   agents: AgentStatus[];
   onAgentsChange?: (agents: AgentStatus[]) => void;
+  activeAgentId?: string;
 }
 
-export default function AgentSidebar({ projectId, agents, onAgentsChange }: AgentSidebarProps) {
+export default function AgentSidebar({ projectId, agents, onAgentsChange, activeAgentId }: AgentSidebarProps) {
   const [localAgents, setLocalAgents] = useState<AgentStatus[]>(agents);
   const [confirmDialog, setConfirmDialog] = useState<{ agentId: string; displayName: string; isWorking: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -127,21 +138,22 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Agen
               const isActive = status?.active ?? def.defaultActive;
               const currentStatus = status?.status ?? 'idle';
               const isWorking = currentStatus === 'working';
+              const isPlanActive = activeAgentId === def.agentId;
 
               return (
                 <div
                   key={def.agentId}
                   data-testid="agent-row"
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                    isWorking ? 'agent-working-pulse' : 'hover:bg-[var(--bg-hover)]'
-                  } ${!isActive ? 'opacity-60' : ''}`}
+                    isPlanActive ? 'bg-[var(--accent-light)] ring-1 ring-[var(--accent)]' : isWorking ? 'agent-working-pulse' : 'hover:bg-[var(--bg-hover)]'
+                  } ${!isActive ? 'opacity-50' : ''}`}
                 >
-                  {/* Avatar — rounded square */}
+                  {/* Avatar — 28px rounded square with gradient */}
                   <div className="relative shrink-0">
                     <div
                       data-testid="agent-avatar"
-                      className="w-9 h-9 rounded-lg flex items-center justify-center text-[11px] font-bold text-white"
-                      style={{ backgroundColor: AVATAR_COLORS[def.agentId] || 'var(--avatar-default)' }}
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-[9px] font-bold text-white"
+                      style={{ background: AVATAR_GRADIENTS[def.agentId] || AVATAR_COLORS[def.agentId] || 'var(--avatar-default)' }}
                     >
                       {def.abbreviation}
                     </div>
@@ -149,7 +161,7 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Agen
                     <span
                       data-testid="agent-status-dot"
                       data-status={currentStatus}
-                      className={`absolute -bottom-0.5 -right-0.5 w-[10px] h-[10px] rounded-full border-2 border-[var(--bg-card)] ${
+                      className={`absolute -bottom-0.5 -right-0.5 w-[9px] h-[9px] rounded-full border-[1.5px] border-[var(--bg-card)] ${
                         isWorking
                           ? 'bg-[var(--accent)] animate-pulse'
                           : currentStatus === 'error'
@@ -169,8 +181,8 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Agen
                     >
                       {def.displayName}
                     </div>
-                    <div className="text-[11px] text-[var(--text-muted)] truncate capitalize">
-                      {currentStatus}
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">
+                      {def.role}
                     </div>
                   </div>
 

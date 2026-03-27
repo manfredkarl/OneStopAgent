@@ -173,3 +173,60 @@ export async function modifyArchitecture(
     body: JSON.stringify({ request: modificationRequest }),
   });
 }
+
+/**
+ * Send a chat message with Server-Sent Events streaming.
+ * Each message is delivered to onMessage() as soon as it arrives.
+ */
+export async function sendMessageStreaming(
+  projectId: string,
+  message: string,
+  onMessage: (msg: ChatMessage) => void,
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'x-user-id': 'demo-user',
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    let errMessage = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(body);
+      errMessage = parsed.error || parsed.message || errMessage;
+    } catch {
+      if (body) errMessage = body;
+    }
+    throw new Error(errMessage);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') return;
+        try {
+          const msg = JSON.parse(data) as ChatMessage;
+          onMessage(msg);
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+}

@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { ChatService } from '../services/chat.service.js';
 import type {
   SendChatMessageRequest,
+  ChatMessage,
   ArchitectureOutput,
   ServiceSelection,
   CostEstimate,
@@ -50,18 +51,51 @@ router.post('/:id/chat', validateBody(SendChatMessageSchema), async (req: Reques
     await projectService.getById(projectId, userId);
 
     const { message, targetAgent } = req.body as SendChatMessageRequest;
+    const wantsStream = req.headers.accept?.includes('text/event-stream');
 
-    const agentMsgs = await chatService.sendMessage({
-      projectId,
-      userId,
-      message,
-      targetAgent,
-    });
+    if (wantsStream) {
+      // SSE streaming mode
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
 
-    // Sync orchestrator outputs to the project entity
-    await syncOutputsToProject(projectId, userId);
+      const onMessage = (msg: ChatMessage) => {
+        res.write(`data: ${JSON.stringify(msg)}\n\n`);
+      };
 
-    res.json(agentMsgs);
+      try {
+        await chatService.sendMessageStreaming({
+          projectId,
+          userId,
+          message,
+          targetAgent,
+          onMessage,
+        });
+
+        // Sync orchestrator outputs to the project entity
+        await syncOutputsToProject(projectId, userId);
+
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } catch (err) {
+        res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
+        res.end();
+      }
+    } else {
+      // Regular mode (backwards compatible)
+      const agentMsgs = await chatService.sendMessage({
+        projectId,
+        userId,
+        message,
+        targetAgent,
+      });
+
+      // Sync orchestrator outputs to the project entity
+      await syncOutputsToProject(projectId, userId);
+
+      res.json(agentMsgs);
+    }
   } catch (err) {
     next(err);
   }

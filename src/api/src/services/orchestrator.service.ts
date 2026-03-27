@@ -42,6 +42,76 @@ interface ToolResult {
   summary: string;
 }
 
+type ProjectPhase = 'gathering' | 'planning' | 'executing' | 'complete';
+
+// ── Agent info for execution plan display ────────────────────────
+
+const AGENT_INFO: Record<string, { name: string; emoji: string }> = {
+  'generate_architecture': { name: 'System Architect', emoji: '🏗️' },
+  'architect': { name: 'System Architect', emoji: '🏗️' },
+  'select_azure_services': { name: 'Azure Specialist', emoji: '☁️' },
+  'azure-specialist': { name: 'Azure Specialist', emoji: '☁️' },
+  'estimate_costs': { name: 'Cost Specialist', emoji: '💰' },
+  'cost': { name: 'Cost Specialist', emoji: '💰' },
+  'assess_business_value': { name: 'Business Value', emoji: '📊' },
+  'business-value': { name: 'Business Value', emoji: '📊' },
+  'generate_presentation': { name: 'Presentation', emoji: '📑' },
+  'presentation': { name: 'Presentation', emoji: '📑' },
+  'suggest_scenarios': { name: 'Envisioning', emoji: '💡' },
+  'envisioning': { name: 'Envisioning', emoji: '💡' },
+};
+
+/** Check if a user message is a "go" signal to execute a pending plan. */
+function isGoSignal(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return ['go', 'proceed', 'yes', 'start', 'ok', 'okay', 'do it', 'run', 'execute', 'let\'s go', 'lgtm', 'looks good'].includes(normalized);
+}
+
+/** Check if the message requests skipping an agent during planning. */
+function parseSkipRequest(message: string): string[] {
+  const normalized = message.trim().toLowerCase();
+  const skips: string[] = [];
+  const skipPatterns: Record<string, string[]> = {
+    'cost': ['skip cost', 'no cost', 'remove cost', 'without cost'],
+    'estimate_costs': ['skip cost', 'no cost', 'remove cost', 'without cost'],
+    'business-value': ['skip business', 'no business', 'remove business', 'without business', 'skip value', 'no value'],
+    'assess_business_value': ['skip business', 'no business', 'remove business', 'without business', 'skip value', 'no value'],
+    'envisioning': ['skip envisioning', 'no envisioning', 'remove envisioning', 'without envisioning'],
+    'suggest_scenarios': ['skip envisioning', 'no envisioning', 'remove envisioning', 'without envisioning'],
+    'presentation': ['skip presentation', 'no presentation', 'remove presentation', 'without presentation'],
+    'generate_presentation': ['skip presentation', 'no presentation', 'remove presentation', 'without presentation'],
+    'architect': ['skip architect', 'no architect', 'remove architect', 'without architect'],
+    'generate_architecture': ['skip architect', 'no architect', 'remove architect', 'without architect'],
+    'azure-specialist': ['skip azure', 'no azure', 'remove azure', 'without azure'],
+    'select_azure_services': ['skip azure', 'no azure', 'remove azure', 'without azure'],
+  };
+  for (const [tool, patterns] of Object.entries(skipPatterns)) {
+    if (patterns.some(p => normalized.includes(p))) {
+      skips.push(tool);
+    }
+  }
+  return skips;
+}
+
+/** Check if the message requests adding an agent during planning. */
+function parseAddRequest(message: string): string[] {
+  const normalized = message.trim().toLowerCase();
+  const adds: string[] = [];
+  if (normalized.includes('add envisioning') || normalized.includes('include envisioning')) {
+    adds.push('suggest_scenarios');
+  }
+  if (normalized.includes('add presentation') || normalized.includes('include presentation')) {
+    adds.push('generate_presentation');
+  }
+  if (normalized.includes('add cost') || normalized.includes('include cost')) {
+    adds.push('estimate_costs');
+  }
+  if (normalized.includes('add business') || normalized.includes('include business') || normalized.includes('add value') || normalized.includes('include value')) {
+    adds.push('assess_business_value');
+  }
+  return adds;
+}
+
 // ── Orchestrator system prompt ───────────────────────────────────
 
 const ORCHESTRATOR_SYSTEM_PROMPT = `You are OneStopAgent, a project manager helping Microsoft Azure sellers scope customer solutions.
@@ -124,17 +194,35 @@ export class OrchestratorService {
   /** Envisioning outputs (cached for downstream use). */
   private projectEnvisioningOutputs = new Map<string, unknown>();
 
+  /** Execution phase per project for plan-then-execute flow. */
+  private projectPhase = new Map<string, ProjectPhase>();
+
+  /** Pending execution plans awaiting user approval. */
+  private pendingPlans = new Map<string, ToolCallRequest[]>();
+
+  /** Cached agent control reference per project (for plan execution). */
+  private pendingAgentControl = new Map<string, AgentControlService>();
+
   // ── Public API ─────────────────────────────────────────────────
 
   /**
    * Process a user message through the PM orchestrator.
    * Returns one or more ChatMessages (PM response + any tool results).
+   *
+   * Flow: PM reasons → if tools needed, present execution plan → user approves → execute.
    */
   async processMessage(
     projectId: string,
     userMessage: string,
     agentControl: AgentControlService,
   ): Promise<ChatMessage[]> {
+    const phase = this.projectPhase.get(projectId) ?? 'gathering';
+
+    // ── Handle planning phase: user responds to a pending plan ──
+    if (phase === 'planning') {
+      return this.handlePlanningPhaseMessage(projectId, userMessage, agentControl);
+    }
+
     // Store description on first message
     if (!this.projectDescriptions.has(projectId)) {
       this.projectDescriptions.set(projectId, userMessage);
@@ -197,7 +285,62 @@ export class OrchestratorService {
 
     const resultMessages: ChatMessage[] = [];
 
-    // Add PM's conversational response
+    // If tool calls are present, show execution plan instead of executing immediately
+    if (plan.toolCalls.length > 0) {
+      // Add PM's conversational response first
+      if (plan.response) {
+        conversation.push({ role: 'assistant', content: plan.response });
+        resultMessages.push({
+          id: crypto.randomUUID(),
+          projectId,
+          role: 'agent',
+          agentId: 'pm',
+          content: plan.response,
+          metadata: { type: 'orchestrator_decision', agentId: 'pm', reasoning: plan.toolCalls.map(tc => tc.reason).join('; '), contextSummary: plan.response },
+          timestamp: new Date(),
+        });
+      }
+
+      // Build and present the execution plan
+      const planDisplay = plan.toolCalls.map((call, i) => {
+        const info = AGENT_INFO[call.tool] ?? { name: call.tool, emoji: '🔧' };
+        return `${i + 1}. ${info.emoji} **${info.name}** — ${call.reason}`;
+      }).join('\n');
+
+      const planMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        projectId,
+        role: 'agent',
+        agentId: 'pm',
+        content: `Here's my plan for your solution:\n\n${planDisplay}\n\nReady to proceed? Say **"go"** to start, or tell me to adjust (e.g., "skip cost" or "add envisioning").`,
+        metadata: {
+          type: 'execution_plan',
+          plan: plan.toolCalls.map(c => {
+            const info = AGENT_INFO[c.tool] ?? { name: c.tool, emoji: '🔧' };
+            return {
+              tool: c.tool,
+              agentName: info.name,
+              emoji: info.emoji,
+              reason: c.reason,
+              status: 'pending' as const,
+            };
+          }),
+        },
+        timestamp: new Date(),
+      };
+
+      resultMessages.push(planMessage);
+
+      // Store pending plan and transition to planning phase
+      this.pendingPlans.set(projectId, plan.toolCalls);
+      this.pendingAgentControl.set(projectId, agentControl);
+      this.projectPhase.set(projectId, 'planning');
+      this.conversations.set(projectId, conversation);
+
+      return resultMessages;
+    }
+
+    // No tool calls — just a conversational response (gathering info)
     if (plan.response) {
       conversation.push({ role: 'assistant', content: plan.response });
       resultMessages.push({
@@ -206,29 +349,333 @@ export class OrchestratorService {
         role: 'agent',
         agentId: 'pm',
         content: plan.response,
-        metadata: plan.toolCalls.length > 0
-          ? { type: 'orchestrator_decision', agentId: 'pm', reasoning: plan.toolCalls.map(tc => tc.reason).join('; '), contextSummary: plan.response }
-          : { type: 'question', category: 'conversation' },
+        metadata: { type: 'question', category: 'conversation' },
         timestamp: new Date(),
       });
     }
 
-    // Execute tool calls sequentially
-    const description = this.projectDescriptions.get(projectId) ?? userMessage;
-    const requirements = this.projectRequirements.get(projectId) ?? {};
+    this.conversations.set(projectId, conversation);
+    return resultMessages;
+  }
 
-    for (const call of plan.toolCalls) {
+  /**
+   * Stream-capable version of processMessage.
+   * Calls onMessage() for each ChatMessage as it becomes available.
+   */
+  async processMessageStreaming(
+    projectId: string,
+    userMessage: string,
+    agentControl: AgentControlService,
+    onMessage: (msg: ChatMessage) => void,
+  ): Promise<void> {
+    const phase = this.projectPhase.get(projectId) ?? 'gathering';
+
+    // ── Handle planning phase: user responds to a pending plan ──
+    if (phase === 'planning') {
+      const msgs = await this.handlePlanningPhaseMessage(projectId, userMessage, agentControl, onMessage);
+      for (const msg of msgs) {
+        onMessage(msg);
+      }
+      return;
+    }
+
+    // Store description on first message
+    if (!this.projectDescriptions.has(projectId)) {
+      this.projectDescriptions.set(projectId, userMessage);
+    }
+
+    const conversation = this.getConversation(projectId);
+    conversation.push({ role: 'user', content: userMessage });
+
+    // Determine active/disabled tools from agent control
+    const statuses = agentControl.getAgentStatuses(projectId);
+    const activeTools: string[] = [];
+    const disabledTools: string[] = [];
+
+    const toolAgentMap: Record<string, string> = {
+      'architect': 'generate_architecture',
+      'azure-specialist': 'select_azure_services',
+      'cost': 'estimate_costs',
+      'business-value': 'assess_business_value',
+      'presentation': 'generate_presentation',
+      'envisioning': 'suggest_scenarios',
+    };
+
+    for (const status of statuses) {
+      if (status.agentId === 'pm') continue;
+      const toolName = toolAgentMap[status.agentId] ?? status.agentId;
+      if (status.active) {
+        activeTools.push(toolName);
+      } else {
+        disabledTools.push(toolName);
+      }
+    }
+
+    const outputs = this.projectOutputs.get(projectId) ?? {};
+    const systemPrompt = ORCHESTRATOR_SYSTEM_PROMPT
+      .replace('{activeTools}', activeTools.join(', ') || 'none')
+      .replace('{disabledTools}', disabledTools.join(', ') || 'none')
+      .replace('{outputsSummary}', this.summarizeOutputs(outputs));
+
+    let plan: OrchestratorPlan;
+    try {
+      const planResponse = await chatCompletion(
+        [
+          { role: 'system', content: systemPrompt },
+          ...conversation,
+          { role: 'system', content: PLAN_INSTRUCTION },
+        ],
+        { responseFormat: 'json_object', temperature: 0.7 },
+      );
+      plan = JSON.parse(planResponse) as OrchestratorPlan;
+    } catch {
+      plan = this.buildFallbackPlan(userMessage, outputs, activeTools);
+    }
+
+    plan.toolCalls = (plan.toolCalls ?? []).filter(
+      (tc) => activeTools.includes(tc.tool) || this.resolveToolToAgent(tc.tool) !== null,
+    );
+
+    // If tool calls are present, show execution plan (same as non-streaming)
+    if (plan.toolCalls.length > 0) {
+      if (plan.response) {
+        const pmMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          projectId,
+          role: 'agent',
+          agentId: 'pm',
+          content: plan.response,
+          metadata: { type: 'orchestrator_decision', agentId: 'pm', reasoning: plan.toolCalls.map(tc => tc.reason).join('; '), contextSummary: plan.response },
+          timestamp: new Date(),
+        };
+        conversation.push({ role: 'assistant', content: plan.response });
+        onMessage(pmMsg);
+      }
+
+      const planDisplay = plan.toolCalls.map((call, i) => {
+        const info = AGENT_INFO[call.tool] ?? { name: call.tool, emoji: '🔧' };
+        return `${i + 1}. ${info.emoji} **${info.name}** — ${call.reason}`;
+      }).join('\n');
+
+      const planMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        projectId,
+        role: 'agent',
+        agentId: 'pm',
+        content: `Here's my plan for your solution:\n\n${planDisplay}\n\nReady to proceed? Say **"go"** to start, or tell me to adjust (e.g., "skip cost" or "add envisioning").`,
+        metadata: {
+          type: 'execution_plan',
+          plan: plan.toolCalls.map(c => {
+            const info = AGENT_INFO[c.tool] ?? { name: c.tool, emoji: '🔧' };
+            return {
+              tool: c.tool,
+              agentName: info.name,
+              emoji: info.emoji,
+              reason: c.reason,
+              status: 'pending' as const,
+            };
+          }),
+        },
+        timestamp: new Date(),
+      };
+
+      onMessage(planMessage);
+
+      this.pendingPlans.set(projectId, plan.toolCalls);
+      this.pendingAgentControl.set(projectId, agentControl);
+      this.projectPhase.set(projectId, 'planning');
+      this.conversations.set(projectId, conversation);
+      return;
+    }
+
+    // No tool calls — conversational response
+    if (plan.response) {
+      conversation.push({ role: 'assistant', content: plan.response });
+      onMessage({
+        id: crypto.randomUUID(),
+        projectId,
+        role: 'agent',
+        agentId: 'pm',
+        content: plan.response,
+        metadata: { type: 'question', category: 'conversation' },
+        timestamp: new Date(),
+      });
+    }
+
+    this.conversations.set(projectId, conversation);
+  }
+
+  /**
+   * Handle user messages during the planning phase (approve, skip, adjust).
+   * If onMessage is provided, results are streamed via the callback; otherwise returned as an array.
+   */
+  private async handlePlanningPhaseMessage(
+    projectId: string,
+    userMessage: string,
+    agentControl: AgentControlService,
+    onMessage?: (msg: ChatMessage) => void,
+  ): Promise<ChatMessage[]> {
+    let planCalls = this.pendingPlans.get(projectId);
+    if (!planCalls) {
+      // No pending plan — reset to gathering and re-process
+      this.projectPhase.set(projectId, 'gathering');
+      return this.processMessage(projectId, userMessage, agentControl);
+    }
+
+    const conversation = this.getConversation(projectId);
+    conversation.push({ role: 'user', content: userMessage });
+
+    // Check for "go" signal
+    if (isGoSignal(userMessage)) {
+      this.projectPhase.set(projectId, 'executing');
+
+      let results: ChatMessage[];
+      if (onMessage) {
+        await this.executePlanStreaming(projectId, planCalls, agentControl, onMessage);
+        results = [];
+      } else {
+        results = await this.executePlan(projectId, planCalls, agentControl);
+      }
+
+      this.projectPhase.set(projectId, 'complete');
+      this.pendingPlans.delete(projectId);
+      this.pendingAgentControl.delete(projectId);
+      this.conversations.set(projectId, conversation);
+      return results;
+    }
+
+    // Check for skip requests
+    const skips = parseSkipRequest(userMessage);
+    if (skips.length > 0) {
+      planCalls = planCalls.filter(c => !skips.includes(c.tool));
+      this.pendingPlans.set(projectId, planCalls);
+
+      if (planCalls.length === 0) {
+        this.projectPhase.set(projectId, 'gathering');
+        this.pendingPlans.delete(projectId);
+        this.pendingAgentControl.delete(projectId);
+        const msg: ChatMessage = {
+          id: crypto.randomUUID(),
+          projectId,
+          role: 'agent',
+          agentId: 'pm',
+          content: 'All agents have been removed from the plan. What would you like to do instead?',
+          metadata: { type: 'question', category: 'conversation' },
+          timestamp: new Date(),
+        };
+        conversation.push({ role: 'assistant', content: msg.content });
+        this.conversations.set(projectId, conversation);
+        return [msg];
+      }
+
+      // Show updated plan
+      const planDisplay = planCalls.map((call, i) => {
+        const info = AGENT_INFO[call.tool] ?? { name: call.tool, emoji: '🔧' };
+        return `${i + 1}. ${info.emoji} **${info.name}** — ${call.reason}`;
+      }).join('\n');
+
+      const updatedPlanMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        projectId,
+        role: 'agent',
+        agentId: 'pm',
+        content: `Updated plan:\n\n${planDisplay}\n\nSay **"go"** to proceed, or continue adjusting.`,
+        metadata: {
+          type: 'execution_plan',
+          plan: planCalls.map(c => {
+            const info = AGENT_INFO[c.tool] ?? { name: c.tool, emoji: '🔧' };
+            return {
+              tool: c.tool,
+              agentName: info.name,
+              emoji: info.emoji,
+              reason: c.reason,
+              status: 'pending' as const,
+            };
+          }),
+        },
+        timestamp: new Date(),
+      };
+      conversation.push({ role: 'assistant', content: updatedPlanMsg.content });
+      this.conversations.set(projectId, conversation);
+      return [updatedPlanMsg];
+    }
+
+    // Check for add requests
+    const adds = parseAddRequest(userMessage);
+    if (adds.length > 0) {
+      for (const tool of adds) {
+        if (!planCalls.some(c => c.tool === tool)) {
+          planCalls.push({ tool, reason: 'Added by user request' });
+        }
+      }
+      this.pendingPlans.set(projectId, planCalls);
+
+      const planDisplay = planCalls.map((call, i) => {
+        const info = AGENT_INFO[call.tool] ?? { name: call.tool, emoji: '🔧' };
+        return `${i + 1}. ${info.emoji} **${info.name}** — ${call.reason}`;
+      }).join('\n');
+
+      const updatedPlanMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        projectId,
+        role: 'agent',
+        agentId: 'pm',
+        content: `Updated plan:\n\n${planDisplay}\n\nSay **"go"** to proceed, or continue adjusting.`,
+        metadata: {
+          type: 'execution_plan',
+          plan: planCalls.map(c => {
+            const info = AGENT_INFO[c.tool] ?? { name: c.tool, emoji: '🔧' };
+            return {
+              tool: c.tool,
+              agentName: info.name,
+              emoji: info.emoji,
+              reason: c.reason,
+              status: 'pending' as const,
+            };
+          }),
+        },
+        timestamp: new Date(),
+      };
+      conversation.push({ role: 'assistant', content: updatedPlanMsg.content });
+      this.conversations.set(projectId, conversation);
+      return [updatedPlanMsg];
+    }
+
+    // Unrecognized input during planning — cancel plan and re-process normally
+    this.projectPhase.set(projectId, 'gathering');
+    this.pendingPlans.delete(projectId);
+    this.pendingAgentControl.delete(projectId);
+    this.conversations.set(projectId, conversation);
+    // Remove the user message we just pushed (processMessage will re-add it)
+    conversation.pop();
+    return this.processMessage(projectId, userMessage, agentControl);
+  }
+
+  /**
+   * Execute a previously approved plan — runs tool calls sequentially.
+   */
+  private async executePlan(
+    projectId: string,
+    planCalls: ToolCallRequest[],
+    agentControl: AgentControlService,
+  ): Promise<ChatMessage[]> {
+    const resultMessages: ChatMessage[] = [];
+    const statuses = agentControl.getAgentStatuses(projectId);
+    const outputs = this.projectOutputs.get(projectId) ?? {};
+    const description = this.projectDescriptions.get(projectId) ?? '';
+    const requirements = this.projectRequirements.get(projectId) ?? {};
+    const conversation = this.getConversation(projectId);
+
+    for (const call of planCalls) {
       const agentId = this.resolveToolToAgent(call.tool);
       if (!agentId) continue;
 
-      // Check if agent is active
       const agentStatus = statuses.find(s => s.agentId === agentId);
       if (agentStatus && !agentStatus.active) continue;
 
-      // Send announcement
       const announcement = this.getAnnouncement(agentId);
       if (announcement) {
-        const announceMsg: ChatMessage = {
+        resultMessages.push({
           id: crypto.randomUUID(),
           projectId,
           role: 'agent',
@@ -236,11 +683,9 @@ export class OrchestratorService {
           content: announcement,
           metadata: { type: 'agent_announcement', agentId },
           timestamp: new Date(),
-        };
-        resultMessages.push(announceMsg);
+        });
       }
 
-      // Set working status
       agentControl.setAgentWorkingStatus(projectId, agentId, 'working');
 
       try {
@@ -255,13 +700,9 @@ export class OrchestratorService {
 
         const result = toolResult.result;
         if (result) {
-          // Store output for downstream tools
           outputs[agentId] = result.data;
           this.projectOutputs.set(projectId, outputs);
-
           resultMessages.push(result.message);
-
-          // Update conversation context so PM knows what happened
           conversation.push({
             role: 'assistant',
             content: `[Tool ${call.tool} completed: ${result.summary}]`,
@@ -303,6 +744,97 @@ export class OrchestratorService {
   }
 
   /**
+   * Stream-execute a previously approved plan — calls onMessage for each result.
+   */
+  private async executePlanStreaming(
+    projectId: string,
+    planCalls: ToolCallRequest[],
+    agentControl: AgentControlService,
+    onMessage: (msg: ChatMessage) => void,
+  ): Promise<void> {
+    const statuses = agentControl.getAgentStatuses(projectId);
+    const outputs = this.projectOutputs.get(projectId) ?? {};
+    const description = this.projectDescriptions.get(projectId) ?? '';
+    const requirements = this.projectRequirements.get(projectId) ?? {};
+    const conversation = this.getConversation(projectId);
+
+    for (const call of planCalls) {
+      const agentId = this.resolveToolToAgent(call.tool);
+      if (!agentId) continue;
+
+      const agentStatus = statuses.find(s => s.agentId === agentId);
+      if (agentStatus && !agentStatus.active) continue;
+
+      const announcement = this.getAnnouncement(agentId);
+      if (announcement) {
+        onMessage({
+          id: crypto.randomUUID(),
+          projectId,
+          role: 'agent',
+          agentId: 'pm',
+          content: announcement,
+          metadata: { type: 'agent_announcement', agentId },
+          timestamp: new Date(),
+        });
+      }
+
+      agentControl.setAgentWorkingStatus(projectId, agentId, 'working');
+
+      try {
+        const toolResult = await this.timeoutService.executeWithTimeout(
+          agentId,
+          () => this.executeTool(projectId, agentId, outputs, description, requirements),
+        );
+
+        if (!toolResult.completed) {
+          throw new Error(`${this.getAgentDisplayName(agentId)} took too long to respond.`);
+        }
+
+        const result = toolResult.result;
+        if (result) {
+          outputs[agentId] = result.data;
+          this.projectOutputs.set(projectId, outputs);
+          onMessage(result.message);
+          conversation.push({
+            role: 'assistant',
+            content: `[Tool ${call.tool} completed: ${result.summary}]`,
+          });
+        }
+
+        agentControl.setAgentWorkingStatus(projectId, agentId, 'idle');
+      } catch (error) {
+        agentControl.setAgentWorkingStatus(projectId, agentId, 'error');
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        onMessage({
+          id: crypto.randomUUID(),
+          projectId,
+          role: 'agent',
+          agentId,
+          content: `⚠️ ${this.getAgentDisplayName(agentId)} encountered an error: ${errorMsg}. You can ask me to try again.`,
+          metadata: {
+            type: 'errorRecovery',
+            agentId,
+            error: errorMsg,
+            canRetry: true,
+            canSkip: !this.isRequiredAgent(agentId),
+            retryCount: 0,
+            maxRetries: 3,
+          },
+          timestamp: new Date(),
+        });
+
+        conversation.push({
+          role: 'assistant',
+          content: `[Tool ${call.tool} failed: ${errorMsg}]`,
+        });
+      }
+    }
+
+    this.conversations.set(projectId, conversation);
+  }
+
+  /**
    * Get accumulated outputs for a project (used by routes to sync to project entity).
    */
   getOutputs(projectId: string): Record<string, unknown> {
@@ -316,6 +848,9 @@ export class OrchestratorService {
     this.projectDescriptions.clear();
     this.projectRequirements.clear();
     this.projectEnvisioningOutputs.clear();
+    this.projectPhase.clear();
+    this.pendingPlans.clear();
+    this.pendingAgentControl.clear();
   }
 
   // ── Tool execution ─────────────────────────────────────────────

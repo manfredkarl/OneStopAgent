@@ -7,6 +7,13 @@ import type { ProjectListItem } from '@/types';
 import ProjectCard from './components/ProjectCard';
 import { useToastContext } from './components/ClientProviders';
 
+const EXAMPLE_PROMPTS = [
+  'A retail company needs a scalable e-commerce platform on Azure with real-time inventory and AI recommendations',
+  'Healthcare provider needs HIPAA-compliant patient portal with telemedicine on Azure',
+  'Manufacturing firm wants IoT-based predictive maintenance using Azure IoT Hub and AI',
+  'Financial services company needs a fraud detection system with real-time streaming analytics',
+];
+
 export default function Home() {
   const router = useRouter();
   const { addToast } = useToastContext();
@@ -43,59 +50,89 @@ export default function Home() {
     }
   }
 
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDescription(e.target.value);
+    const ta = e.target;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  };
+
   return (
-    <main className="min-h-[calc(100vh-48px)] bg-[var(--bg-secondary)]">
-      {/* Hero / Create */}
-      <div className="max-w-[720px] mx-auto pt-10 sm:pt-14 px-4 sm:px-6 text-center">
-        <h1 className="text-[26px] sm:text-[28px] font-semibold text-[var(--text-primary)] tracking-[-0.02em]">
+    <main className="min-h-[calc(100vh-48px)] bg-[var(--bg-secondary)] overflow-y-auto">
+      {/* Hero */}
+      <div className="max-w-[680px] mx-auto pt-16 sm:pt-24 px-4 sm:px-6 text-center">
+        <div className="inline-flex items-center gap-2 bg-[var(--accent-light)] text-[var(--accent)] text-[12px] font-semibold px-3 py-1 rounded-full mb-5">
+          <span>✨</span> AI-Powered Azure Scoping
+        </div>
+        <h1 className="text-[32px] sm:text-[38px] font-semibold text-[var(--text-primary)] tracking-[-0.03em] leading-tight">
           OneStopAgent
         </h1>
-        <p className="text-[15px] text-[var(--text-secondary)] mt-2 leading-relaxed">
+        <p className="text-[16px] text-[var(--text-secondary)] mt-3 leading-relaxed max-w-[480px] mx-auto">
           Describe a customer scenario and let AI agents build architecture, estimates, and a presentation deck.
         </p>
+      </div>
 
-        {/* Create card */}
+      {/* Copilot-style input card */}
+      <div className="max-w-[680px] mx-auto px-4 sm:px-6 mt-8">
         <div
           role="form"
           aria-label="Create a new project"
-          className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 sm:p-8 mt-8 text-left shadow-[var(--shadow-md)]"
+          className="bg-[var(--bg-card)] rounded-2xl shadow-[var(--shadow-md)] overflow-hidden"
         >
-          <label htmlFor="desc" className="block text-[13px] font-semibold text-[var(--text-secondary)] mb-2">
-            Describe your customer&apos;s scenario or need
-          </label>
-          <textarea
-            id="desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g., A retail company needs a scalable e-commerce platform on Azure..."
-            maxLength={5000}
-            rows={4}
-            className="w-full min-h-[110px] border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-lg px-4 py-3 text-sm font-[inherit] resize-y transition-all focus:outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-light)] focus:bg-[var(--bg-primary)] placeholder:text-[var(--text-muted)]"
-          />
-          <div
-            data-testid="description-char-counter"
-            className="text-[11px] text-[var(--text-muted)] text-right mt-1.5"
-          >
-            {description.length.toLocaleString()} / 5,000
-          </div>
-
-          <div className="mt-5">
-            <label htmlFor="cust" className="block text-[13px] font-semibold text-[var(--text-secondary)] mb-2">
-              Customer name <span className="font-normal text-[var(--text-muted)]">(optional)</span>
-            </label>
-            <input
-              type="text"
-              id="cust"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Customer name"
-              maxLength={200}
-              className="w-full h-10 border border-[var(--border)] bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-lg px-4 text-sm font-[inherit] transition-all focus:outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-light)] focus:bg-[var(--bg-primary)] placeholder:text-[var(--text-muted)]"
+          <div className="p-5 sm:p-6">
+            <textarea
+              id="desc"
+              value={description}
+              onChange={handleTextareaChange}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !isEmpty) {
+                  e.preventDefault();
+                  handleCreate();
+                }
+              }}
+              placeholder="Describe your customer's Azure need..."
+              maxLength={5000}
+              rows={3}
+              className="w-full min-h-[80px] max-h-[160px] border-none bg-transparent text-[var(--text-primary)] text-[15px] font-[inherit] resize-none transition-all focus:outline-none placeholder:text-[var(--text-muted)] leading-relaxed"
             />
+
+            {/* Customer name — inline subtle */}
+            <div className="flex items-center gap-3 mt-2 pt-3 border-t border-[var(--border-subtle)]">
+              <input
+                type="text"
+                id="cust"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Customer name (optional)"
+                maxLength={200}
+                className="flex-1 h-9 border-none bg-transparent text-[var(--text-primary)] text-[13px] font-[inherit] focus:outline-none placeholder:text-[var(--text-muted)]"
+              />
+              <div className="text-[11px] text-[var(--text-muted)] shrink-0">
+                {description.length.toLocaleString()} / 5,000
+              </div>
+              <button
+                onClick={handleCreate}
+                disabled={isEmpty || creating}
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-all shrink-0 ${
+                  isEmpty || creating
+                    ? 'bg-[var(--disabled-bg)] cursor-not-allowed text-[var(--disabled-text)]'
+                    : 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] hover:shadow-[var(--shadow-sm)] active:scale-95 cursor-pointer'
+                }`}
+                aria-label="Create project"
+              >
+                {creating ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-[16px] w-[16px]">
+                    <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
 
           {error && (
-            <div role="alert" className="mt-5 bg-[var(--error-bg)] text-[var(--error)] border border-[var(--error-border)] rounded-lg px-4 py-3 text-[13px] flex items-center gap-2">
+            <div role="alert" className="mx-5 mb-5 bg-[var(--error-bg)] text-[var(--error)] border border-[var(--error-border)] rounded-lg px-4 py-3 text-[13px] flex items-center gap-2">
               <span>⚠️</span>
               <span>{error}</span>
               <button
@@ -106,23 +143,27 @@ export default function Home() {
               </button>
             </div>
           )}
-
-          <button
-            onClick={handleCreate}
-            disabled={isEmpty || creating}
-            className="mt-6 w-full h-11 bg-[var(--accent)] text-white border-none rounded-lg text-[14px] font-semibold cursor-pointer transition-all hover:bg-[var(--accent-hover)] hover:shadow-[var(--shadow-sm)] disabled:bg-[var(--disabled-bg)] disabled:text-[var(--disabled-text)] disabled:cursor-default disabled:shadow-none focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-2 flex items-center justify-center gap-2"
-          >
-            {creating && (
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            )}
-            {creating ? 'Creating…' : 'Create Project'}
-          </button>
         </div>
+
+        {/* Example prompts */}
+        {isEmpty && (
+          <div className="mt-4 flex flex-wrap gap-2 justify-center">
+            {EXAMPLE_PROMPTS.map((prompt, i) => (
+              <button
+                key={i}
+                onClick={() => setDescription(prompt)}
+                className="text-[12px] text-[var(--text-secondary)] bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg px-3 py-2 hover:border-[var(--accent)] hover:text-[var(--accent)] hover:bg-[var(--accent-light)] transition-all cursor-pointer text-left max-w-[320px] leading-snug"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Recent Projects */}
-      <div className="max-w-[720px] mx-auto mt-10 sm:mt-12 px-4 sm:px-6 pb-12">
-        <h2 className="text-[15px] font-semibold text-[var(--text-primary)] mb-4">Recent Projects</h2>
+      <div className="max-w-[680px] mx-auto mt-12 px-4 sm:px-6 pb-12">
+        <h2 className="text-[14px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-4">Recent Projects</h2>
 
         {loading ? (
           <div className="space-y-3">
@@ -131,14 +172,14 @@ export default function Home() {
             ))}
           </div>
         ) : projects.length === 0 ? (
-          <div className="text-center py-10 text-[var(--text-secondary)] text-sm">
-            <svg className="mx-auto mb-3" width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-              <rect x="8" y="12" width="32" height="24" rx="3" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
-              <path d="M8 18h32" stroke="currentColor" strokeWidth="1.5" opacity="0.3"/>
-              <circle cx="13" cy="15" r="1.5" fill="currentColor" opacity="0.3"/>
-              <circle cx="18" cy="15" r="1.5" fill="currentColor" opacity="0.3"/>
-            </svg>
-            <p className="text-[var(--text-muted)]">No projects yet. Start by describing a customer scenario above.</p>
+          <div className="text-center py-12 text-[var(--text-secondary)] text-sm">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+                <path d="M14 6v16M6 14h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.3" />
+              </svg>
+            </div>
+            <p className="text-[var(--text-secondary)] font-medium mb-1">No projects yet</p>
+            <p className="text-[var(--text-muted)] text-[13px]">Describe a customer scenario above to get started.</p>
           </div>
         ) : (
           <div className="space-y-3">

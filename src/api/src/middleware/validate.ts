@@ -20,7 +20,8 @@ export function validateQuery(schema: ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = schema.parse(req.query);
-      req.query = parsed as typeof req.query;
+      // Store parsed query on res.locals since req.query may be read-only
+      res.locals.parsedQuery = parsed;
       next();
     } catch (err) {
       if (err instanceof ZodError) {

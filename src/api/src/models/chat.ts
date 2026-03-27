@@ -22,7 +22,8 @@ export type ChatMetadata =
   | { type: 'pipeline_complete'; pipelineState: unknown }
   | { type: 'skip_notice'; agentId: string }
   | { type: 'agent_announcement'; agentId: string }
-  | { type: 'orchestrator_decision'; agentId: string; reasoning: string; contextSummary: string };
+  | { type: 'orchestrator_decision'; agentId: string; reasoning: string; contextSummary: string }
+  | { type: 'execution_plan'; plan: { tool: string; agentName: string; emoji: string; reason: string; status: 'pending' | 'running' | 'done' | 'skipped' }[] };
 
 export interface ChatMessage {
   id: string;
