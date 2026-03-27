@@ -33,10 +33,18 @@ Format your response in markdown. End with: "Ready when you are — just say **p
 
     def build_plan(self, active_agents: list[str]) -> list[str]:
         """Build execution plan respecting agent toggles. Architect is always included."""
+        # Map internal plan names to active_agents format
+        PLAN_TO_ACTIVE = {
+            "architect": "architect",
+            "azure_services": "azure-specialist",
+            "cost": "cost",
+            "business_value": "business-value",
+            "presentation": "presentation",
+            "envisioning": "envisioning",
+        }
         plan = []
         for agent_id in DEFAULT_PLAN:
-            # Map agent IDs to match active_agents format
-            mapped = agent_id.replace("_", "-")  # azure_services -> azure-services
+            mapped = PLAN_TO_ACTIVE.get(agent_id, agent_id)
             if mapped in active_agents or agent_id == "architect":
                 plan.append(agent_id)
         return plan
