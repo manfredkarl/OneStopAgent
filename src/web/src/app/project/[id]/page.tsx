@@ -70,7 +70,21 @@ export default function ProjectChatPage() {
 
       try {
         await sendMessageStreaming(projectId, text, (msg) => {
-          setMessages((prev) => [...prev, msg]);
+          if (msg.metadata?.type === 'pm_response_chunk' && msg.metadata?.streaming) {
+            // Update existing message with this ID (streaming text)
+            setMessages((prev) => {
+              const existing = prev.findIndex((m) => m.id === msg.id);
+              if (existing >= 0) {
+                const updated = [...prev];
+                updated[existing] = msg;
+                return updated;
+              }
+              return [...prev, msg];
+            });
+          } else {
+            // New complete message
+            setMessages((prev) => [...prev, msg]);
+          }
         });
       } catch (err: unknown) {
         const errorMessage: ChatMessage = {

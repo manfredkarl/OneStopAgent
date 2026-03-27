@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -47,6 +48,15 @@ AGENT_TOOL_MAP = {
     "envisioning": "suggest_scenarios",
 }
 
+AGENT_INFO = {
+    "generate_architecture": {"name": "System Architect", "emoji": "🏗️"},
+    "select_azure_services": {"name": "Azure Specialist", "emoji": "☁️"},
+    "estimate_costs": {"name": "Cost Specialist", "emoji": "💰"},
+    "assess_business_value": {"name": "Business Value", "emoji": "📊"},
+    "generate_presentation": {"name": "Presentation", "emoji": "📑"},
+    "suggest_scenarios": {"name": "Envisioning", "emoji": "💡"},
+}
+
 
 def _get_active_tool_names(active_agents: list[str]) -> list[str]:
     return [AGENT_TOOL_MAP[a] for a in active_agents if a in AGENT_TOOL_MAP]
@@ -86,53 +96,88 @@ async def _run_agent(
     thread_id = session["thread_id"]
     config = {"configurable": {"thread_id": thread_id}}
 
+    current_text = ""
+    current_msg_id = str(uuid.uuid4())
+
     async for event in agent.astream(
         {"messages": [{"role": "user", "content": user_message}]},
         config=config,
-        stream_mode="updates",
+        stream_mode="messages",
     ):
-        for node_name, node_output in event.items():
-            messages = node_output.get("messages", [])
-            for msg in messages:
-                # LLM text response
-                if node_name == "agent":
-                    if hasattr(msg, "content") and msg.content:
-                        yield ChatMessage(
-                            project_id=project_id,
-                            role="agent",
-                            agent_id="pm",
-                            content=msg.content,
-                            metadata={"type": "pm_response"},
-                        )
-                    if hasattr(msg, "tool_calls") and msg.tool_calls:
-                        for tc in msg.tool_calls:
-                            yield ChatMessage(
-                                project_id=project_id,
-                                role="agent",
-                                agent_id="pm",
-                                content=f"\U0001f527 Calling {tc['name']}...",
-                                metadata={"type": "agent_announcement", "tool": tc["name"]},
-                            )
+        msg, metadata = event
 
-                # Tool results
-                elif node_name == "tools":
-                    if hasattr(msg, "content") and msg.content:
-                        try:
-                            tool_result = json.loads(msg.content)
-                            yield ChatMessage(
-                                project_id=project_id,
-                                role="agent",
-                                agent_id=tool_result.get("agentId", getattr(msg, "name", "tool")),
-                                content=_format_tool_output(tool_result),
-                                metadata=tool_result,
-                            )
-                        except json.JSONDecodeError:
-                            yield ChatMessage(
-                                project_id=project_id,
-                                role="agent",
-                                agent_id="tool",
-                                content=msg.content,
-                            )
+        # AIMessage content tokens (PM text streaming)
+        if msg.type == "ai" and msg.content and not msg.tool_calls:
+            current_text += msg.content
+            yield ChatMessage(
+                id=current_msg_id,
+                project_id=project_id,
+                role="agent",
+                agent_id="pm",
+                content=current_text,
+                metadata={"type": "pm_response_chunk", "streaming": True},
+            )
+
+        # AIMessage with tool calls (PM decided to call a tool)
+        elif msg.type == "ai" and msg.tool_calls:
+            # Finalize any pending text
+            if current_text:
+                yield ChatMessage(
+                    id=current_msg_id,
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=current_text,
+                    metadata={"type": "pm_response"},
+                )
+                current_text = ""
+                current_msg_id = str(uuid.uuid4())
+
+            # Announce each tool call
+            for tc in msg.tool_calls:
+                tool_name = tc["name"]
+                agent_info = AGENT_INFO.get(tool_name, {"name": tool_name, "emoji": "🔧"})
+                yield ChatMessage(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=f"{agent_info['emoji']} {agent_info['name']} is working...",
+                    metadata={"type": "agent_announcement", "tool": tool_name},
+                )
+
+        # ToolMessage (tool completed)
+        elif msg.type == "tool":
+            try:
+                tool_result = json.loads(msg.content)
+                yield ChatMessage(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=tool_result.get("agentId", getattr(msg, "name", "tool")),
+                    content=_format_tool_output(tool_result),
+                    metadata=tool_result,
+                )
+            except json.JSONDecodeError:
+                yield ChatMessage(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=getattr(msg, "name", "tool"),
+                    content=msg.content,
+                    metadata={"type": "tool_result"},
+                )
+
+    # Finalize any remaining text
+    if current_text:
+        yield ChatMessage(
+            id=current_msg_id,
+            project_id=project_id,
+            role="agent",
+            agent_id="pm",
+            content=current_text,
+            metadata={"type": "pm_response"},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +263,10 @@ async def _stream_sse(
     project_id: str, session: dict, user_message: str
 ) -> AsyncGenerator[dict, None]:
     async for msg in _run_agent(project_id, session, user_message):
-        store.add_message(project_id, msg)
+        # Only persist final messages, not intermediate streaming chunks
+        is_chunk = msg.metadata and msg.metadata.get("streaming")
+        if not is_chunk:
+            store.add_message(project_id, msg)
         yield {
             "event": "message",
             "data": json.dumps(msg.model_dump(), default=str),
