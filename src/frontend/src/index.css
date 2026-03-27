@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F5;
+  --bg-card: #FFFFFF;
+  --text-primary: #242424;
+  --text-secondary: #616161;
+  --text-muted: #8A8A8A;
+  --border: #E0E0E0;
+  --accent: #0F6CBD;
+  --accent-hover: #115EA3;
+  --accent-light: #EBF3FC;
+  --error: #D13438;
+  --success: #107C10;
+  --warning: #F7630C;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-card: 0 2px 4px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1B1A19;
+    --bg-secondary: #252423;
+    --bg-card: #2D2C2B;
+    --text-primary: #F3F2F1;
+    --text-secondary: #C8C6C4;
+    --text-muted: #797775;
+    --border: #484644;
+    --accent: #2B88D8;
+    --accent-hover: #3AA0F0;
+    --accent-light: #1a3a5c;
+  }
+}
+
+body {
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
