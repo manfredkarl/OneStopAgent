@@ -15,42 +15,28 @@ import { SendChatMessageSchema, ChatHistoryQuerySchema } from '../validation/sch
 const router = Router();
 const chatService = new ChatService();
 
-/** Sync pipeline stage outputs to the project entity's context. */
-async function syncPipelineToProject(projectId: string, userId: string): Promise<void> {
-  const pipelineState = chatService.getPipelineState(projectId);
-  if (!pipelineState) return;
+/** Sync orchestrator outputs to the project entity's context. */
+async function syncOutputsToProject(projectId: string, userId: string): Promise<void> {
+  const outputs = chatService.getOutputs(projectId);
+  if (!outputs || Object.keys(outputs).length === 0) return;
 
   const updates: Partial<ProjectContext> = {};
 
-  for (const stage of pipelineState.stages) {
-    if (stage.status !== 'complete' || !stage.output) continue;
-
-    switch (stage.agentId) {
-      case 'architect':
-        updates.architecture = stage.output as ArchitectureOutput;
-        break;
-      case 'azure-specialist':
-        updates.services = stage.output as ServiceSelection[];
-        break;
-      case 'cost':
-        updates.costEstimate = stage.output as CostEstimate;
-        break;
-      case 'business-value':
-        updates.businessValue = stage.output as ValueAssessment;
-        break;
-    }
+  if (outputs['architect']) {
+    updates.architecture = outputs['architect'] as ArchitectureOutput;
+  }
+  if (outputs['azure-specialist']) {
+    updates.services = outputs['azure-specialist'] as ServiceSelection[];
+  }
+  if (outputs['cost']) {
+    updates.costEstimate = outputs['cost'] as CostEstimate;
+  }
+  if (outputs['business-value']) {
+    updates.businessValue = outputs['business-value'] as ValueAssessment;
   }
 
   if (Object.keys(updates).length > 0) {
     await projectService.updateContext(projectId, userId, updates);
-  }
-
-  if (pipelineState.status === 'completed') {
-    const project = await projectService.getById(projectId, userId);
-    if (project.status !== 'completed') {
-      project.status = 'completed';
-      project.updatedAt = new Date();
-    }
   }
 }
 
@@ -72,8 +58,8 @@ router.post('/:id/chat', validateBody(SendChatMessageSchema), async (req: Reques
       targetAgent,
     });
 
-    // Sync pipeline outputs to the project entity
-    await syncPipelineToProject(projectId, userId);
+    // Sync orchestrator outputs to the project entity
+    await syncOutputsToProject(projectId, userId);
 
     res.json(agentMsgs);
   } catch (err) {
