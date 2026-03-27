@@ -65,17 +65,54 @@ def _get_active_tool_names(active_agents: list[str]) -> list[str]:
 def _format_tool_output(result: dict) -> str:
     t = result.get("type", "")
     if t == "architecture":
-        return result.get("narrative", "Architecture generated.")
+        mermaid = result.get("mermaidCode", "")
+        narrative = result.get("narrative", "Architecture generated.")
+        components = result.get("components", [])
+        parts = [f"## 🏗️ Architecture Design\n\n{narrative}\n"]
+        if mermaid:
+            parts.append(f"```mermaid\n{mermaid}\n```\n")
+        if components:
+            parts.append("### Components\n")
+            for c in components[:15]:
+                name = c.get("name", "")
+                svc = c.get("azureService", "")
+                desc = c.get("description", "")
+                parts.append(f"- **{name}** ({svc}) — {desc}")
+        return "\n".join(parts)
     if t == "serviceSelections":
-        count = len(result.get("selections", []))
-        return f"Mapped {count} Azure services with SKU recommendations."
+        sels = result.get("selections", [])
+        parts = [f"## ☁️ Azure Services ({len(sels)} mapped)\n"]
+        for s in sels[:15]:
+            parts.append(f"- **{s.get('componentName', '')}** → {s.get('serviceName', '')} ({s.get('sku', '')}) in {s.get('region', 'eastus')}")
+        return "\n".join(parts)
     if t == "costEstimate":
         est = result.get("estimate", {})
-        return f"Cost estimate: ${est.get('totalMonthly', 0):,.2f}/month (${est.get('totalAnnual', 0):,.2f}/year)"
+        items = est.get("items", [])
+        monthly = est.get("totalMonthly", 0)
+        annual = est.get("totalAnnual", 0)
+        source = est.get("pricingSource", "unknown")
+        parts = [f"## 💰 Cost Estimate\n\n**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** — Source: {source}\n"]
+        parts.append("| Service | SKU | Monthly Cost |")
+        parts.append("|---------|-----|-------------|")
+        for item in items[:20]:
+            parts.append(f"| {item.get('serviceName', '')} | {item.get('sku', '')} | ${item.get('monthlyCost', 0):,.2f} |")
+        if est.get("assumptions"):
+            parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
+        return "\n".join(parts)
     if t == "businessValue":
-        return result.get("assessment", {}).get("executiveSummary", "Business value assessed.")
+        assessment = result.get("assessment", {})
+        summary = assessment.get("executiveSummary", "Business value assessed.")
+        drivers = assessment.get("drivers", [])
+        confidence = assessment.get("confidenceLevel", "moderate")
+        parts = [f"## 📊 Business Value Assessment\n\n{summary}\n\n**Confidence:** {confidence}\n"]
+        if drivers:
+            parts.append("### Value Drivers\n")
+            for d in drivers:
+                est_text = f" — *{d.get('quantifiedEstimate', '')}*" if d.get("quantifiedEstimate") else ""
+                parts.append(f"- **{d.get('name', '')}**: {d.get('impact', d.get('description', ''))}{est_text}")
+        return "\n".join(parts)
     if t == "presentationReady":
-        return f"Presentation generated with {result.get('metadata', {}).get('slideCount', 0)} slides."
+        return f"## 📑 Presentation Ready\n\nGenerated a PowerPoint deck with {result.get('metadata', {}).get('slideCount', 0)} slides. You can download it from the project."
     if t == "envisioning":
         count = len(result.get("scenarios", []))
         return f"Found {count} matching reference scenarios."
