@@ -10,7 +10,22 @@ import type {
   CostDiff,
 } from '@/types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/** Normalize a message from the Python backend (snake_case) to camelCase. */
+function normalizeMessage(msg: any): ChatMessage {
+  return {
+    id: msg.id,
+    projectId: msg.project_id || msg.projectId,
+    role: msg.role,
+    agentId: msg.agent_id || msg.agentId,
+    content: msg.content,
+    metadata: msg.metadata,
+    timestamp: msg.timestamp,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Global rate limit state
 let rateLimitCallback: ((retryAfter: number) => void) | null = null;
@@ -78,8 +93,9 @@ export async function sendMessage(
     method: 'POST',
     body: JSON.stringify({ message, targetAgent }),
   });
-  // Handle both array and single message responses for backwards compatibility
-  return Array.isArray(data) ? data : [data];
+  // Handle both array and single message responses; normalize snake_case from Python
+  const arr = Array.isArray(data) ? data : [data];
+  return arr.map(normalizeMessage);
 }
 
 export async function getChatHistory(
@@ -94,7 +110,7 @@ export async function getChatHistory(
   const data = await request<{ messages: ChatMessage[]; hasMore: boolean; nextCursor: string | null }>(
     `/api/projects/${projectId}/chat${qs ? `?${qs}` : ''}`,
   );
-  return data.messages;
+  return data.messages.map(normalizeMessage);
 }
 
 export async function getAgents(projectId: string): Promise<AgentStatus[]> {
@@ -127,10 +143,11 @@ export async function submitGateAction(
   action: GateAction,
   feedback?: string,
 ): Promise<ChatMessage> {
-  return request<ChatMessage>(`/api/projects/${projectId}/gate`, {
+  const data = await request<ChatMessage>(`/api/projects/${projectId}/gate`, {
     method: 'POST',
     body: JSON.stringify({ action, feedback }),
   });
+  return normalizeMessage(data);
 }
 
 export async function adjustCostParameters(
@@ -168,10 +185,11 @@ export async function modifyArchitecture(
   projectId: string,
   modificationRequest: string,
 ): Promise<ChatMessage> {
-  return request<ChatMessage>(`/api/projects/${projectId}/architecture/modify`, {
+  const data = await request<ChatMessage>(`/api/projects/${projectId}/architecture/modify`, {
     method: 'POST',
     body: JSON.stringify({ request: modificationRequest }),
   });
+  return normalizeMessage(data);
 }
 
 /**
@@ -219,12 +237,14 @@ export async function sendMessageStreaming(
     buffer = lines.pop() ?? '';
 
     for (const line of lines) {
+      // Skip SSE event-type lines (e.g. "event: message")
+      if (line.startsWith('event:')) continue;
       if (line.startsWith('data: ')) {
-        const data = line.slice(6);
+        const data = line.slice(6).trim();
         if (data === '[DONE]') return;
         try {
-          const msg = JSON.parse(data) as ChatMessage;
-          onMessage(msg);
+          const msg = JSON.parse(data);
+          onMessage(normalizeMessage(msg));
         } catch { /* skip malformed */ }
       }
     }

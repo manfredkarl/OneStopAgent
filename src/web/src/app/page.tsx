@@ -50,6 +50,19 @@ export default function Home() {
     }
   }
 
+  async function handleCreateWithDescription(desc: string) {
+    setCreating(true);
+    setError(null);
+    try {
+      const { projectId } = await createProject({ description: desc });
+      addToast('Project created successfully', 'success');
+      router.push(`/project/${projectId}`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create project');
+      setCreating(false);
+    }
+  }
+
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setDescription(e.target.value);
     const ta = e.target;
@@ -151,7 +164,11 @@ export default function Home() {
             {EXAMPLE_PROMPTS.map((prompt, i) => (
               <button
                 key={i}
-                onClick={() => setDescription(prompt)}
+                onClick={() => {
+                  setDescription(prompt);
+                  handleCreateWithDescription(prompt);
+                }}
+                disabled={creating}
                 className="text-[12px] text-[var(--text-secondary)] bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg px-3 py-2 hover:border-[var(--accent)] hover:text-[var(--accent)] hover:bg-[var(--accent-light)] transition-all cursor-pointer text-left max-w-[320px] leading-snug"
               >
                 {prompt}
