@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { getProject, getChatHistory, sendMessage, getAgents } from '@/lib/api';
-import type { Project, ChatMessage, AgentStatus } from '@/types';
+import { getProject, getChatHistory, sendMessage, getAgents, modifyArchitecture, adjustCostParameters } from '@/lib/api';
+import type { Project, ChatMessage, AgentStatus, CostParameters, CostDiff } from '@/types';
 import { AGENT_REGISTRY } from '@/types';
 import AgentSidebar from '../../components/AgentSidebar';
 import ChatThread from '../../components/ChatThread';
@@ -19,6 +19,9 @@ export default function ProjectChatPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isModifyingArchitecture, setIsModifyingArchitecture] = useState(false);
+  const [costDiff, setCostDiff] = useState<CostDiff | undefined>(undefined);
+  const [costParams, setCostParams] = useState<CostParameters | undefined>(undefined);
 
   // Load project, chat history, and agents
   useEffect(() => {
@@ -167,6 +170,84 @@ export default function ProjectChatPage() {
     }
   }, [projectId]);
 
+  /** Helper: send a plain-text message through the pipeline */
+  const sendPipelineMessage = useCallback(async (text: string) => {
+    if (!projectId) return;
+    setIsSending(true);
+    try {
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        projectId,
+        role: 'user',
+        content: text,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      const responses = await sendMessage(projectId, text);
+      setMessages((prev) => [...prev, ...responses]);
+    } catch (err) {
+      console.error('Message send failed:', err);
+    } finally {
+      setIsSending(false);
+    }
+  }, [projectId]);
+
+  const handleGuidedAnswer = useCallback((answer: string) => {
+    sendPipelineMessage(answer);
+  }, [sendPipelineMessage]);
+
+  const handleGuidedSkip = useCallback(() => {
+    sendPipelineMessage('skip');
+  }, [sendPipelineMessage]);
+
+  const handleGuidedProceed = useCallback(() => {
+    sendPipelineMessage('proceed');
+  }, [sendPipelineMessage]);
+
+  const handleRejectionSubmit = useCallback((direction: string) => {
+    sendPipelineMessage(direction);
+  }, [sendPipelineMessage]);
+
+  const handleActionButton = useCallback((action: string) => {
+    sendPipelineMessage(action);
+  }, [sendPipelineMessage]);
+
+  const handleErrorRetry = useCallback((_agentId: string) => {
+    sendPipelineMessage('retry');
+  }, [sendPipelineMessage]);
+
+  const handleErrorSkip = useCallback((_agentId: string) => {
+    sendPipelineMessage('skip');
+  }, [sendPipelineMessage]);
+
+  const handleErrorStop = useCallback(() => {
+    sendPipelineMessage('stop');
+  }, [sendPipelineMessage]);
+
+  const handleModifyArchitecture = useCallback(async (request: string) => {
+    if (!projectId) return;
+    setIsModifyingArchitecture(true);
+    try {
+      const response = await modifyArchitecture(projectId, request);
+      setMessages((prev) => [...prev, response]);
+    } catch (err) {
+      console.error('Architecture modification failed:', err);
+    } finally {
+      setIsModifyingArchitecture(false);
+    }
+  }, [projectId]);
+
+  const handleRecalculateCost = useCallback(async (params: CostParameters) => {
+    if (!projectId) return;
+    setCostParams(params);
+    try {
+      const diff = await adjustCostParameters(projectId, params);
+      setCostDiff(diff);
+    } catch (err) {
+      console.error('Cost recalculation failed:', err);
+    }
+  }, [projectId]);
+
   return (
     <div className="flex flex-1 overflow-hidden relative">
       {/* Mobile sidebar toggle */}
@@ -227,6 +308,19 @@ export default function ProjectChatPage() {
           onApproveGate={handleApprove}
           onRequestChangesGate={handleRequestChanges}
           onSelectableListProceed={handleSelectableListProceed}
+          onGuidedAnswer={handleGuidedAnswer}
+          onGuidedSkip={handleGuidedSkip}
+          onGuidedProceed={handleGuidedProceed}
+          onRejectionSubmit={handleRejectionSubmit}
+          onActionButton={handleActionButton}
+          onErrorRetry={handleErrorRetry}
+          onErrorSkip={handleErrorSkip}
+          onErrorStop={handleErrorStop}
+          onModifyArchitecture={handleModifyArchitecture}
+          isModifyingArchitecture={isModifyingArchitecture}
+          onRecalculateCost={handleRecalculateCost}
+          costDiff={costDiff}
+          costParams={costParams}
         />
 
         <ChatInput onSend={handleSend} disabled={isSending} />
