@@ -36,38 +36,103 @@ Sellers can toggle agents on or off in the sidebar. If cost estimation isn't nee
 
 ## Technical Design Decisions
 
-### Built with LangChain + LangGraph
+### Controlled Multi-Agent Orchestration
 
-The multi-agent orchestration is built on **LangChain** and **LangGraph** using the **ReAct (Reasoning + Acting) agent pattern**:
+The system uses a **deterministic orchestration pattern** — not autonomous agent reasoning:
 
-- The **Project Manager** is a `create_react_agent()` from LangGraph — it receives the user's message, reasons about what to do, and decides which tools to call
-- Each specialist agent is a **LangChain `@tool` function** — the PM's LLM sees the tool descriptions and decides when to invoke them based on the conversation context
-- The PM has access to all 6 tools and chains them together: architecture output feeds into service selection, which feeds into cost estimation, etc.
-- **Conversation memory** is managed by LangGraph's built-in `MemorySaver` checkpointer — the PM remembers the full conversation history across messages
-- **Tool selection is dynamic** — when an agent is toggled off, the tool is removed from the PM's available tools and it simply won't call it
+```
+User → Project Manager (planner) → Execution Plan → Agents run in sequence → Results stream
+```
 
-This follows the **Microsoft Foundry Connected Agents** pattern where a main agent delegates to specialized sub-agents using natural language routing rather than hardcoded pipelines.
+**Why not ReAct / autonomous agents?**
+- Deterministic > autonomous for demos and reliability
+- Explicit flow > hidden reasoning for debuggability
+- Predictable execution order > LLM-decided order for consistency
+
+**How it works:**
+
+1. **ProjectManager** is a Python class (not a LangChain agent) that:
+   - Asks 2-3 clarifying questions via LLM
+   - Builds an execution plan (ordered list of agents)
+   - Respects agent toggles (removes disabled agents from plan)
+   - Architect is always required
+
+2. **Execution Plan** is a simple list:
+   ```python
+   ["architect", "azure_services", "cost", "business_value", "presentation"]
+   ```
+
+3. **Orchestrator** runs agents in sequence:
+   ```python
+   for step in plan:
+       agent = get_agent(step)
+       state = agent.run(state)  # each agent reads/writes shared state
+   ```
+
+4. **Each agent** is a class with a `run(state) -> state` method:
+   ```python
+   class ArchitectAgent:
+       def run(self, state: AgentState) -> AgentState:
+           # call LLM, write to state.architecture
+           return state
+   ```
+
+5. **Shared state** flows between agents:
+   ```python
+   state = {
+       "user_input": "...",
+       "clarifications": "...",
+       "architecture": { "mermaidCode": "...", "components": [...] },
+       "services": { "selections": [...] },
+       "costs": { "estimate": { "totalMonthly": 1200 } },
+       "business_value": { "drivers": [...], "executiveSummary": "..." },
+       "presentation_path": "output/deck.pptx"
+   }
+   ```
+
+### LangChain Used ONLY for LLM Calls
+
+LangChain is used for **Azure OpenAI integration only** — not for agent orchestration:
+
+```python
+from langchain_openai import AzureChatOpenAI
+
+llm = AzureChatOpenAI(
+    azure_endpoint="https://demopresentations.services.ai.azure.com",
+    azure_deployment="gpt-4.1",
+    azure_ad_token=token,
+)
+
+# Inside each agent:
+response = llm.invoke([
+    {"role": "system", "content": "Generate a Mermaid diagram..."},
+    {"role": "user", "content": requirements}
+])
+```
+
+No LangGraph, no ReAct agents, no chains — just direct LLM calls inside each agent class.
 
 ### Streaming via Server-Sent Events (SSE)
 
 Agent responses stream to the frontend in real-time using **Server-Sent Events**:
 
 - The FastAPI `/chat` endpoint supports `Accept: text/event-stream` for SSE streaming
-- LangGraph's `astream()` with `stream_mode="messages"` yields individual message chunks (AIMessageChunk, ToolMessage)
-- Each chunk is sent as an SSE event (`data: {...}\n\n`) to the frontend
-- The frontend uses `fetch()` with `ReadableStream` to read SSE events progressively
-- **PM text streams token by token** — the user sees the response appearing word by word
-- **Tool announcements appear immediately** ("🏗️ System Architect is working...")
-- **Tool results appear as soon as they complete** — architecture diagram, cost table, etc.
-- For the non-streaming path (no SSE), `invoke()` runs in a thread pool via `run_in_executor` to avoid blocking the async event loop
+- The **Orchestrator** yields structured progress events as each agent starts and completes:
+  ```json
+  { "type": "agent_start", "agent": "architect", "content": "🏗️ System Architect is working..." }
+  { "type": "agent_result", "agent": "architect", "content": "## Architecture Design\n..." }
+  ```
+- The frontend uses `fetch()` with `ReadableStream` to process SSE events progressively
+- Each agent result appears immediately when that agent finishes — no waiting for the full pipeline
+- Agent execution runs in a **thread pool** (`run_in_executor`) to avoid blocking the async event loop
 
 ### Azure OpenAI Integration
 
 - Uses **Azure OpenAI GPT-4.1** deployed on Azure AI Foundry
 - Authenticated via **Azure CLI credential** (`az account get-access-token`)
 - Token passed as `AZURE_OPENAI_TOKEN` environment variable at server startup
-- LangChain's `AzureChatOpenAI` handles the API calls with streaming enabled
-- Each tool that needs AI reasoning (architecture, component extraction, business value) makes its own LLM call within the tool function
+- LangChain's `AzureChatOpenAI` handles the API calls
+- Each agent makes its own LLM calls for domain-specific tasks (architecture design, component extraction, business analysis)
 
 ### Real Azure Pricing
 
@@ -161,13 +226,20 @@ Open `http://localhost:4200` in your browser.
 ```
 OneStopAgent/
 ├── src/
-│   ├── python-api/              # Python backend (FastAPI + LangChain)
-│   │   ├── main.py              # FastAPI routes, SSE streaming, message extraction
-│   │   ├── requirements.txt     # fastapi, langchain, langchain-openai, langgraph, etc.
+│   ├── python-api/              # Python backend (FastAPI + controlled orchestration)
+│   │   ├── main.py              # FastAPI routes, SSE streaming, message handling
+│   │   ├── orchestrator.py      # Execution engine — runs agents in sequence
+│   │   ├── requirements.txt     # fastapi, langchain-openai, python-pptx, etc.
 │   │   ├── agents/
-│   │   │   ├── llm.py           # Azure OpenAI connection (AzureChatOpenAI)
-│   │   │   ├── pm_agent.py      # PM orchestrator (create_react_agent + system prompt)
-│   │   │   └── tools.py         # 6 @tool functions (architect, services, cost, BV, pptx, envisioning)
+│   │   │   ├── llm.py                    # Azure OpenAI connection (AzureChatOpenAI)
+│   │   │   ├── state.py                  # Shared AgentState object
+│   │   │   ├── pm_agent.py               # ProjectManager class (planner, NOT ReAct)
+│   │   │   ├── architect_agent.py        # System Architect (Mermaid + components via LLM)
+│   │   │   ├── azure_specialist_agent.py # Azure service + SKU selection
+│   │   │   ├── cost_agent.py             # Cost estimation via Azure Pricing API
+│   │   │   ├── business_value_agent.py   # ROI analysis via LLM
+│   │   │   ├── presentation_agent.py     # PowerPoint generation (python-pptx)
+│   │   │   └── envisioning_agent.py      # Reference scenario matching
 │   │   ├── services/
 │   │   │   ├── pricing.py       # Azure Retail Prices API client + reference prices
 │   │   │   ├── presentation.py  # python-pptx deck builder (8 slides)
@@ -201,13 +273,12 @@ OneStopAgent/
 |---------|---------|
 | `fastapi` | HTTP API framework |
 | `uvicorn` | ASGI server |
-| `langchain` | Agent framework |
-| `langchain-openai` | Azure OpenAI integration |
-| `langgraph` | ReAct agent runtime with memory |
+| `langchain-openai` | Azure OpenAI LLM calls (AzureChatOpenAI) |
 | `azure-identity` | Azure credential management |
 | `python-pptx` | PowerPoint generation |
 | `httpx` | HTTP client for Azure Pricing API |
 | `sse-starlette` | Server-Sent Events support |
+| `pydantic` | Data validation and schemas |
 
 ### Frontend (TypeScript)
 | Package | Purpose |
