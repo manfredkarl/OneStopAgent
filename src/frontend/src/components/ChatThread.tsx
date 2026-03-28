@@ -4,6 +4,7 @@ import { AGENT_REGISTRY } from '../types';
 import { downloadPptx } from '../api';
 import MessageContent from './MessageContent';
 import ExecutionPlan from './ExecutionPlan';
+import AssumptionsInput from './AssumptionsInput';
 
 interface Props {
   messages: ChatMessage[];
@@ -146,6 +147,26 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                     >
                       Skip
                     </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.metadata?.type === 'assumptions_input') {
+            return (
+              <div key={msg.id} className="flex gap-3 items-start">
+                <span className="text-xl shrink-0 mt-0.5">{EMOJIS[agentId] || '\uD83D\uDD27'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-muted)] mb-1.5">{getAgentName(agentId)}</p>
+                  <div className="prose-content">
+                    <MessageContent content={msg.content} />
+                    <AssumptionsInput
+                      assumptions={msg.metadata.assumptions as Array<{id: string; label: string; unit: string; default: number; hint?: string}>}
+                      onSubmit={(values) => {
+                        onSend?.(JSON.stringify(values));
+                      }}
+                    />
                   </div>
                 </div>
               </div>

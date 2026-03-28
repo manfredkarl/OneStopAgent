@@ -277,6 +277,65 @@ class Orchestrator:
         elif phase == "approval":
             current = state.current_step
 
+            # Check if the user submitted assumption values (JSON array)
+            try:
+                user_data = json.loads(message)
+                if isinstance(user_data, list) and all(
+                    isinstance(d, dict) and "id" in d and "value" in d
+                    for d in user_data
+                ):
+                    # User submitted assumption values — re-run BV with them
+                    state.business_value["user_assumptions"] = user_data
+                    state.completed_steps = [
+                        s for s in state.completed_steps if s != "business_value"
+                    ]
+                    self.phases[project_id] = "executing"
+                    yield self._msg(
+                        project_id,
+                        "📊 Got your numbers — calculating business value...",
+                        {"type": "pm_response"},
+                    )
+                    async for msg in self.run_single_step(
+                        project_id, state, "business_value"
+                    ):
+                        yield msg
+                    return
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Check if user says "proceed" while in BV needs_input phase (use defaults)
+            if (
+                current == "business_value"
+                and state.business_value.get("phase") == "needs_input"
+                and intent == Intent.PROCEED
+            ):
+                # Use default values from assumptions
+                assumptions = state.business_value.get("assumptions_needed", [])
+                default_values = [
+                    {
+                        "id": a["id"],
+                        "label": a["label"],
+                        "value": a["default"],
+                        "unit": a.get("unit", ""),
+                    }
+                    for a in assumptions
+                ]
+                state.business_value["user_assumptions"] = default_values
+                state.completed_steps = [
+                    s for s in state.completed_steps if s != "business_value"
+                ]
+                self.phases[project_id] = "executing"
+                yield self._msg(
+                    project_id,
+                    "📊 Using default values — calculating business value...",
+                    {"type": "pm_response"},
+                )
+                async for msg in self.run_single_step(
+                    project_id, state, "business_value"
+                ):
+                    yield msg
+                return
+
             if intent == Intent.PROCEED:
                 state.awaiting_approval = False
                 self.phases[project_id] = "executing"
@@ -565,6 +624,27 @@ class Orchestrator:
                     raise stream_error_holder[0]
                 state = stream_state_holder[0]
                 self.states[project_id] = state
+
+                # BV Phase 1: needs_input → emit assumptions form and pause
+                if step == "business_value" and state.business_value.get("phase") == "needs_input":
+                    assumptions = state.business_value["assumptions_needed"]
+                    formatted = pm.format_agent_output(step, state)
+                    yield ChatMessage(
+                        id=msg_id,
+                        project_id=project_id,
+                        role="agent",
+                        agent_id=step,
+                        content=formatted,
+                        metadata={
+                            "type": "assumptions_input",
+                            "assumptions": assumptions,
+                        },
+                    )
+                    state.awaiting_approval = True
+                    state.current_step = "business_value"
+                    self.phases[project_id] = "approval"
+                    return
+
                 state.mark_step_completed(step)
 
                 # Emit plan_update: completed
@@ -665,6 +745,26 @@ class Orchestrator:
                 raise error_holder[0]
             state = result_holder[0]
             self.states[project_id] = state  # update reference
+
+            # BV Phase 1: needs_input → emit assumptions form and pause
+            if step == "business_value" and state.business_value.get("phase") == "needs_input":
+                assumptions = state.business_value["assumptions_needed"]
+                formatted = pm.format_agent_output(step, state)
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=step,
+                    content=formatted,
+                    metadata={
+                        "type": "assumptions_input",
+                        "assumptions": assumptions,
+                    },
+                )
+                state.awaiting_approval = True
+                state.current_step = "business_value"
+                self.phases[project_id] = "approval"
+                return
+
             state.mark_step_completed(step)
 
             # Emit plan_update: completed

@@ -329,12 +329,16 @@ RULES:
 
         elif step == "business_value":
             bv = state.business_value
-            drivers = bv.get("drivers", [])
-            impact = bv.get("annual_impact_range")
-            summary = f"Identified {len(drivers)} benchmark-backed value drivers."
-            if impact:
-                summary += f" Estimated annual impact: **${impact['low']:,.0f}–${impact['high']:,.0f}**."
-            insight = ""
+            if bv.get("phase") == "needs_input":
+                summary = "I need a few assumptions before calculating business value."
+                insight = "Fill in the values above and click **Calculate**, or say **proceed** to use defaults."
+            else:
+                drivers = bv.get("drivers", [])
+                impact = bv.get("annual_impact_range")
+                summary = f"Identified {len(drivers)} benchmark-backed value drivers."
+                if impact:
+                    summary += f" Estimated annual impact: **${impact['low']:,.0f}–${impact['high']:,.0f}**."
+                insight = ""
 
         elif step == "roi":
             roi_pct = state.roi.get("roi_percent")
@@ -522,6 +526,23 @@ RULES:
 
         if step == "business_value":
             bv = state.business_value
+
+            # Phase 1: needs_input — format assumption questions
+            if bv.get("phase") == "needs_input":
+                assumptions = bv.get("assumptions_needed", [])
+                parts = ["## 📊 Business Value — Input Needed\n"]
+                parts.append("Please provide these assumptions to calculate value drivers:\n")
+                for a in assumptions:
+                    unit = a.get("unit", "")
+                    unit_prefix = "$" if unit == "$" else ""
+                    unit_suffix = f" {unit}" if unit not in ("$", "") else ""
+                    parts.append(f"- **{a['label']}**: {unit_prefix}{a['default']}{unit_suffix} *(default)*")
+                    if a.get("hint"):
+                        parts.append(f"  *{a['hint']}*")
+                parts.append("\n*Adjust the values and click Calculate, or say **proceed** to use defaults.*")
+                return "\n".join(parts)
+
+            # Phase 2: completed BV with drivers
             drivers = bv.get("drivers", [])
             impact = bv.get("annual_impact_range")
             assumptions = bv.get("assumptions", [])

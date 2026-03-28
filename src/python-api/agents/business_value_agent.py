@@ -1,7 +1,7 @@
-"""Business Value Agent — benchmark-backed value drivers.
+"""Business Value Agent — two-phase benchmark-backed value drivers.
 
-Returns exactly 3 value drivers, each with a source link,
-an aggregated annual impact range, and explicit assumptions.
+Phase 1: Generate assumption questions with defaults for user input.
+Phase 2: Calculate value drivers using user-provided assumptions.
 """
 import asyncio
 import json
@@ -17,12 +17,79 @@ class BusinessValueAgent:
     name = "Business Value"
     emoji = "📊"
 
+    def generate_assumptions(self, state: AgentState) -> list[dict]:
+        """Generate assumption questions based on the use case. Returns list of assumption dicts."""
+        industry = state.brainstorming.get("industry", "Cross-Industry")
+        description = state.user_input
+
+        try:
+            response = llm.invoke([
+                {"role": "system", "content": """Generate 3-5 business assumption questions for calculating Azure solution value.
+Return ONLY a JSON array. Each item:
+{
+    "id": "unique_key",
+    "label": "Human-readable question",
+    "unit": "$" or "hours" or "count" or "%",
+    "default": numeric_default_value,
+    "hint": "Brief explanation of why this matters"
+}
+
+Be specific to the industry and use case. Include things like:
+- Number of employees/users affected
+- Current cost/spend related to the problem
+- Time spent on manual processes
+- Revenue or transaction volumes
+Keep it to 3-5 questions max. Be concise."""},
+                {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"}
+            ])
+
+            text = response.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+            assumptions = json.loads(text)
+            if isinstance(assumptions, list) and len(assumptions) > 0:
+                return assumptions[:5]
+        except Exception:
+            pass
+
+        # Fallback generic assumptions
+        return [
+            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 100, "hint": "How many people will use or benefit from this solution"},
+            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 50000, "hint": "Approximate monthly infrastructure/operations cost"},
+            {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 40, "hint": "Time that could be automated or reduced"},
+            {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 500000, "hint": "Revenue from the business area this solution touches"},
+        ]
+
     def run(self, state: AgentState) -> AgentState:
-        """Produce 3 benchmark-backed value drivers with sources."""
+        """Two-phase value driver generation.
+
+        Phase 1: Return assumption questions for user input.
+        Phase 2: Calculate value drivers using user-provided assumptions.
+        """
+        # Check if we have user-provided assumptions
+        user_assumptions = state.business_value.get("user_assumptions")
+
+        if not user_assumptions:
+            # Phase 1: Generate assumption questions
+            assumptions = self.generate_assumptions(state)
+            state.business_value = {
+                "phase": "needs_input",
+                "assumptions_needed": assumptions,
+            }
+            return state
+
+        # Phase 2: Calculate with real numbers
         industry = state.brainstorming.get("industry", "Cross-Industry")
         customer = state.customer_name or "the customer"
         description = state.user_input
         clarifications = state.clarifications
+
+        # Build assumption context from user-provided values
+        assumption_context = "\n".join([
+            f"- {a['label']}: {a['value']} {a.get('unit', '')}"
+            for a in user_assumptions
+        ])
 
         # Search for real industry benchmarks
         use_case = description[:120]
@@ -63,6 +130,9 @@ USE CASE: {description}
 {f"CLARIFICATIONS: {clarifications}" if clarifications else ""}
 {extra_context}
 
+USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
+{assumption_context}
+
 {search_context}
 
 RULES — follow precisely:
@@ -72,6 +142,7 @@ RULES — follow precisely:
    Include the source name AND a URL. If you don't have a real URL, use the best matching web search result above.
 4. Do NOT write long prose. Each description is 1 sentence max.
 5. Provide an aggregated annual_impact_range (low–high dollars) across all 3 drivers.
+   USE THE USER-PROVIDED ASSUMPTIONS ABOVE to compute real dollar values.
 6. List every assumption behind that number explicitly (headcount, hourly rate, hours saved, etc.).
 7. If you cannot compute a dollar range without knowing something, still give the percentage drivers
    but set annual_impact_range to null and list what's missing in assumptions.
@@ -125,6 +196,7 @@ Return ONLY valid JSON (no markdown fences):
                     {"title": r.get("title", ""), "url": r.get("url", "")}
                     for r in search_results[:5]
                 ],
+                "user_assumptions": user_assumptions,
             }
 
         except Exception:
@@ -138,6 +210,7 @@ Return ONLY valid JSON (no markdown fences):
                 "assumptions": ["Insufficient data to compute dollar range — provide headcount and current spend to refine."],
                 "confidence": "conservative",
                 "sources": [],
+                "user_assumptions": user_assumptions,
             }
 
         return state
@@ -147,13 +220,20 @@ Return ONLY valid JSON (no markdown fences):
     ) -> AgentState:
         """Async streaming — runs full agent, then streams an executive summary.
 
-        Approach B per spec: value drivers are computed synchronously, then a
+        Phase 1 (needs_input): returns immediately without streaming.
+        Phase 2: value drivers are computed synchronously, then a
         2-sentence plain-text summary is streamed token-by-token via on_token(str).
         """
         loop = asyncio.get_event_loop()
         state = await loop.run_in_executor(None, self.run, state)
 
         bv = state.business_value
+
+        # Phase 1: no streaming needed — orchestrator handles the input prompt
+        if bv.get("phase") == "needs_input":
+            return state
+
+        # Phase 2: stream executive summary
         drivers = bv.get("drivers", [])
         impact_range = bv.get("annual_impact_range")
 
