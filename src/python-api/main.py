@@ -101,7 +101,9 @@ async def send_message(
             async for msg in orchestrator.handle_message(
                 project_id, req.message, project.active_agents, project.description
             ):
-                store.add_message(project_id, msg)
+                # Don't persist individual streaming tokens — only final messages
+                if msg.metadata is None or msg.metadata.get("type") != "agent_token":
+                    store.add_message(project_id, msg)
                 yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
             yield {"event": "done", "data": "[DONE]"}
         return EventSourceResponse(stream())

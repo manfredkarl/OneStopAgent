@@ -12,6 +12,7 @@ FRD-01 §2 (modes), §3 (PM class), §4 (execution plan), §6 (iteration), §8 (
 """
 import asyncio
 import json
+import uuid
 from typing import AsyncGenerator
 
 from agents.state import AgentState
@@ -143,10 +144,40 @@ class Orchestrator:
             state.user_input = message
             state.mode = "brainstorm"
 
-            # Brainstorm + classify Azure fit in one call
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, pm.brainstorm_greeting, message,
-            )
+            # Stream PM brainstorm response token-by-token
+            msg_id = str(uuid.uuid4())
+            token_queue: asyncio.Queue = asyncio.Queue()
+            result_holder: list = [None]
+
+            async def _run_brainstorm():
+                def on_token(token: str):
+                    token_queue.put_nowait(token)
+                result_holder[0] = await pm.brainstorm_greeting_streaming(
+                    message, on_token
+                )
+                token_queue.put_nowait(None)  # sentinel
+
+            task = asyncio.create_task(_run_brainstorm())
+
+            while True:
+                token = await token_queue.get()
+                if token is None:
+                    break
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=token,
+                    metadata={
+                        "type": "agent_token",
+                        "agent": "pm",
+                        "msg_id": msg_id,
+                        "token": token,
+                    },
+                )
+
+            await task
+            result = result_holder[0]
 
             # Populate state from structured response
             state.brainstorming = {
@@ -173,14 +204,19 @@ class Orchestrator:
                 self.phases[project_id] = "plan_shown"  # stay conversational
                 plan = pm.build_plan(active_agents)
                 state.plan_steps = plan
-                yield self._msg(
-                    project_id,
-                    f"{greeting}\n\n"
-                    f"> ⚠️ **Azure fit: {state.azure_fit}** — "
-                    f"{state.azure_fit_explanation}\n\n"
-                    "Could you provide more details so I can better assess "
-                    "the Azure opportunity? Or say **proceed** to continue anyway.",
-                    {"type": "pm_response"},
+                yield ChatMessage(
+                    id=msg_id,
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=(
+                        f"{greeting}\n\n"
+                        f"> ⚠️ **Azure fit: {state.azure_fit}** — "
+                        f"{state.azure_fit_explanation}\n\n"
+                        "Could you provide more details so I can better assess "
+                        "the Azure opportunity? Or say **proceed** to continue anyway."
+                    ),
+                    metadata={"type": "pm_response"},
                 )
             else:
                 plan = pm.build_plan(active_agents)
@@ -188,10 +224,13 @@ class Orchestrator:
                 plan_text = pm.format_plan(state)
 
                 self.phases[project_id] = "plan_shown"
-                yield self._msg(
-                    project_id,
-                    f"{greeting}\n\n{plan_text}",
-                    {"type": "pm_response"},
+                yield ChatMessage(
+                    id=msg_id,
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content=f"{greeting}\n\n{plan_text}",
+                    metadata={"type": "pm_response"},
                 )
 
         # ── Phase: plan_shown ───────────────────────────────────────
@@ -480,6 +519,118 @@ class Orchestrator:
         done_event = asyncio.Event()
         result_holder = [None]
         error_holder = [None]
+
+        if hasattr(agent, 'run_streaming'):
+            # ── Async streaming path ─────────────────────────────────
+            msg_id = str(uuid.uuid4())
+            token_queue: asyncio.Queue = asyncio.Queue()
+            stream_state_holder: list = [None]
+            stream_error_holder: list = [None]
+
+            async def _run_streaming():
+                try:
+                    def on_token(token: str):
+                        token_queue.put_nowait(token)
+                    stream_state_holder[0] = await agent.run_streaming(
+                        state, on_token
+                    )
+                except Exception as e:
+                    stream_error_holder[0] = e
+                finally:
+                    token_queue.put_nowait(None)  # sentinel
+
+            task = asyncio.create_task(_run_streaming())
+
+            while True:
+                token = await token_queue.get()
+                if token is None:
+                    break
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=step,
+                    content=token,
+                    metadata={
+                        "type": "agent_token",
+                        "agent": step,
+                        "msg_id": msg_id,
+                        "token": token,
+                    },
+                )
+
+            await task
+
+            try:
+                if stream_error_holder[0]:
+                    raise stream_error_holder[0]
+                state = stream_state_holder[0]
+                self.states[project_id] = state
+                state.mark_step_completed(step)
+
+                # Emit plan_update: completed
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content="",
+                    metadata={
+                        "type": "plan_update",
+                        "step": step,
+                        "status": "completed",
+                    },
+                )
+
+                # Emit full agent result, reusing msg_id so the frontend
+                # replaces the streaming message with the formatted output
+                formatted = pm.format_agent_output(step, state)
+                yield ChatMessage(
+                    id=msg_id,
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=step,
+                    content=formatted,
+                    metadata={"type": "agent_result", "agent": step},
+                )
+
+                # Approval gate check (FRD-01 §2.3)
+                if self.should_pause(state, step):
+                    summary = pm.approval_summary(step, state)
+                    state.awaiting_approval = True
+                    state.current_step = step
+                    self.phases[project_id] = "approval"
+                    yield self._msg(
+                        project_id,
+                        summary,
+                        {"type": "approval", "step": step},
+                    )
+                else:
+                    async for msg in self.continue_execution(project_id, state):
+                        yield msg
+
+            except Exception as e:
+                state.mark_step_failed(step)
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id="pm",
+                    content="",
+                    metadata={
+                        "type": "plan_update",
+                        "step": step,
+                        "status": "failed",
+                    },
+                )
+                yield self._msg(
+                    project_id,
+                    f"⚠️ {info['name']} failed: {str(e)}",
+                    {"type": "agent_error", "agent": step},
+                )
+                async for msg in self.continue_execution(project_id, state):
+                    yield msg
+
+            return
+
+        # ── Non-streaming path (thread pool + heartbeat) ─────────────
 
         def _run():
             try:

@@ -87,6 +87,21 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
             );
           }
 
+          if (msg.metadata?.type === 'agent_token') {
+            return (
+              <div key={msg.id} className="flex gap-3 items-start">
+                <span className="text-xl shrink-0 mt-0.5">{EMOJIS[agentId] || '\uD83D\uDD27'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-muted)] mb-1.5">{getAgentName(agentId)}</p>
+                  <div className="prose-content" aria-live="polite" aria-label="Streaming response">
+                    <MessageContent content={msg.content} />
+                    <span className="inline-block w-2 h-4 bg-[var(--accent)] animate-pulse ml-0.5 align-text-bottom rounded-sm" aria-hidden="true" />
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
           if (msg.metadata?.type === 'progress') {
             return (
               <div key={msg.id} className="text-center text-xs text-[var(--text-muted)] py-1 animate-pulse">
