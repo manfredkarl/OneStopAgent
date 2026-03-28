@@ -94,13 +94,39 @@ def create_pptx_python(slide_data: dict, customer_name: str = "Customer") -> str
     filename = f"OneStopAgent-{safe_name}-{uuid.uuid4().hex[:8]}.pptx"
     output_path = os.path.abspath(os.path.join(OUTPUT_DIR, filename))
 
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    SLIDE_W = Inches(13.333)
-    SLIDE_H = Inches(7.5)
+    # Use branded template if available, otherwise blank
+    TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "..", "templates", "slide_master.pptx")
+    if os.path.exists(TEMPLATE_PATH):
+        prs = Presentation(TEMPLATE_PATH)
+        # Remove existing example slides from the template
+        while len(prs.slides) > 0:
+            rId = prs.slides._sldIdLst[0].get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+            if rId:
+                prs.part.drop_rel(rId)
+            prs.slides._sldIdLst.remove(prs.slides._sldIdLst[0])
+        logger.info(f"Using branded template: {TEMPLATE_PATH}")
+    else:
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        logger.info("No template found — using blank presentation")
+    SLIDE_W = prs.slide_width
+    SLIDE_H = prs.slide_height
 
-    blank_layout = prs.slide_layouts[6]  # blank
+    # Use template layouts if available, fallback to index-based
+    def _get_layout(name_hint: str, fallback_idx: int = 0):
+        """Find layout by name, fallback to index."""
+        for layout in prs.slide_layouts:
+            if name_hint.lower() in layout.name.lower():
+                return layout
+        if fallback_idx < len(prs.slide_layouts):
+            return prs.slide_layouts[fallback_idx]
+        return prs.slide_layouts[0]
+
+    title_layout = _get_layout("Title", 0)
+    content_layout = _get_layout("Title and Content", 6)
+    divider_layout = _get_layout("Divider", 3)
+    blank_layout = _get_layout("Blank", 27)
 
     def _rgb(hex_str: str) -> RGBColor:
         return RGBColor.from_string(hex_str)
