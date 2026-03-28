@@ -156,11 +156,7 @@ class ROIAgent:
         
         # Only use generic benchmarks as last resort
         if not benchmarks:
-            benchmarks = [
-                {"source": "Forrester TEI", "metric": "327% ROI", "detail": "Microsoft AI solutions deliver 327% ROI over 3 years with <6 months payback."},
-                {"source": "McKinsey", "metric": "60-70%", "detail": "60-70% of worker activities automatable by AI; avg 35% operational cost reduction."},
-                {"source": "Gartner", "metric": "15-23%", "detail": "GenAI early adopters report 15% cost savings and 23% productivity improvement."},
-            ]
+            benchmarks = []  # No real data — show nothing rather than made-up numbers
         
         # ── Build methodology from actual data sources ───────────────
         cost_source = cost_estimate.get("pricingSource", "estimated")

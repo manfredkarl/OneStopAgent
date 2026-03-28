@@ -108,7 +108,7 @@ Keep it to 3-5 questions max. Be concise."""},
                 if r.get("url"):
                     search_context += f"  URL: {r['url']}\n"
         else:
-            search_context = "No web search results available — use well-known published benchmarks.\n"
+            search_context = "No web search results available — DO NOT make up benchmark sources. Only cite sources if you are CERTAIN they are real published reports with verifiable URLs. Otherwise leave source_url empty and use 'Industry estimate' as source_name.\n"
 
         # Extra context from prior agents (iteration re-runs)
         extra = []
@@ -199,18 +199,16 @@ Return ONLY valid JSON (no markdown fences):
                 "user_assumptions": user_assumptions,
             }
 
-        except Exception:
+        except Exception as e:
+            logger.warning("BV LLM call failed: %s", e)
             state.business_value = {
-                "drivers": [
-                    {"name": "Operational efficiency", "metric": "15–25% improvement", "description": "Azure managed services reduce operational overhead.", "source_name": "Microsoft case studies", "source_url": ""},
-                    {"name": "Time to market", "metric": "30–50% faster delivery", "description": "PaaS and serverless accelerate development cycles.", "source_name": "Forrester TEI studies", "source_url": ""},
-                    {"name": "Infrastructure cost avoidance", "metric": "20–35% savings", "description": "Right-sized cloud resources vs. on-premises over-provisioning.", "source_name": "IDC Cloud Economics", "source_url": ""},
-                ],
+                "drivers": [],
                 "annual_impact_range": None,
-                "assumptions": ["Insufficient data to compute dollar range — provide headcount and current spend to refine."],
-                "confidence": "conservative",
+                "assumptions": ["Value calculation failed — please try again or provide more details about the use case."],
+                "confidence": "low",
                 "sources": [],
                 "user_assumptions": user_assumptions,
+                "error": "Could not generate value drivers. Please retry or refine the use case description.",
             }
 
         return state

@@ -124,16 +124,20 @@ class PresentationAgent:
     emoji = "📑"
 
     def run(self, state: AgentState) -> AgentState:
-        """Generate a professional PptxGenJS script via LLM, then execute it.
+        """Generate a professional PptxGenJS script via LLM, review it, then execute.
 
+        Two-pass approach:
+        1. Generate the full PptxGenJS script
+        2. LLM reviews for visual quality & common errors, returns corrected script
         Falls back to python-pptx if the LLM or Node.js execution fails.
         """
         slide_data = self._build_slide_data(state)
         customer = state.customer_name or "Customer"
 
         try:
-            from agents.llm import llm  # lazy import — allows import without token
+            from agents.llm import llm
             script = self._generate_pptxgenjs_script(slide_data, state, llm)
+            script = self._review_script(script, llm)
             path = execute_pptxgenjs(script, customer)
         except Exception as exc:
             logger.warning("PptxGenJS path failed (%s), falling back to python-pptx", exc)
@@ -249,4 +253,55 @@ class PresentationAgent:
         if script.startswith("```"):
             script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
+        return script
+
+    def _review_script(self, script: str, llm) -> str:
+        """LLM reviews the generated PptxGenJS script for quality and common errors.
+
+        Catches issues like:
+        - '#' prefixed hex colors (causes file corruption)
+        - Overlapping elements (same x/y on multiple items)
+        - Text overflow (too much text in small boxes)
+        - Missing visual variety (all slides look the same)
+        - Reused option objects (PptxGenJS mutates in-place)
+        - Unicode bullets instead of bullet:true
+        """
+        response = llm.invoke([
+            {
+                "role": "system",
+                "content": (
+                    "You are a PptxGenJS code reviewer. Review the script below and return "
+                    "the CORRECTED, COMPLETE script. Fix any issues you find.\n\n"
+                    "CHECK FOR AND FIX:\n"
+                    "1. Hex colors must NEVER have '#' prefix — strip it (e.g. '363636' not '#363636')\n"
+                    "2. Never encode opacity in hex (e.g. '00000020' is wrong)\n"
+                    "3. Use bullet:true, NEVER unicode '•' characters\n"
+                    "4. Use breakLine:true between text array items\n"
+                    "5. Never reuse option objects — clone them for each element\n"
+                    "6. Avoid lineSpacing with bullets — use paraSpaceAfter instead\n"
+                    "7. Elements must not overlap — check x/y/w/h coordinates\n"
+                    "8. Text boxes should be large enough for their content\n"
+                    "9. Tables must have enough height for all rows\n"
+                    "10. Slide backgrounds must contrast with text colors (dark bg = light text)\n"
+                    "11. Vary slide layouts — no two consecutive slides should look identical\n"
+                    "12. Every chart needs proper colors and labels\n"
+                    "13. Never use accent lines under titles\n\n"
+                    "Return ONLY the corrected JavaScript code. No markdown fences, no explanation.\n"
+                    "If the script is already good, return it unchanged."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Review and fix this PptxGenJS script:\n\n{script}",
+            },
+        ])
+
+        reviewed = response.content.strip()
+        if reviewed.startswith("```"):
+            reviewed = reviewed.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        # Sanity check — reviewed script should still be valid JS
+        if "pptxgenjs" in reviewed and "writeFile" in reviewed:
+            return reviewed
+        logger.warning("Review produced invalid script — using original")
         return script
