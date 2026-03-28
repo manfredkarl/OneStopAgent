@@ -1,9 +1,7 @@
-"""Business Value Agent — analyses business impact and value drivers.
+"""Business Value Agent — benchmark-backed value drivers.
 
-Runs BEFORE architecture to establish the business case first.
-Uses user input, brainstorming output, and retrieved patterns as context.
-If architecture/cost data is available (e.g., during iteration re-runs),
-it incorporates that too.
+Returns exactly 3 value drivers, each with a source link,
+an aggregated annual impact range, and explicit assumptions.
 """
 import json
 import logging
@@ -19,104 +17,86 @@ class BusinessValueAgent:
     emoji = "📊"
 
     def run(self, state: AgentState) -> AgentState:
-        """Analyze business impact and value drivers for the proposed Azure solution."""
+        """Produce 3 benchmark-backed value drivers with sources."""
         industry = state.brainstorming.get("industry", "Cross-Industry")
         customer = state.customer_name or "the customer"
         description = state.user_input
         clarifications = state.clarifications
 
-        # Search for real industry metrics
-        use_case = description[:100]
+        # Search for real industry benchmarks
+        use_case = description[:120]
         search_results: list[dict[str, str]] = []
         try:
             search_results = search_industry_benchmarks(industry, use_case)
         except Exception as e:
             logger.warning(f"Industry benchmark search failed: {e}")
 
-        # Build context from whatever is available
-        context_parts = []
-
-        # Retrieved patterns (from MCP / local KB) — may be populated by a prior architect run
-        patterns = state.retrieved_patterns
-        if patterns:
-            pattern_info = [f"- {p.get('title', '')}: {p.get('summary', '')}" for p in patterns[:3]]
-            context_parts.append(f"REFERENCE ARCHITECTURES:\n" + "\n".join(pattern_info))
-
-        # Brainstorming scenarios
-        scenarios = state.brainstorming.get("scenarios", [])
-        if scenarios:
-            scenario_info = [f"- {s.get('title', '')}: {s.get('description', '')}" for s in scenarios[:3]]
-            context_parts.append(f"BRAINSTORMED SCENARIOS:\n" + "\n".join(scenario_info))
-
-        # Architecture (available during iteration re-runs)
-        arch_narrative = state.architecture.get("narrative", "")
-        components = state.architecture.get("components", [])
-        if arch_narrative:
-            component_names = [f"{c.get('name')} ({c.get('azureService', '')})" for c in components]
-            context_parts.append(f"ARCHITECTURE: {arch_narrative}")
-            context_parts.append(f"COMPONENTS: {', '.join(component_names[:10])}")
-
-        # Services + cost (available during iteration re-runs)
-        services = state.services.get("selections", [])
-        if services:
-            service_list = [f"{s.get('serviceName')} ({s.get('sku')})" for s in services]
-            context_parts.append(f"AZURE SERVICES: {', '.join(service_list[:10])}")
-
-        monthly_cost = state.costs.get("estimate", {}).get("totalMonthly", 0)
-        if monthly_cost > 0:
-            context_parts.append(f"MONTHLY COST: ${monthly_cost:,.2f}")
-
-        extra_context = "\n".join(context_parts)
-
-        # Build search context for the LLM prompt
+        # Build search context
         search_context = ""
         if search_results:
-            search_context = "\n\nREAL INDUSTRY DATA (from web search — use these to ground your estimates):\n"
+            search_context = "INDUSTRY BENCHMARKS (from web search — cite these):\n"
             for r in search_results[:5]:
                 search_context += f"- {r.get('title', '')}: {r.get('snippet', '')}\n"
-                if r.get('url'):
-                    search_context += f"  Source: {r['url']}\n"
-            search_context += "\nBase your value driver estimates on this real data where possible.\n"
+                if r.get("url"):
+                    search_context += f"  URL: {r['url']}\n"
         else:
-            search_context = "\n\n⚠️ No web search results available — use your best knowledge for estimates.\n"
+            search_context = "No web search results available — use well-known published benchmarks.\n"
 
-        prompt = f"""Analyze the business value of this Azure solution.
+        # Extra context from prior agents (iteration re-runs)
+        extra = []
+        scenarios = state.brainstorming.get("scenarios", [])
+        if scenarios:
+            extra.append("SCENARIOS: " + "; ".join(s.get("title", "") for s in scenarios[:3]))
+        if state.architecture.get("narrative"):
+            extra.append(f"ARCHITECTURE: {state.architecture['narrative'][:200]}")
+        monthly_cost = state.costs.get("estimate", {}).get("totalMonthly", 0)
+        if monthly_cost > 0:
+            extra.append(f"MONTHLY AZURE COST: ${monthly_cost:,.0f}")
+        extra_context = "\n".join(extra)
+
+        prompt = f"""You are a value engineer. Produce EXACTLY 3 benchmark-backed value drivers for this Azure solution.
 
 CUSTOMER: {customer}
 INDUSTRY: {industry}
 USE CASE: {description}
-{f"ADDITIONAL CONTEXT: {clarifications}" if clarifications else ""}
+{f"CLARIFICATIONS: {clarifications}" if clarifications else ""}
 {extra_context}
+
 {search_context}
 
-Generate 3-5 value drivers. RULES:
-- Each driver MUST be specific to the {industry} industry and this use case
-- Each driver MUST reference specific Azure capabilities or services
-- Do NOT use generic drivers like "cloud saves money" — be specific to THIS solution
-- For each driver, decide if the value can be expressed as an annual dollar amount
-- If monetizable: set annual_value_estimate to your best conservative annual dollar estimate (a number, not a string)
-- If NOT monetizable (qualitative only): set annual_value_estimate to null
-- Do NOT invent revenue or salary figures you don't know — if you can't estimate a dollar value without knowing the customer's revenue, headcount, or other specifics, set annual_value_estimate to null and list what info you'd need in "info_needed"
-- The executive summary MUST mention {customer} by name and reference the top 2-3 value drivers
+RULES — follow precisely:
+1. Return EXACTLY 3 value drivers. No more, no fewer.
+2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
+3. Each driver must cite a real, published source — a research firm, analyst report, or case study.
+   Include the source name AND a URL. If you don't have a real URL, use the best matching web search result above.
+4. Do NOT write long prose. Each description is 1 sentence max.
+5. Provide an aggregated annual_impact_range (low–high dollars) across all 3 drivers.
+6. List every assumption behind that number explicitly (headcount, hourly rate, hours saved, etc.).
+7. If you cannot compute a dollar range without knowing something, still give the percentage drivers
+   but set annual_impact_range to null and list what's missing in assumptions.
 
 Return ONLY valid JSON (no markdown fences):
 {{
-    "drivers": [
-        {{
-            "name": "Driver name",
-            "description": "1-2 sentences explaining HOW Azure delivers this value",
-            "estimate": "Human-readable estimate (e.g., '15-25% reduction in deployment time')",
-            "annual_value_estimate": 50000 or null,
-            "info_needed": null or "What info would be needed to monetize this (e.g., 'current annual infrastructure spend')?"
-        }}
-    ],
-    "executiveSummary": "100-200 word summary mentioning {customer} and {industry}",
-    "confidenceLevel": "conservative" | "moderate" | "optimistic"
+  "drivers": [
+    {{
+      "name": "Short driver name",
+      "metric": "10–20% time savings" or similar specific range,
+      "description": "One sentence explaining the mechanism",
+      "source_name": "Gartner 2024" or "McKinsey Digital" or similar,
+      "source_url": "https://..."
+    }}
+  ],
+  "annual_impact_range": {{ "low": 500000, "high": 1200000 }} or null,
+  "assumptions": [
+    "500 engineers at $75/hr average fully loaded cost",
+    "15% reduction in search time = 120 hrs/engineer/year"
+  ],
+  "confidence": "conservative" | "moderate" | "optimistic"
 }}"""
 
         try:
             response = llm.invoke([
-                {"role": "system", "content": "You are an Azure business value analyst. Return ONLY valid JSON. Be specific to the customer's industry and use case — no generic cloud benefits."},
+                {"role": "system", "content": "You are an Azure value engineer. Return ONLY valid JSON. Be specific, cite real sources, no fluff."},
                 {"role": "user", "content": prompt},
             ])
 
@@ -126,31 +106,37 @@ Return ONLY valid JSON (no markdown fences):
 
             result = json.loads(text)
 
-            # Validate and set defaults
-            for driver in result.get("drivers", []):
-                driver.setdefault("description", "")
-                driver.setdefault("estimate", "")
-                driver.setdefault("annual_value_estimate", None)
-                driver.setdefault("info_needed", None)
+            # Validate exactly 3 drivers
+            drivers = result.get("drivers", [])[:3]
+            for d in drivers:
+                d.setdefault("name", "")
+                d.setdefault("metric", "")
+                d.setdefault("description", "")
+                d.setdefault("source_name", "")
+                d.setdefault("source_url", "")
 
-            state.business_value = result
-
-            # Attach web search sources so they can be rendered downstream
-            state.business_value["sources"] = [
-                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("snippet", "")[:100]}
-                for r in search_results[:5]
-            ]
+            state.business_value = {
+                "drivers": drivers,
+                "annual_impact_range": result.get("annual_impact_range"),
+                "assumptions": result.get("assumptions", []),
+                "confidence": result.get("confidence", "moderate"),
+                "sources": [
+                    {"title": r.get("title", ""), "url": r.get("url", "")}
+                    for r in search_results[:5]
+                ],
+            }
 
         except Exception:
-            # Fallback — generic but structured per §2.4 schema
             state.business_value = {
                 "drivers": [
-                    {"name": "Cloud Cost Optimization", "description": "Azure PaaS services reduce infrastructure management overhead.", "estimate": "Estimated 20-30% reduction in infrastructure costs", "annual_value_estimate": None, "info_needed": "Current annual infrastructure spend"},
-                    {"name": "Scalability", "description": "Auto-scaling handles peak loads without over-provisioning.", "estimate": "Elastic scaling on demand", "annual_value_estimate": None, "info_needed": None},
-                    {"name": "Time to Market", "description": "Managed services accelerate development velocity.", "estimate": "Estimated 40% reduction in deployment time", "annual_value_estimate": None, "info_needed": "Current average deployment cycle time and developer team size"},
+                    {"name": "Operational efficiency", "metric": "15–25% improvement", "description": "Azure managed services reduce operational overhead.", "source_name": "Microsoft case studies", "source_url": ""},
+                    {"name": "Time to market", "metric": "30–50% faster delivery", "description": "PaaS and serverless accelerate development cycles.", "source_name": "Forrester TEI studies", "source_url": ""},
+                    {"name": "Infrastructure cost avoidance", "metric": "20–35% savings", "description": "Right-sized cloud resources vs. on-premises over-provisioning.", "source_name": "IDC Cloud Economics", "source_url": ""},
                 ],
-                "executiveSummary": f"The proposed Azure solution for {customer} offers significant operational and business value through cloud-native services.",
-                "confidenceLevel": "conservative",
+                "annual_impact_range": None,
+                "assumptions": ["Insufficient data to compute dollar range — provide headcount and current spend to refine."],
+                "confidence": "conservative",
+                "sources": [],
             }
 
         return state

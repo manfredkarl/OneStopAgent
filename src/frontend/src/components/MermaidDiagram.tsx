@@ -22,7 +22,7 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
           theme: 'default',
           securityLevel: 'loose',
           suppressErrorRendering: true,
-          logLevel: 'fatal' as unknown as number,
+          logLevel: 5,
         });
         await mermaid.parse(sanitized);
         const id = `m${Date.now()}${Math.random().toString(36).slice(2, 8)}`;

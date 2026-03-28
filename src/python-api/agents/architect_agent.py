@@ -1,8 +1,8 @@
-"""System Architect Agent — generates Azure architecture with Mermaid diagrams.
+"""System Architect Agent — use-case-specific layered Azure architecture.
 
-Retrieves Microsoft reference architectures (via MCP or local fallback) and uses
-them to ground architecture designs. Single LLM call produces Mermaid diagram,
-components, and narrative together so they stay consistent.
+Retrieves Microsoft reference architectures (via MCP or local fallback),
+then generates a layered architecture framed around the user's specific
+scenario — not a generic bag of Azure services.
 """
 
 import json
@@ -22,20 +22,24 @@ class ArchitectAgent:
     emoji = "🏗️"
 
     def run(self, state: AgentState) -> AgentState:
-        """Retrieve reference patterns, then generate architecture grounded in them."""
+        """Retrieve reference patterns, then generate layered architecture."""
         self._retrieve_patterns(state)
 
         try:
             pattern = self._select_pattern(state.retrieved_patterns)
             requirements = state.to_context_string()
-            state.architecture = self._generate_architecture(requirements, pattern)
+            industry = state.brainstorming.get("industry", "Cross-Industry")
+            scenarios = state.brainstorming.get("scenarios", [])
+            state.architecture = self._generate_architecture(
+                requirements, pattern, industry, scenarios,
+            )
         except Exception:
-            logger.exception("ArchitectAgent failed — using LLM-less fallback")
+            logger.exception("ArchitectAgent failed — using fallback")
             state.architecture = self._build_fallback(state)
 
         return state
 
-    # ── pattern retrieval (merged from KnowledgeAgent) ────────────────
+    # ── pattern retrieval ─────────────────────────────────────────────
 
     @staticmethod
     def _retrieve_patterns(state: AgentState) -> None:
@@ -71,56 +75,85 @@ class ArchitectAgent:
             return None
         return max(patterns, key=lambda p: p.get("confidence_score", 0.0))
 
-    # ── Single LLM call for mermaid + components + narrative ──────────
+    # ── Layered architecture generation ───────────────────────────────
 
     @staticmethod
-    def _generate_architecture(requirements: str, pattern: dict | None) -> dict:
-        """Generate mermaid, components, and narrative in one LLM call."""
+    def _generate_architecture(
+        requirements: str,
+        pattern: dict | None,
+        industry: str,
+        scenarios: list[dict],
+    ) -> dict:
+        """Generate a layered, use-case-framed architecture in one LLM call."""
         pattern_context = ""
+        pattern_title = ""
         if pattern:
+            pattern_title = pattern.get("title", "")
             pattern_context = (
-                f"\nREFERENCE ARCHITECTURE: {pattern.get('title', '')}\n"
+                f"\nREFERENCE ARCHITECTURE: {pattern_title}\n"
                 f"Summary: {pattern.get('summary', '')}\n"
                 f"Recommended services: {', '.join(pattern.get('recommended_services', []))}\n"
-                f"Components: {json.dumps(pattern.get('components', []))}\n\n"
-                "Base your design on this reference architecture. "
-                "Adapt it to the user's specific requirements.\n"
+                f"URL: {pattern.get('url', '')}\n\n"
+                "ADAPT this reference architecture to the user's specific scenario.\n"
+                "Mention by name which Microsoft pattern you adapted and why.\n"
             )
+
+        scenario_context = ""
+        if scenarios:
+            scenario_context = "BRAINSTORMED SCENARIOS:\n"
+            for s in scenarios[:3]:
+                scenario_context += f"- {s.get('title', '')}: {s.get('description', '')}\n"
 
         response = llm.invoke([
             {
                 "role": "system",
                 "content": (
-                    "You are an Azure solutions architect. Design a complete Azure architecture.\n"
+                    "You are an Azure solutions architect. You design architectures that are SPECIFIC to the customer's use case.\n\n"
+                    "KEY PRINCIPLE: Every architecture decision must be explained in the context of the use case.\n"
+                    "Do NOT produce a generic list of Azure services. Instead, organize around functional LAYERS\n"
+                    "that map to what the customer is actually trying to do.\n\n"
+                    f"INDUSTRY: {industry}\n"
                     f"{pattern_context}"
+                    f"{scenario_context}\n"
                     "Return ONLY valid JSON (no markdown fences) with this structure:\n"
                     "{\n"
-                    '  "mermaidCode": "flowchart TD\\n  A[Client] --> B[Web App]\\n  ...",\n'
-                    '  "components": [\n'
-                    '    {"name": "Component Name", "azureService": "Azure Service Name", "description": "What it does"}\n'
+                    '  "layers": [\n'
+                    "    {\n"
+                    '      "name": "Layer name (e.g. User & Engineering Experience)",\n'
+                    '      "purpose": "1 sentence: what this layer does FOR THIS USE CASE",\n'
+                    '      "components": [\n'
+                    '        {"name": "Component Name", "azureService": "Azure Service Name", "role": "What this component does for the use case (1 sentence)"}\n'
+                    "      ]\n"
+                    "    }\n"
                     "  ],\n"
-                    '  "narrative": "2-3 sentence architecture description for a business audience."\n'
+                    '  "mermaidCode": "flowchart TD\\n  subgraph Layer1[...]\\n  ...",\n'
+                    '  "narrative": "2-3 sentences framing this architecture for the specific use case.",\n'
+                    '  "adaptedFrom": "Name of Microsoft reference pattern adapted, or null",\n'
+                    '  "adaptedFromUrl": "URL to the reference pattern, or null",\n'
+                    '  "adaptationNotes": "1-2 sentences on what was adapted and why, or null"\n'
                     "}\n\n"
+                    "LAYER GUIDELINES:\n"
+                    "- 3-6 layers depending on the use case\n"
+                    "- Each layer should have 1-4 components (keep it lean — not every service needs to show early)\n"
+                    "- Layer names should describe USE CASE FUNCTION, not generic IT tiers\n"
+                    "  GOOD: 'AI & Agent Orchestration', 'Engineering Knowledge & PLM Grounding', 'Simulation & HPC'\n"
+                    "  BAD:  'Compute Layer', 'Storage Layer', 'Networking Layer'\n"
+                    "- Each component's 'role' explains WHY it's here for THIS scenario, not what Azure does generically\n\n"
                     "MERMAID RULES:\n"
-                    "- Use 'flowchart TD' syntax\n"
-                    "- Maximum 15 nodes\n"
-                    "- Each node label must be a specific Azure service name\n"
-                    "- Show data flow between components with arrows (-->)\n"
-                    "- Do NOT use HTML tags like <br> in node labels\n"
-                    "- Node labels should be concise: e.g. [Azure SQL Database]\n"
-                    "- Use unique single-letter or short IDs for nodes (A, B, C...)\n"
-                    "- Every component in the components array MUST appear as a node in the diagram\n\n"
-                    "COMPONENT RULES:\n"
-                    "- Use real Azure service names (Azure App Service, Azure Cosmos DB, etc.)\n"
-                    "- Include ALL services shown in the Mermaid diagram\n"
-                    "- 5-15 components depending on complexity\n\n"
+                    "- Use 'flowchart TD' with subgraph blocks for each layer\n"
+                    "- Maximum 15 nodes total\n"
+                    "- Subgraph labels = layer names\n"
+                    "- Node labels = short Azure service name (e.g. [Azure AI Search])\n"
+                    "- Show data flow between layers with arrows (-->)\n"
+                    "- Do NOT use HTML tags like <br> in labels\n"
+                    "- Use unique short IDs (A, B, C... or descriptive like PLM, HPC)\n\n"
                     "NARRATIVE RULES:\n"
-                    "- 2-3 sentences for a business audience\n"
-                    "- Reference the specific Azure services used\n"
-                    "- Mention the reference architecture if one was provided"
+                    "- Open with 'This architecture is designed for [specific use case]...'\n"
+                    "- Reference the adapted pattern if one was provided\n"
+                    "- Mention the key differentiating layers"
                 ),
             },
-            {"role": "user", "content": f"Design an Azure architecture for:\n{requirements}"},
+            {"role": "user", "content": f"Design a layered Azure architecture for:\n{requirements}"},
         ])
 
         text = response.content.strip()
@@ -129,37 +162,48 @@ class ArchitectAgent:
 
         result = json.loads(text)
 
-        # Validate and clean the mermaid code
+        # Validate mermaid
         mermaid = result.get("mermaidCode", "")
         mermaid = re.sub(r"^```(?:mermaid)?\s*\n?", "", mermaid)
         mermaid = re.sub(r"\n?```\s*$", "", mermaid)
         if not mermaid.strip().startswith(("flowchart", "graph")):
             mermaid = "flowchart TD\n" + mermaid
 
-        components = result.get("components", [])
-        if not isinstance(components, list) or not components:
-            raise ValueError("No components returned")
+        layers = result.get("layers", [])
+        if not isinstance(layers, list) or not layers:
+            raise ValueError("No layers returned")
+
+        # Flatten components for downstream consumers (cost agent, etc.)
+        all_components = []
+        for layer in layers:
+            for comp in layer.get("components", []):
+                comp["layer"] = layer.get("name", "")
+                comp.setdefault("description", comp.get("role", ""))
+                all_components.append(comp)
 
         narrative = result.get("narrative", "")
         if not narrative:
-            comp_names = ", ".join(c.get("azureService", c.get("name", "")) for c in components[:5])
-            narrative = f"Azure architecture using {comp_names}."
+            narrative = f"Layered Azure architecture with {len(layers)} functional layers."
+
+        adapted = result.get("adaptedFrom") or (pattern_title if pattern else None)
 
         return {
             "mermaidCode": mermaid,
-            "components": components,
+            "layers": layers,
+            "components": all_components,
             "narrative": narrative,
-            "basedOn": pattern["title"] if pattern else "custom design",
+            "basedOn": adapted or "custom design",
+            "basedOnUrl": result.get("adaptedFromUrl") or (pattern.get("url") if pattern else None),
+            "adaptationNotes": result.get("adaptationNotes"),
         }
 
-    # ── Fallback (LLM failure) ───────────────────────────────────────
+    # ── Fallback ──────────────────────────────────────────────────────
 
     @staticmethod
     def _build_fallback(state: AgentState) -> dict:
-        """Build a fallback architecture from brainstorming scenarios if available."""
+        """Build a fallback architecture from brainstorming scenarios."""
         scenarios = state.brainstorming.get("scenarios", [])
 
-        # Try to build something useful from the scenarios' azure_services
         services: list[str] = []
         for s in scenarios:
             services.extend(s.get("azure_services", []))
@@ -167,33 +211,33 @@ class ArchitectAgent:
         if not services:
             services = ["Azure App Service", "Azure SQL Database", "Azure Cache for Redis"]
 
-        # Deduplicate while preserving order
         seen: set[str] = set()
-        unique_services: list[str] = []
+        unique: list[str] = []
         for svc in services:
             if svc not in seen:
                 seen.add(svc)
-                unique_services.append(svc)
+                unique.append(svc)
 
-        # Build simple mermaid from services
         lines = ["flowchart TD", "  Client[Client Browser]"]
         components = []
         prev_id = "Client"
-        for i, svc in enumerate(unique_services[:12]):
-            node_id = chr(65 + i)  # A, B, C, ...
+        for i, svc in enumerate(unique[:10]):
+            node_id = chr(65 + i)
             lines.append(f"  {prev_id} --> {node_id}[{svc}]")
             components.append({
                 "name": svc.replace("Azure ", ""),
                 "azureService": svc,
                 "description": f"Managed {svc.replace('Azure ', '').lower()} service",
+                "role": f"Managed {svc.replace('Azure ', '').lower()} service",
             })
             prev_id = node_id
 
         return {
             "mermaidCode": "\n".join(lines),
+            "layers": [{"name": "Core Services", "purpose": "Primary Azure services", "components": components}],
             "components": components,
             "narrative": (
-                f"Architecture using {', '.join(unique_services[:4])} "
+                f"Architecture using {', '.join(unique[:4])} "
                 "to deliver a scalable Azure solution. "
                 "⚠️ Generated from fallback — review and refine."
             ),

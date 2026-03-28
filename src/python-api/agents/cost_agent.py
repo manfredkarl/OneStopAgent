@@ -204,6 +204,7 @@ RULES:
 - Scale the SKU appropriately for {users} concurrent users
 - Use real Azure SKU names (e.g., "B1", "S1", "P2v3" for App Service; "Standard S0" for Azure OpenAI)
 - Include 3-5 key capabilities for each service
+- For each service, write a short 'reason' explaining WHY this service fits THIS use case (1 sentence)
 - If a component already has an azureService specified, validate and refine the SKU choice
 - Always include Azure Monitor / Application Insights for observability
 - Consider the industry ({industry}) for compliance needs (e.g., Premium SKUs for healthcare/finance)
@@ -214,6 +215,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
         "componentName": "Name from the architecture",
         "serviceName": "Azure Service Name (exact official name)",
         "sku": "Specific SKU/tier",
+        "reason": "Why this service fits: e.g. 'Handles PLM document indexing with vector search for engineering queries'",
         "capabilities": ["capability1", "capability2", "capability3"],
         "skuNote": null or "Reason for this SKU choice if notable"
     }}
@@ -304,12 +306,20 @@ Return ONLY valid JSON (no markdown fences) as an array:
             monthly = self._calculate_monthly(price, unit, service_name, users)
             monthly = self._apply_instance_count(monthly, sku)
 
+            # Tag $0 items so downstream rendering explains the zero
+            cost_note = note
+            if monthly == 0:
+                cost_note = "Usage-dependent — placeholder estimate (actual cost varies with consumption)"
+                consumption = CONSUMPTION_ASSUMPTIONS.get(service_name)
+                if consumption:
+                    cost_note = f"Usage-dependent ({consumption}) — placeholder estimate"
+
             items.append({
                 "serviceName": service_name,
                 "sku": sku,
                 "region": region,
                 "monthlyCost": round(monthly, 2),
-                "pricingNote": note,
+                "pricingNote": cost_note,
             })
 
             if source_priority.get(source, 2) > source_priority.get(worst_source, 0):

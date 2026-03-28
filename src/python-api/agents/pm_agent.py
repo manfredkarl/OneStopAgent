@@ -228,18 +228,22 @@ RULES:
             insight = f"Annual projection: **${est.get('totalAnnual', 0):,.0f}**"
 
         elif step == "business_value":
-            drivers = state.business_value.get("drivers", [])
-            confidence = state.business_value.get("confidenceLevel", "moderate")
-            summary = f"Identified {len(drivers)} value drivers ({confidence} confidence)."
-            if drivers:
-                insight = f"Top driver: **{drivers[0].get('name', '')}**"
+            bv = state.business_value
+            drivers = bv.get("drivers", [])
+            impact = bv.get("annual_impact_range")
+            summary = f"Identified {len(drivers)} benchmark-backed value drivers."
+            if impact:
+                summary += f" Estimated annual impact: **${impact['low']:,.0f}–${impact['high']:,.0f}**."
+            insight = ""
 
         elif step == "roi":
             roi_pct = state.roi.get("roi_percent")
             payback = state.roi.get("payback_months")
+            roi_range = state.roi.get("roi_range")
             needs_info = state.roi.get("needs_info")
             if roi_pct is not None:
-                summary = f"ROI calculated: **{roi_pct:.0f}%** with {payback:.1f} month payback."
+                range_text = roi_range or f"{roi_pct:.0f}%"
+                summary = f"ROI calculated: **{range_text}** with {payback:.1f} month payback."
                 if needs_info:
                     summary += "\n\nSome drivers couldn't be monetized yet. To refine the ROI, I'd need:"
                     for q in needs_info:
@@ -306,100 +310,145 @@ RULES:
         """Format an agent's output as markdown for the chat."""
         if step == "architect":
             arch = state.architecture
-            parts = [f"## \U0001f3d7\ufe0f Architecture Design\n\n{arch.get('narrative', '')}\n"]
+            parts = [f"## \U0001f3d7\ufe0f Architecture\n\n{arch.get('narrative', '')}\n"]
+
+            # Reference pattern attribution
+            based_on = arch.get("basedOn")
+            url = arch.get("basedOnUrl")
+            notes = arch.get("adaptationNotes")
+            if based_on and based_on not in ("custom design", "fallback (LLM unavailable)"):
+                ref_text = f"[{based_on}]({url})" if url else f"**{based_on}**"
+                parts.append(f"\U0001f4da Adapted from: {ref_text}")
+                if notes:
+                    parts.append(f"  *{notes}*")
+                parts.append("")
+
+            # Mermaid diagram
             mermaid = arch.get("mermaidCode", "")
             if mermaid:
                 parts.append(f"```mermaid\n{mermaid}\n```\n")
-            comps = arch.get("components", [])
-            if comps:
-                parts.append("### Components\n")
-                for c in comps[:15]:
-                    parts.append(
-                        f"- **{c.get('name', '')}** ({c.get('azureService', '')}) "
-                        f"\u2014 {c.get('description', '')}"
-                    )
+
+            # Layers with components
+            layers = arch.get("layers", [])
+            if layers:
+                for layer in layers:
+                    parts.append(f"### {layer.get('name', '')}")
+                    purpose = layer.get("purpose", "")
+                    if purpose:
+                        parts.append(f"*{purpose}*\n")
+                    for c in layer.get("components", []):
+                        role = c.get("role", c.get("description", ""))
+                        parts.append(
+                            f"- **{c.get('name', '')}** ({c.get('azureService', '')}) — {role}"
+                        )
+                    parts.append("")
+            else:
+                # Fallback: flat component list
+                comps = arch.get("components", [])
+                if comps:
+                    parts.append("### Components\n")
+                    for c in comps[:15]:
+                        parts.append(
+                            f"- **{c.get('name', '')}** ({c.get('azureService', '')}) "
+                            f"\u2014 {c.get('description', '')}"
+                        )
+
             return "\n".join(parts)
 
         if step == "cost":
-            sels = state.services.get("selections", [])
             sels = state.services.get("selections", [])
             est = state.costs.get("estimate", {})
             monthly = est.get("totalMonthly", 0)
             annual = est.get("totalAnnual", 0)
             source = est.get("pricingSource", "unknown")
-            parts = [
-                f"## \U0001f4b0 Azure Services & Cost Estimate\n",
-                f"### \u2601\ufe0f Services ({len(sels)} mapped)\n",
-            ]
+            items = est.get("items", [])
+            assumptions = est.get("assumptions", [])
+
+            # ── Section 1: Mapped Azure Services ──
+            parts = [f"## \u2601\ufe0f Azure Services ({len(sels)} mapped)\n"]
             for s in sels[:15]:
+                reason = s.get("reason", "")
+                reason_text = f" — {reason}" if reason else ""
                 parts.append(
                     f"- **{s.get('componentName', '')}** \u2192 "
-                    f"{s.get('serviceName', '')} ({s.get('sku', '')}) "
-                    f"in {s.get('region', 'eastus')}"
+                    f"{s.get('serviceName', '')} ({s.get('sku', '')}){reason_text}"
                 )
-            parts.append(
-                f"\n### \U0001f4b0 Cost Estimate\n\n"
-                f"**Total: ${monthly:,.0f}/month (${annual:,.0f}/year)** \u2014 Source: {source}\n"
-            )
-            parts.append("| Service | SKU | Monthly Cost |")
-            parts.append("|---------|-----|-------------|")
-            for item in est.get("items", [])[:20]:
-                parts.append(
-                    f"| {item.get('serviceName', '')} | {item.get('sku', '')} "
-                    f"| ${item.get('monthlyCost', 0):,.0f} |"
-                )
-            if est.get("assumptions"):
-                parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
+
+            # ── Section 2: Cost Summary ──
+            parts.append(f"\n## \U0001f4b0 Cost Summary\n")
+            parts.append(f"| | |")
+            parts.append(f"|---|---|")
+            parts.append(f"| **Monthly** | **${monthly:,.0f}** |")
+            parts.append(f"| **Annual** | **${annual:,.0f}** |")
+            parts.append(f"| **Pricing source** | {source} |")
+
+            # Confidence based on pricing source
+            confidence = "high" if source == "live" else "medium" if source == "live-fallback" else "low"
+            parts.append(f"| **Confidence** | {confidence} |\n")
+
+            # Top 5 cost drivers
+            sorted_items = sorted(items, key=lambda x: x.get("monthlyCost", 0), reverse=True)
+            top5 = sorted_items[:5]
+            if top5:
+                parts.append("### Top Cost Drivers\n")
+                parts.append("| Service | SKU | Monthly |")
+                parts.append("|---------|-----|--------:|")
+                for item in top5:
+                    cost = item.get("monthlyCost", 0)
+                    note = item.get("pricingNote") or ""
+                    if cost == 0 and note:
+                        cost_text = f"$0 *({note[:50]})*"
+                    elif cost == 0:
+                        cost_text = "$0 *(usage-dependent)*"
+                    else:
+                        cost_text = f"${cost:,.0f}"
+                    parts.append(
+                        f"| {item.get('serviceName', '')} | {item.get('sku', '')} | {cost_text} |"
+                    )
+
+            # Flag any $0 items not in top 5
+            zero_items = [i for i in items if i.get("monthlyCost", 0) == 0 and i not in top5]
+            if zero_items:
+                names = ", ".join(i.get("serviceName", "") for i in zero_items[:5])
+                parts.append(f"\n*Also usage-dependent (placeholder $0): {names}*")
+
+            # Assumptions
+            if assumptions:
+                parts.append("\n### Assumptions\n")
+                for a in assumptions:
+                    parts.append(f"- {a}")
+
             return "\n".join(parts)
 
         if step == "business_value":
             bv = state.business_value
-            summary = bv.get("executiveSummary", "")
             drivers = bv.get("drivers", [])
-            confidence = bv.get("confidenceLevel", "moderate")
-            parts = [
-                f"## \U0001f4ca Business Value Assessment\n\n{summary}\n\n"
-                f"**Confidence:** {confidence}\n"
-            ]
-            if drivers:
-                parts.append("### Value Drivers\n")
-                for d in drivers:
-                    est_text = ""
-                    q = d.get("estimate")
-                    if q:
-                        est_text = f" \u2014 *{q}*"
-                    annual_val = d.get("annual_value_estimate")
-                    icon = "\U0001f4b0" if annual_val else "\U0001f4cb"
-                    line = f"- {icon} **{d.get('name', '')}**: {d.get('description', '')}{est_text}"
-                    if annual_val:
-                        line += f" (~${annual_val:,.0f}/yr)"
-                    info = d.get("info_needed")
-                    if info:
-                        line += f"\n  *To refine: {info}*"
-                    parts.append(line)
-            # Add source references from web search results
-            sources = bv.get("sources", [])
-            if sources:
-                parts.append("\n### 🔍 Research Sources\n")
-                for s in sources:
-                    if s.get("url"):
-                        parts.append(f"- [{s['title'][:60]}]({s['url']})")
-                    else:
-                        parts.append(f"- {s['title'][:60]}")
-            # Add source references from retrieved patterns
-            patterns = state.retrieved_patterns
-            if patterns:
-                parts.append("\n### \U0001f4da Sources & References\n")
-                for p in patterns[:3]:
-                    url = p.get("url", "")
-                    title = p.get("title", "Microsoft Learn")
-                    if url:
-                        parts.append(f"- [{title}]({url})")
-                    else:
-                        parts.append(f"- {title}")
-                parts.append("\n*Value estimates based on Microsoft case studies and industry benchmarks.*")
+            impact = bv.get("annual_impact_range")
+            assumptions = bv.get("assumptions", [])
+            confidence = bv.get("confidence", "moderate")
+
+            parts = ["## \U0001f4ca Value Drivers\n"]
+            for i, d in enumerate(drivers, 1):
+                source = d.get("source_name", "")
+                url = d.get("source_url", "")
+                source_text = f"[{source}]({url})" if url else source
+                parts.append(
+                    f"{i}. **{d.get('name', '')}**: {d.get('metric', '')}\n"
+                    f"   {d.get('description', '')}\n"
+                    f"   *Source: {source_text}*\n"
+                )
+
+            if impact:
+                parts.append(f"### Estimated Annual Impact\n\n"
+                             f"**${impact['low']:,.0f} – ${impact['high']:,.0f}** ({confidence} estimate)\n")
             else:
-                parts.append("\n*\u26a0\ufe0f Value estimates based on LLM knowledge \u2014 not grounded in live sources.*")
+                parts.append(f"*Dollar range not computed — need more inputs (see assumptions).*\n")
+
+            if assumptions:
+                parts.append("### Assumptions\n")
+                for a in assumptions:
+                    parts.append(f"- {a}")
+
             return "\n".join(parts)
 
         if step == "roi":
@@ -407,21 +456,24 @@ RULES:
             needs_info = roi.get("needs_info")
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
-                parts.append(f"**ROI: {roi['roi_percent']:.0f}%** | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
+                roi_range = roi.get("roi_range", f"{roi['roi_percent']:.0f}%")
+                parts.append(f"**ROI: {roi_range}** (midpoint {roi['roi_percent']:.0f}%) | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
                 parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.0f}")
-                parts.append(f"- Annual value generated: ${roi['annual_value']:,.0f}\n")
+                val_low = roi.get("annual_value_low")
+                val_high = roi.get("annual_value_high")
+                if val_low and val_high:
+                    parts.append(f"- Annual value range: ${val_low:,.0f} – ${val_high:,.0f}\n")
+                else:
+                    parts.append(f"- Annual value generated: ${roi['annual_value']:,.0f}\n")
                 if roi.get("monetized_drivers"):
-                    parts.append("### Monetized Value Drivers\n")
+                    parts.append("### Value Drivers Contributing\n")
                     for d in roi["monetized_drivers"]:
-                        parts.append(f"- **{d['name']}**: ${d['annual_value']:,.0f}/year")
-                if roi.get("qualitative_benefits"):
-                    parts.append("\n### Qualitative Benefits\n")
-                    for b in roi["qualitative_benefits"]:
-                        parts.append(f"- {b}")
-                if needs_info:
-                    parts.append("\n### \u2139\ufe0f To refine this estimate\n")
-                    for q in needs_info:
-                        parts.append(f"- {q}")
+                        metric = d.get("metric", "")
+                        parts.append(f"- **{d['name']}**: {metric}" if metric else f"- **{d['name']}**")
+                if roi.get("assumptions"):
+                    parts.append("\n### Assumptions\n")
+                    for a in roi["assumptions"]:
+                        parts.append(f"- {a}")
             elif needs_info:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 parts.append("I need more information to calculate ROI:\n")
@@ -434,10 +486,6 @@ RULES:
                         parts.append(f"- {b}")
             else:
                 parts = ["## \U0001f4c8 ROI Analysis\n", "ROI could not be calculated quantitatively.\n"]
-                if roi.get("qualitative_benefits"):
-                    parts.append("### Qualitative Benefits\n")
-                    for b in roi["qualitative_benefits"]:
-                        parts.append(f"- {b}")
             return "\n".join(parts)
 
         if step == "presentation":
