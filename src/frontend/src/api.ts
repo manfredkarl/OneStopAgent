@@ -113,7 +113,7 @@ export async function sendMessage(projectId: string, message: string): Promise<C
 }
 
 export async function downloadPptx(projectId: string): Promise<void> {
-  const res = await fetch(${BASE_URL}/api/projects//export/pptx, {
+  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/export/pptx`, {
     headers: { 'x-user-id': 'demo-user' },
   });
   if (!res.ok) {
