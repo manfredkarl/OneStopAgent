@@ -110,17 +110,84 @@ class CostAgent:
     name = "Cost Specialist"
     emoji = "💰"
 
+    def generate_usage_assumptions(self, state: AgentState) -> list[dict]:
+        """Generate usage-specific questions so cost estimates are grounded in real numbers."""
+        components = state.architecture.get("components", [])
+        industry = state.brainstorming.get("industry", "Cross-Industry")
+        description = state.user_input
+
+        comp_names = [c.get("name", c.get("azureService", "")) for c in components[:8]]
+
+        try:
+            response = llm.invoke([
+                {"role": "system", "content": """Generate 3-5 usage assumption questions to accurately estimate Azure costs for this solution.
+Return ONLY a JSON array. Each item:
+{
+    "id": "unique_key",
+    "label": "Human-readable question",
+    "unit": "count" or "GB" or "hours" or "requests" or "$",
+    "default": numeric_default_value,
+    "hint": "Brief explanation of how this affects cost"
+}
+
+Focus on CONSUMPTION metrics that drive Azure pricing:
+- Number of users, requests, transactions, or documents processed
+- Data volume (storage, ingestion, transfer)
+- Compute hours or concurrent workloads
+- API calls or model inference requests
+Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
+                {"role": "user", "content": f"Industry: {industry}\nUse case: {description}\nArchitecture components: {', '.join(comp_names)}"}
+            ])
+
+            text = response.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+            assumptions = json.loads(text)
+            if isinstance(assumptions, list) and len(assumptions) > 0:
+                return assumptions[:5]
+        except Exception:
+            pass
+
+        # Fallback generic usage questions
+        return [
+            {"id": "concurrent_users", "label": "Expected concurrent users", "unit": "count", "default": 500, "hint": "Drives compute and scaling tier selection"},
+            {"id": "requests_per_day", "label": "API requests per day", "unit": "count", "default": 10000, "hint": "Affects API Management, Functions, and App Service costs"},
+            {"id": "data_storage_gb", "label": "Total data storage needed", "unit": "GB", "default": 100, "hint": "Drives storage, database, and backup costs"},
+            {"id": "ai_calls_per_day", "label": "AI/ML inference calls per day", "unit": "count", "default": 5000, "hint": "Affects Azure OpenAI, Cognitive Services costs"},
+        ]
+
     def run(self, state: AgentState) -> AgentState:
-        """Map architecture → Azure services + SKUs, then estimate costs in one pass."""
+        """Two-phase cost estimation.
+
+        Phase 1: Generate usage assumption questions for user input.
+        Phase 2: Map architecture → Azure services + SKUs using real consumption numbers.
+        """
+        # Check if we have user-provided usage assumptions
+        user_assumptions = state.costs.get("user_assumptions")
+
+        if not user_assumptions:
+            # Phase 1: Generate usage assumption questions
+            assumptions = self.generate_usage_assumptions(state)
+            state.costs = {
+                "phase": "needs_input",
+                "assumptions_needed": assumptions,
+            }
+            return state
+
+        # Phase 2: Calculate with real usage numbers
         components = state.architecture.get("components", [])
         full_text = f"{state.user_input} {state.clarifications}"
-        users = _extract_users(full_text)
+
+        # Build usage context from user-provided values
+        usage_dict = {a["id"]: a["value"] for a in user_assumptions}
+        users = usage_dict.get("concurrent_users", _extract_users(full_text))
         regions = _extract_regions(full_text)
         primary_region = regions[0]
         industry = state.brainstorming.get("industry", "Cross-Industry")
 
         # ── Step 1: LLM maps components → Azure services + SKUs ──────
-        selections = self._llm_map_services(components, users, primary_region, industry, state)
+        selections = self._llm_map_services(components, users, primary_region, industry, state, usage_dict)
 
         # ── Step 2: Pricing API — validate SKUs + get prices ─────────
         items, worst_source, assumptions = self._price_selections(selections, users)
@@ -141,6 +208,10 @@ class CostAgent:
             assumptions.append(
                 "Multi-region overhead estimated at 40% of compute + storage costs"
             )
+
+        # Add user-provided usage context to assumptions
+        for ua in user_assumptions:
+            assumptions.append(f"{ua['label']}: {ua['value']} {ua.get('unit', '')}")
 
         total_monthly = round(sum(i["monthlyCost"] for i in items), 2)
         total_annual = round(total_monthly * 12, 2)
@@ -170,7 +241,8 @@ class CostAgent:
                 "totalAnnual": total_annual,
                 "assumptions": assumptions,
                 "pricingSource": worst_source,
-            }
+            },
+            "user_assumptions": user_assumptions,
         }
         return state
 
@@ -183,9 +255,15 @@ class CostAgent:
         primary_region: str,
         industry: str,
         state: AgentState,
+        usage: dict | None = None,
     ) -> list[dict]:
         """Use LLM to map architecture components to Azure services + SKUs."""
         component_list = json.dumps(components, indent=2)
+
+        usage_context = ""
+        if usage:
+            usage_lines = [f"- {k.replace('_', ' ').title()}: {v}" for k, v in usage.items()]
+            usage_context = "\nUSAGE ASSUMPTIONS (from user — use these for SKU sizing):\n" + "\n".join(usage_lines)
 
         prompt = f"""Map these architecture components to specific Azure services with appropriate SKUs.
 
@@ -198,6 +276,7 @@ CONTEXT:
 - Industry: {industry}
 - Use case: {state.user_input}
 {f"- Additional context: {state.clarifications}" if state.clarifications else ""}
+{usage_context}
 
 RULES:
 - For each component, select the most appropriate Azure service and a specific SKU/tier

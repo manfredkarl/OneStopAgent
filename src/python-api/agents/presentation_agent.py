@@ -1,121 +1,425 @@
 """Presentation Agent — generates executive-ready PowerPoint deck via PptxGenJS.
 
-Uses the LLM to generate a complete PptxGenJS Node.js script with professional
-design (color palettes, shapes, charts, icons, modern layout), then executes it
-to produce the .pptx file.  Falls back to python-pptx if LLM/Node.js unavailable.
+Template-based approach: a hardcoded, tested PptxGenJS script template handles
+all layout / design.  The LLM is only asked to produce polished *text content*
+(tagline, bullets, narrative) as structured JSON, which is injected into the
+template.  Falls back to python-pptx if Node.js execution fails.
 """
 import json
 import logging
+import re
 from agents.state import AgentState
 from services.presentation import execute_pptxgenjs, create_pptx_python
 
 logger = logging.getLogger(__name__)
 
 
-# ── Design reference (from Anthropic PPTX skill) ────────────────────────
+# ── Design reference (kept for documentation) ────────────────────────────
 
 PPTXGENJS_REFERENCE = r"""
 ## PptxGenJS Quick Reference
-
-### Setup
-```javascript
-const pptxgen = require("pptxgenjs");
-let pres = new pptxgen();
-pres.layout = 'LAYOUT_16x9';  // 10" x 5.625"
-pres.author = 'OneStopAgent';
-let slide = pres.addSlide();
-```
-
-### Text
-```javascript
-slide.addText("Title", { x: 0.5, y: 0.5, w: 9, h: 0.8, fontSize: 36, fontFace: "Arial", color: "363636", bold: true });
-// Rich text arrays
-slide.addText([
-  { text: "Bold ", options: { bold: true, breakLine: true } },
-  { text: "Normal", options: {} }
-], { x: 0.5, y: 1.5, w: 8, h: 2 });
-// Bullets
-slide.addText([
-  { text: "Item 1", options: { bullet: true, breakLine: true } },
-  { text: "Item 2", options: { bullet: true } }
-], { x: 0.5, y: 2, w: 8, h: 2 });
-```
-
-### Shapes
-```javascript
-slide.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: 10, h: 0.5, fill: { color: "1E2761" } });
-slide.addShape(pres.shapes.RECTANGLE, { x: 0.5, y: 1, w: 0.08, h: 1.5, fill: { color: "0891B2" } }); // accent bar
-```
-
-### Tables
-```javascript
-slide.addTable([
-  [{ text: "Header", options: { fill: { color: "1E2761" }, color: "FFFFFF", bold: true } }, ...],
-  ["Cell 1", "Cell 2"]
-], { x: 0.5, y: 1.5, w: 9, border: { pt: 0.5, color: "E2E8F0" }, colW: [3, 3, 3] });
-```
-
-### Charts
-```javascript
-slide.addChart(pres.charts.BAR, [{
-  name: "Cost", labels: ["Service A", "Service B"], values: [150, 300]
-}], {
-  x: 0.5, y: 1.5, w: 9, h: 3.5, barDir: "col",
-  chartColors: ["0D9488", "14B8A6", "5EEAD4"],
-  chartArea: { fill: { color: "FFFFFF" }, roundedCorners: true },
-  catAxisLabelColor: "64748B", valAxisLabelColor: "64748B",
-  valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" },
-  showValue: true, dataLabelPosition: "outEnd", dataLabelColor: "1E293B"
-});
-```
-
-### Backgrounds
-```javascript
-slide.background = { color: "1E2761" };  // dark slide
-slide.background = { color: "F8FAFC" };  // light content slide
-```
-
-### Save
-```javascript
-pres.writeFile({ fileName: OUTPUT_PATH });
-```
-
-## CRITICAL RULES
-- NEVER use "#" with hex colors (causes corruption)
-- NEVER encode opacity in hex strings (e.g. "00000020") — use opacity property
+- NEVER use "#" with hex colors
 - Use bullet: true, NEVER unicode "•"
 - Use breakLine: true between array items
-- Each pres = new pptxgen() must be fresh — never reuse
 - NEVER reuse option objects — PptxGenJS mutates them in-place
-- Avoid lineSpacing with bullets — use paraSpaceAfter instead
+- Use paraSpaceAfter not lineSpacing with bullets
 - NEVER use accent lines under titles
 """
 
 DESIGN_GUIDANCE = """
-## Slide Design Principles
+## Slide Design Principles (embedded in template)
+- Microsoft color palette: dark navy, white content, accent blue, teal highlights
+- Segoe UI / Arial fonts
+- Dark sandwich structure (dark title + closing, light content slides)
+- Stat callout cards, tables, conditional bar chart
+"""
 
-### Color Strategy
-- Pick one dominant color (60-70% weight), 1-2 supporting tones, one sharp accent
-- Dark backgrounds for title + conclusion, light for content ("sandwich" structure)
-- Choose colors that match the customer's industry/topic
 
-### Layout Variety
-- NEVER repeat the same layout on consecutive slides
-- Mix: two-column, icon rows, stat callouts, tables, charts, full-width
-- Every slide needs a visual element (shape, chart, icon, or table) — no text-only slides
-- Large stat callouts: big numbers 48-60pt with small labels below
+# ── PptxGenJS slide template ─────────────────────────────────────────────
+# The template reads a DATA JSON object and builds 9 slide types.
+# Each slide is conditional — it only renders when the relevant data exists.
 
-### Typography
-- Slide titles: 28-36pt bold
-- Section headers: 18-22pt bold
-- Body text: 12-14pt
-- Always left-align body text; center only titles
-- 0.5" minimum margins from slide edges
+SLIDE_TEMPLATE = r"""
+const pptxgen = require("pptxgenjs");
+const DATA = __DATA_PLACEHOLDER__;
 
-### Shapes for Visual Interest
-- Use colored rectangles as background sections
-- Thin accent bars (0.08" wide) beside key content
-- Cards: white rectangles with subtle shadows for grouped content
+const pres = new pptxgen();
+pres.layout = "LAYOUT_16x9";
+pres.author = "OneStopAgent";
+
+// ── Color palette ──
+const DARK   = "0F1B2D";
+const WHITE  = "FFFFFF";
+const ACCENT = "0078D4";
+const TEAL   = "00B7C3";
+const LIGHT  = "F5F5F5";
+const TEXT_C  = "1E293B";
+const MUTED  = "64748B";
+const BORDER = "E2E8F0";
+const FONT   = "Segoe UI";
+
+// ── Helpers ──
+function fmt$(v) {
+  if (v == null) return "$0";
+  const n = typeof v === "string" ? parseFloat(v.replace(/[^0-9.]/g, "")) : v;
+  if (isNaN(n)) return String(v);
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+function fmtPct(v) {
+  if (v == null) return "N/A";
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  if (isNaN(n)) return String(v);
+  return n.toLocaleString("en-US", { maximumFractionDigits: 0 }) + "%";
+}
+function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallback || ""); }
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 1 — Title (dark)
+// ════════════════════════════════════════════════════════════════════════
+(function titleSlide() {
+  const s = pres.addSlide();
+  s.background = { color: DARK };
+  // Customer name
+  s.addText(safe(DATA.customer, "Customer"), {
+    x: 0.5, y: 1.0, w: 9.0, h: 0.7,
+    fontSize: 18, fontFace: FONT, color: TEAL, bold: true,
+    align: "left"
+  });
+  // Main title
+  s.addText("Azure Solution Proposal", {
+    x: 0.5, y: 1.7, w: 9.0, h: 1.0,
+    fontSize: 36, fontFace: FONT, color: WHITE, bold: true,
+    align: "left"
+  });
+  // Tagline
+  if (DATA.tagline) {
+    s.addText(DATA.tagline, {
+      x: 0.5, y: 2.9, w: 9.0, h: 0.6,
+      fontSize: 14, fontFace: FONT, color: MUTED, italic: true,
+      align: "left"
+    });
+  }
+  // Bottom accent bar
+  s.addShape(pres.shapes.RECTANGLE, {
+    x: 0.5, y: 4.8, w: 2.0, h: 0.06, fill: { color: ACCENT }
+  });
+  s.addText("Powered by OneStopAgent", {
+    x: 0.5, y: 5.0, w: 4.0, h: 0.35,
+    fontSize: 9, fontFace: FONT, color: MUTED
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 2 — Executive Summary
+// ════════════════════════════════════════════════════════════════════════
+(function execSummarySlide() {
+  if (!DATA.executiveSummary || DATA.executiveSummary.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Executive Summary", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  // Problem statement
+  if (DATA.problemStatement) {
+    s.addText(DATA.problemStatement, {
+      x: 0.5, y: 1.05, w: 9.0, h: 0.7,
+      fontSize: 13, fontFace: FONT, color: MUTED, italic: true,
+      valign: "top"
+    });
+  }
+  // Key highlights as bullets
+  const bullets = DATA.executiveSummary.map(function(item, i) {
+    return { text: item, options: { bullet: true, breakLine: i < DATA.executiveSummary.length - 1, fontSize: 13, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 8 } };
+  });
+  const bulletY = DATA.problemStatement ? 1.9 : 1.1;
+  s.addText(bullets, {
+    x: 0.5, y: bulletY, w: 9.0, h: 3.5,
+    valign: "top"
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 3 — Solution Architecture
+// ════════════════════════════════════════════════════════════════════════
+(function archSlide() {
+  if (!DATA.architecture || (!DATA.solutionNarrative && (!DATA.architecture.components || DATA.architecture.components.length === 0))) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Solution Architecture", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  // Narrative
+  const narr = DATA.solutionNarrative || DATA.architecture.narrative || "";
+  if (narr) {
+    s.addText(narr, {
+      x: 0.5, y: 1.05, w: 9.0, h: 0.9,
+      fontSize: 12, fontFace: FONT, color: MUTED, valign: "top"
+    });
+  }
+  // Component table
+  const comps = (DATA.architecture.components || []).slice(0, 10);
+  if (comps.length > 0) {
+    const headerRow = [
+      { text: "Component", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+      { text: "Azure Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+      { text: "Description", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
+    ];
+    const rows = [headerRow];
+    comps.forEach(function(c, idx) {
+      const bg = idx % 2 === 0 ? WHITE : LIGHT;
+      rows.push([
+        { text: safe(c.name || c.component, ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
+        { text: safe(c.service || c.azureService || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+        { text: safe(c.description || c.purpose || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: MUTED } }
+      ]);
+    });
+    const tableY = narr ? 2.1 : 1.1;
+    s.addTable(rows, {
+      x: 0.5, y: tableY, w: 9.0,
+      border: { pt: 0.5, color: BORDER },
+      colW: [2.5, 2.5, 4.0],
+      rowH: 0.35,
+      autoPage: false
+    });
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 4 — Azure Services & SKUs
+// ════════════════════════════════════════════════════════════════════════
+(function servicesSlide() {
+  if (!DATA.services || DATA.services.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Azure Services", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  const headerRow = [
+    { text: "Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "SKU / Tier", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Region", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Monthly Cost", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
+  ];
+  const rows = [headerRow];
+  // Merge cost items if available
+  const costMap = {};
+  if (DATA.costs && DATA.costs.items) {
+    DATA.costs.items.forEach(function(ci) { costMap[ci.service] = ci.monthly; });
+  }
+  DATA.services.slice(0, 12).forEach(function(svc, idx) {
+    const bg = idx % 2 === 0 ? WHITE : LIGHT;
+    const cost = costMap[svc.name] != null ? fmt$(costMap[svc.name]) : "—";
+    rows.push([
+      { text: safe(svc.name), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
+      { text: safe(svc.sku, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+      { text: safe(svc.region, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+      { text: cost, options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, align: "right" } }
+    ]);
+  });
+  s.addTable(rows, {
+    x: 0.5, y: 1.05, w: 9.0,
+    border: { pt: 0.5, color: BORDER },
+    colW: [3.0, 2.0, 2.0, 2.0],
+    rowH: 0.35,
+    autoPage: false
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 5 — Cost Summary
+// ════════════════════════════════════════════════════════════════════════
+(function costSlide() {
+  if (!DATA.costs) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Cost Summary", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  // Stat callout cards
+  const stats = [
+    { label: "Monthly Estimate", value: fmt$(DATA.costs.totalMonthly) },
+    { label: "Annual Estimate", value: fmt$(DATA.costs.totalAnnual) },
+    { label: "Pricing Source", value: safe(DATA.costs.pricingSource, "Azure Pricing") }
+  ];
+  stats.forEach(function(st, i) {
+    const cardX = 0.5 + i * 3.1;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+      x: cardX, y: 1.1, w: 2.8, h: 1.3,
+      fill: { color: LIGHT }, rectRadius: 0.1
+    });
+    s.addText(st.value, {
+      x: cardX, y: 1.2, w: 2.8, h: 0.7,
+      fontSize: 26, fontFace: FONT, color: ACCENT, bold: true, align: "center"
+    });
+    s.addText(st.label, {
+      x: cardX, y: 1.85, w: 2.8, h: 0.4,
+      fontSize: 11, fontFace: FONT, color: MUTED, align: "center"
+    });
+  });
+  // Bar chart of top 5 services (if cost items exist)
+  const items = (DATA.costs.items || []).filter(function(ci) { return ci.monthly > 0; });
+  if (items.length > 0) {
+    items.sort(function(a, b) { return b.monthly - a.monthly; });
+    const top = items.slice(0, 5);
+    s.addChart(pres.charts.BAR, [{
+      name: "Monthly Cost",
+      labels: top.map(function(ci) { return ci.service; }),
+      values: top.map(function(ci) { return ci.monthly; })
+    }], {
+      x: 0.5, y: 2.7, w: 9.0, h: 2.7, barDir: "col",
+      chartColors: [ACCENT, TEAL, "5B9BD5", "A5A5A5", "FFC000"],
+      chartArea: { fill: { color: WHITE }, roundedCorners: true },
+      catAxisLabelColor: MUTED, catAxisLabelFontSize: 9, catAxisLabelFontFace: FONT,
+      valAxisLabelColor: MUTED, valAxisLabelFontSize: 9,
+      valGridLine: { color: BORDER, size: 0.5 }, catGridLine: { style: "none" },
+      showValue: true, dataLabelPosition: "outEnd", dataLabelColor: TEXT_C, dataLabelFontSize: 9,
+      valAxisNumFmt: "$#,##0"
+    });
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 6 — Business Value
+// ════════════════════════════════════════════════════════════════════════
+(function bvSlide() {
+  if (!DATA.drivers || DATA.drivers.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Business Value", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  // Show up to 3 value-driver cards side by side
+  const cards = DATA.drivers.slice(0, 3);
+  const cardW = cards.length === 1 ? 9.0 : (9.0 - 0.3 * (cards.length - 1)) / cards.length;
+  cards.forEach(function(d, i) {
+    const cx = 0.5 + i * (cardW + 0.3);
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+      x: cx, y: 1.1, w: cardW, h: 2.8,
+      fill: { color: LIGHT }, rectRadius: 0.1
+    });
+    // Impact metric big
+    s.addText(safe(d.metric || d.impact, "—"), {
+      x: cx + 0.2, y: 1.3, w: cardW - 0.4, h: 0.8,
+      fontSize: 28, fontFace: FONT, color: ACCENT, bold: true, align: "center", shrinkText: true
+    });
+    // Driver name
+    s.addText(safe(d.name, "Value Driver"), {
+      x: cx + 0.2, y: 2.15, w: cardW - 0.4, h: 0.4,
+      fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true, align: "center"
+    });
+    // Description
+    if (d.description) {
+      s.addText(d.description, {
+        x: cx + 0.2, y: 2.6, w: cardW - 0.4, h: 1.1,
+        fontSize: 10, fontFace: FONT, color: MUTED, align: "center", valign: "top"
+      });
+    }
+  });
+  // If more than 3 drivers, add remaining as bullets below
+  if (DATA.drivers.length > 3) {
+    const extra = DATA.drivers.slice(3).map(function(d, i) {
+      return { text: safe(d.name, "") + (d.impact ? " — " + d.impact : ""), options: { bullet: true, breakLine: i < DATA.drivers.length - 4, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 4 } };
+    });
+    s.addText(extra, { x: 0.5, y: 4.1, w: 9.0, h: 1.2, valign: "top" });
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 7 — ROI
+// ════════════════════════════════════════════════════════════════════════
+(function roiSlide() {
+  if (!DATA.roi) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Return on Investment", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  const roiStats = [
+    { label: "ROI", value: fmtPct(DATA.roi.percent) },
+    { label: "Payback Period", value: DATA.roi.paybackMonths != null ? DATA.roi.paybackMonths + " mo" : "N/A" },
+    { label: "Annual Value", value: fmt$(DATA.roi.annualValue) },
+    { label: "Annual Cost", value: fmt$(DATA.roi.annualCost) }
+  ];
+  roiStats.forEach(function(st, i) {
+    const cx = 0.3 + i * 2.4;
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+      x: cx, y: 1.1, w: 2.2, h: 1.4,
+      fill: { color: i === 0 ? ACCENT : LIGHT }, rectRadius: 0.1
+    });
+    s.addText(st.value, {
+      x: cx, y: 1.2, w: 2.2, h: 0.8,
+      fontSize: 28, fontFace: FONT, color: i === 0 ? WHITE : ACCENT, bold: true, align: "center", shrinkText: true
+    });
+    s.addText(st.label, {
+      x: cx, y: 1.95, w: 2.2, h: 0.4,
+      fontSize: 11, fontFace: FONT, color: i === 0 ? WHITE : MUTED, align: "center"
+    });
+  });
+  // Qualitative benefits
+  var quals = DATA.roi.qualitativeBenefits || [];
+  if (quals.length > 0) {
+    var qBullets = quals.slice(0, 5).map(function(b, i) {
+      return { text: String(b), options: { bullet: true, breakLine: i < Math.min(quals.length, 5) - 1, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 6 } };
+    });
+    s.addText("Additional Benefits", {
+      x: 0.5, y: 2.7, w: 9.0, h: 0.4,
+      fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true
+    });
+    s.addText(qBullets, { x: 0.5, y: 3.1, w: 9.0, h: 2.2, valign: "top" });
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 8 — Next Steps
+// ════════════════════════════════════════════════════════════════════════
+(function nextStepsSlide() {
+  if (!DATA.nextSteps || DATA.nextSteps.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Next Steps", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  const steps = DATA.nextSteps.slice(0, 6).map(function(step, i) {
+    return { text: step, options: { bullet: true, breakLine: i < Math.min(DATA.nextSteps.length, 6) - 1, fontSize: 14, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 12 } };
+  });
+  s.addText(steps, {
+    x: 0.5, y: 1.1, w: 9.0, h: 3.8,
+    valign: "top"
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 9 — Closing (dark)
+// ════════════════════════════════════════════════════════════════════════
+(function closingSlide() {
+  const s = pres.addSlide();
+  s.background = { color: DARK };
+  s.addText("Thank You", {
+    x: 0.5, y: 1.5, w: 9.0, h: 1.0,
+    fontSize: 40, fontFace: FONT, color: WHITE, bold: true, align: "center"
+  });
+  s.addText(safe(DATA.customer, ""), {
+    x: 0.5, y: 2.6, w: 9.0, h: 0.6,
+    fontSize: 20, fontFace: FONT, color: TEAL, align: "center"
+  });
+  s.addShape(pres.shapes.RECTANGLE, {
+    x: 4.0, y: 3.5, w: 2.0, h: 0.06, fill: { color: ACCENT }
+  });
+  s.addText("Powered by OneStopAgent", {
+    x: 0.5, y: 3.8, w: 9.0, h: 0.4,
+    fontSize: 10, fontFace: FONT, color: MUTED, align: "center"
+  });
+})();
+
+// ── Save ──
+pres.writeFile({ fileName: OUTPUT_PATH });
 """
 
 
@@ -124,20 +428,21 @@ class PresentationAgent:
     emoji = "📑"
 
     def run(self, state: AgentState) -> AgentState:
-        """Generate a professional PptxGenJS script via LLM, review it, then execute.
+        """Build slides using a fixed template + LLM-generated text content.
 
-        Two-pass approach:
-        1. Generate the full PptxGenJS script
-        2. LLM reviews for visual quality & common errors, returns corrected script
-        Falls back to python-pptx if the LLM or Node.js execution fails.
+        1. Extract structured data from pipeline state
+        2. Ask LLM to polish/generate text content only (JSON)
+        3. Merge data + LLM content → inject into JS template
+        4. Execute via Node.js; fall back to python-pptx on failure
         """
         slide_data = self._build_slide_data(state)
         customer = state.customer_name or "Customer"
 
         try:
             from agents.llm import llm
-            script = self._generate_pptxgenjs_script(slide_data, state, llm)
-            script = self._review_script(script, llm)
+            content = self._generate_slide_content(slide_data, llm)
+            merged = self._merge_data(slide_data, content)
+            script = SLIDE_TEMPLATE.replace("__DATA_PLACEHOLDER__", json.dumps(merged, default=str))
             path = execute_pptxgenjs(script, customer)
         except Exception as exc:
             logger.warning("PptxGenJS path failed (%s), falling back to python-pptx", exc)
@@ -146,11 +451,13 @@ class PresentationAgent:
         state.presentation_path = path
         return state
 
+    # ── data extraction (unchanged logic) ────────────────────────────────
+
     def _build_slide_data(self, state: AgentState) -> dict:
-        """Extract all relevant data from state for the LLM to design slides."""
+        """Extract all relevant data from state for slide generation."""
         customer = state.customer_name or "Customer"
 
-        data = {
+        data: dict = {
             "customer": customer,
             "problem": state.user_input,
             "clarifications": state.clarifications or "",
@@ -205,103 +512,99 @@ class PresentationAgent:
 
         return data
 
-    def _generate_pptxgenjs_script(self, slide_data: dict, state: AgentState, llm) -> str:
-        """Use LLM to generate a complete PptxGenJS Node.js script."""
+    # ── LLM generates text content only ──────────────────────────────────
+
+    def _generate_slide_content(self, slide_data: dict, llm) -> dict:
+        """Ask the LLM to produce polished text content as JSON.
+
+        The LLM never writes code — only human-readable slide copy.
+        """
         data_json = json.dumps(slide_data, indent=2, default=str)
 
         response = llm.invoke([
             {
                 "role": "system",
                 "content": (
-                    "You are an expert presentation designer. Generate a COMPLETE, EXECUTABLE "
-                    "Node.js script using PptxGenJS that creates a professional executive deck.\n\n"
-                    "The script must:\n"
-                    "1. require('pptxgenjs') and create a new presentation\n"
-                    "2. Create 8-12 visually distinct slides\n"
-                    "3. Use the OUTPUT_PATH placeholder for the file name: pres.writeFile({ fileName: OUTPUT_PATH })\n"
-                    "4. Be a complete, runnable script — no imports other than pptxgenjs\n"
-                    "5. Use modern, professional design (not default PowerPoint templates)\n\n"
-                    "Return ONLY the JavaScript code, no markdown fences, no explanation.\n\n"
-                    f"{PPTXGENJS_REFERENCE}\n\n"
-                    f"{DESIGN_GUIDANCE}"
+                    "You are an expert executive-presentation copywriter. "
+                    "Given raw data about an Azure solution proposal, produce polished, "
+                    "concise slide TEXT CONTENT as a JSON object.\n\n"
+                    "Return ONLY valid JSON (no markdown fences, no explanation).\n\n"
+                    "Required JSON keys:\n"
+                    "  tagline        — string, 6-12 word inspirational subtitle\n"
+                    "  problemStatement — string, 1-2 sentence problem framing\n"
+                    "  executiveSummary — array of 3-5 bullet strings (key highlights)\n"
+                    "  solutionNarrative — string, 2-3 sentence architecture overview\n"
+                    "  drivers         — array of objects {name, metric, description} "
+                    "(up to 3 top value drivers, metric = concise impact figure)\n"
+                    "  nextSteps       — array of 4-5 actionable recommendation strings\n\n"
+                    "Rules:\n"
+                    "- Keep bullets under 15 words each\n"
+                    "- Use concrete numbers from the data when available\n"
+                    "- Write for C-level executives — no jargon, no filler\n"
+                    "- If data for a field is missing, still provide a reasonable default"
                 ),
             },
             {
                 "role": "user",
-                "content": (
-                    f"Create an executive Azure solution proposal deck for this data:\n\n"
-                    f"{data_json}\n\n"
-                    "REQUIRED SLIDES (in order):\n"
-                    "1. Title slide — dark background, customer name, 'Azure Solution Proposal'\n"
-                    "2. Problem & Opportunity — the user's challenge with visual emphasis\n"
-                    "3. Solution Overview — architecture narrative with key highlights\n"
-                    "4. Architecture Components — table or card layout showing Azure services\n"
-                    "5. Azure Services & SKUs — table with service selections\n"
-                    "6. Cost Estimate — bar chart of top costs + summary stats\n"
-                    "7. Business Value — value drivers with impact metrics\n"
-                    "8. ROI — large stat callouts (ROI %, payback period, annual value)\n"
-                    "9. Next Steps — actionable recommendations\n\n"
-                    "Skip any slide where data is missing. Add a closing slide.\n"
-                    "Use a bold color palette appropriate for the customer's industry.\n"
-                    "Make every slide visually distinct — vary layouts across slides."
-                ),
+                "content": f"Produce slide text content for this proposal:\n\n{data_json}",
             },
         ])
 
-        script = response.content.strip()
+        raw = response.content.strip()
         # Strip markdown fences if present
-        if script.startswith("```"):
-            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-        return script
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Try to extract JSON object from the response
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+            logger.warning("LLM returned invalid JSON for slide content — using defaults")
+            return {}
 
-    def _review_script(self, script: str, llm) -> str:
-        """LLM reviews the generated PptxGenJS script for quality and common errors.
+    # ── Merge structured data + LLM text ─────────────────────────────────
 
-        Catches issues like:
-        - '#' prefixed hex colors (causes file corruption)
-        - Overlapping elements (same x/y on multiple items)
-        - Text overflow (too much text in small boxes)
-        - Missing visual variety (all slides look the same)
-        - Reused option objects (PptxGenJS mutates in-place)
-        - Unicode bullets instead of bullet:true
-        """
-        response = llm.invoke([
-            {
-                "role": "system",
-                "content": (
-                    "You are a PptxGenJS code reviewer. Review the script below and return "
-                    "the CORRECTED, COMPLETE script. Fix any issues you find.\n\n"
-                    "CHECK FOR AND FIX:\n"
-                    "1. Hex colors must NEVER have '#' prefix — strip it (e.g. '363636' not '#363636')\n"
-                    "2. Never encode opacity in hex (e.g. '00000020' is wrong)\n"
-                    "3. Use bullet:true, NEVER unicode '•' characters\n"
-                    "4. Use breakLine:true between text array items\n"
-                    "5. Never reuse option objects — clone them for each element\n"
-                    "6. Avoid lineSpacing with bullets — use paraSpaceAfter instead\n"
-                    "7. Elements must not overlap — check x/y/w/h coordinates\n"
-                    "8. Text boxes should be large enough for their content\n"
-                    "9. Tables must have enough height for all rows\n"
-                    "10. Slide backgrounds must contrast with text colors (dark bg = light text)\n"
-                    "11. Vary slide layouts — no two consecutive slides should look identical\n"
-                    "12. Every chart needs proper colors and labels\n"
-                    "13. Never use accent lines under titles\n\n"
-                    "Return ONLY the corrected JavaScript code. No markdown fences, no explanation.\n"
-                    "If the script is already good, return it unchanged."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Review and fix this PptxGenJS script:\n\n{script}",
-            },
-        ])
+    @staticmethod
+    def _merge_data(slide_data: dict, content: dict) -> dict:
+        """Combine pipeline data with LLM-polished text into the DATA object
+        consumed by the PptxGenJS template."""
+        merged: dict = {
+            "customer": slide_data.get("customer", "Customer"),
+            "tagline": content.get("tagline", ""),
+            "problemStatement": content.get("problemStatement", slide_data.get("problem", "")),
+            "executiveSummary": content.get("executiveSummary", []),
+            "solutionNarrative": content.get("solutionNarrative", ""),
+        }
 
-        reviewed = response.content.strip()
-        if reviewed.startswith("```"):
-            reviewed = reviewed.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        # Architecture (from pipeline)
+        if slide_data.get("architecture"):
+            merged["architecture"] = slide_data["architecture"]
 
-        # Sanity check — reviewed script should still be valid JS
-        if "pptxgenjs" in reviewed and "writeFile" in reviewed:
-            return reviewed
-        logger.warning("Review produced invalid script — using original")
-        return script
+        # Services (from pipeline)
+        if slide_data.get("services"):
+            merged["services"] = slide_data["services"]
+
+        # Costs (from pipeline)
+        if slide_data.get("costs"):
+            merged["costs"] = slide_data["costs"]
+
+        # Business-value drivers — prefer LLM-polished, fall back to pipeline
+        if content.get("drivers"):
+            merged["drivers"] = content["drivers"]
+        elif slide_data.get("businessValue", {}).get("drivers"):
+            merged["drivers"] = slide_data["businessValue"]["drivers"]
+
+        # ROI (from pipeline)
+        if slide_data.get("roi"):
+            merged["roi"] = slide_data["roi"]
+
+        # Next steps (from LLM)
+        merged["nextSteps"] = content.get("nextSteps", [])
+
+        return merged

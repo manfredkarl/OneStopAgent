@@ -284,19 +284,31 @@ class Orchestrator:
                     isinstance(d, dict) and "id" in d and "value" in d
                     for d in user_data
                 ):
-                    # User submitted assumption values — re-run BV with them
-                    state.business_value["user_assumptions"] = user_data
+                    # Determine which agent needs re-run based on current step
+                    target_agent = current
+                    if current == "business_value" or state.business_value.get("phase") == "needs_input":
+                        state.business_value["user_assumptions"] = user_data
+                        target_agent = "business_value"
+                    elif current == "cost" or state.costs.get("phase") == "needs_input":
+                        state.costs["user_assumptions"] = user_data
+                        target_agent = "cost"
+                    else:
+                        # Default to BV for backward compat
+                        state.business_value["user_assumptions"] = user_data
+                        target_agent = "business_value"
+
                     state.completed_steps = [
-                        s for s in state.completed_steps if s != "business_value"
+                        s for s in state.completed_steps if s != target_agent
                     ]
                     self.phases[project_id] = "executing"
+                    agent_label = "business value" if target_agent == "business_value" else "cost estimate"
                     yield self._msg(
                         project_id,
-                        "📊 Got your numbers — calculating business value...",
+                        f"📊 Got your numbers — calculating {agent_label}...",
                         {"type": "pm_response"},
                     )
                     async for msg in self.run_single_step(
-                        project_id, state, "business_value"
+                        project_id, state, target_agent
                     ):
                         yield msg
                     return
@@ -332,6 +344,38 @@ class Orchestrator:
                 )
                 async for msg in self.run_single_step(
                     project_id, state, "business_value"
+                ):
+                    yield msg
+                return
+
+            # Check if user says "proceed" while in cost needs_input phase (use defaults)
+            if (
+                current == "cost"
+                and state.costs.get("phase") == "needs_input"
+                and intent == Intent.PROCEED
+            ):
+                assumptions = state.costs.get("assumptions_needed", [])
+                default_values = [
+                    {
+                        "id": a["id"],
+                        "label": a["label"],
+                        "value": a["default"],
+                        "unit": a.get("unit", ""),
+                    }
+                    for a in assumptions
+                ]
+                state.costs["user_assumptions"] = default_values
+                state.completed_steps = [
+                    s for s in state.completed_steps if s != "cost"
+                ]
+                self.phases[project_id] = "executing"
+                yield self._msg(
+                    project_id,
+                    "💰 Using default values — calculating costs...",
+                    {"type": "pm_response"},
+                )
+                async for msg in self.run_single_step(
+                    project_id, state, "cost"
                 ):
                     yield msg
                 return
@@ -645,6 +689,25 @@ class Orchestrator:
                     self.phases[project_id] = "approval"
                     return
 
+                # Cost Phase 1: needs_input → emit usage assumptions form and pause
+                if step == "cost" and state.costs.get("phase") == "needs_input":
+                    assumptions = state.costs["assumptions_needed"]
+                    yield ChatMessage(
+                        id=msg_id,
+                        project_id=project_id,
+                        role="agent",
+                        agent_id=step,
+                        content="To estimate costs accurately, I need a few details about your expected usage:",
+                        metadata={
+                            "type": "assumptions_input",
+                            "assumptions": assumptions,
+                        },
+                    )
+                    state.awaiting_approval = True
+                    state.current_step = "cost"
+                    self.phases[project_id] = "approval"
+                    return
+
                 state.mark_step_completed(step)
 
                 # Emit plan_update: completed
@@ -766,6 +829,24 @@ class Orchestrator:
                 )
                 state.awaiting_approval = True
                 state.current_step = "business_value"
+                self.phases[project_id] = "approval"
+                return
+
+            # Cost Phase 1: needs_input → emit usage assumptions form and pause
+            if step == "cost" and state.costs.get("phase") == "needs_input":
+                assumptions = state.costs["assumptions_needed"]
+                yield ChatMessage(
+                    project_id=project_id,
+                    role="agent",
+                    agent_id=step,
+                    content="To estimate costs accurately, I need a few details about your expected usage:",
+                    metadata={
+                        "type": "assumptions_input",
+                        "assumptions": assumptions,
+                    },
+                )
+                state.awaiting_approval = True
+                state.current_step = "cost"
                 self.phases[project_id] = "approval"
                 return
 
