@@ -2,12 +2,14 @@
 
 Uses the LLM to generate a complete PptxGenJS Node.js script with professional
 design (color palettes, shapes, charts, icons, modern layout), then executes it
-to produce the .pptx file.
+to produce the .pptx file.  Falls back to python-pptx if LLM/Node.js unavailable.
 """
 import json
-from agents.llm import llm
+import logging
 from agents.state import AgentState
-from services.presentation import execute_pptxgenjs
+from services.presentation import execute_pptxgenjs, create_pptx_python
+
+logger = logging.getLogger(__name__)
 
 
 # ── Design reference (from Anthropic PPTX skill) ────────────────────────
@@ -122,10 +124,21 @@ class PresentationAgent:
     emoji = "📑"
 
     def run(self, state: AgentState) -> AgentState:
-        """Generate a professional PptxGenJS script via LLM, then execute it."""
+        """Generate a professional PptxGenJS script via LLM, then execute it.
+
+        Falls back to python-pptx if the LLM or Node.js execution fails.
+        """
         slide_data = self._build_slide_data(state)
-        script = self._generate_pptxgenjs_script(slide_data, state)
-        path = execute_pptxgenjs(script, state.customer_name or "Customer")
+        customer = state.customer_name or "Customer"
+
+        try:
+            from agents.llm import llm  # lazy import — allows import without token
+            script = self._generate_pptxgenjs_script(slide_data, state, llm)
+            path = execute_pptxgenjs(script, customer)
+        except Exception as exc:
+            logger.warning("PptxGenJS path failed (%s), falling back to python-pptx", exc)
+            path = create_pptx_python(slide_data, customer)
+
         state.presentation_path = path
         return state
 
@@ -188,7 +201,7 @@ class PresentationAgent:
 
         return data
 
-    def _generate_pptxgenjs_script(self, slide_data: dict, state: AgentState) -> str:
+    def _generate_pptxgenjs_script(self, slide_data: dict, state: AgentState, llm) -> str:
         """Use LLM to generate a complete PptxGenJS Node.js script."""
         data_json = json.dumps(slide_data, indent=2, default=str)
 
