@@ -2,22 +2,26 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { ChatMessage, AgentStatus } from '../types';
 import { getChatHistory, getAgents, sendMessageStreaming } from '../api';
-import AgentSidebar from '../components/AgentSidebar';
 import ChatThread from '../components/ChatThread';
 import ChatInput from '../components/ChatInput';
 
-export default function Chat() {
+interface Props {
+  agents: AgentStatus[];
+  onAgentsChange: (agents: AgentStatus[]) => void;
+  onProjectCreated?: () => void;
+}
+
+export default function Chat({ agents: _agents, onAgentsChange, onProjectCreated: _onProjectCreated }: Props) {
   const { id: projectId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [sending, setSending] = useState(false);
   const initialSent = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
     getChatHistory(projectId).then(setMessages).catch(console.error);
-    getAgents(projectId).then(setAgents).catch(console.error);
+    getAgents(projectId).then(onAgentsChange).catch(console.error);
   }, [projectId]);
 
   const handleSend = useCallback(async (message: string) => {
@@ -59,7 +63,7 @@ export default function Chat() {
     } finally {
       setSending(false);
       if (projectId) {
-        getAgents(projectId).then(setAgents).catch(() => {});
+        getAgents(projectId).then(onAgentsChange).catch(() => {});
       }
     }
   }, [projectId, sending]);
@@ -75,12 +79,9 @@ export default function Chat() {
   }, [projectId]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg-main)]">
-      <AgentSidebar projectId={projectId || ''} agents={agents} onAgentsChange={setAgents} />
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <ChatThread messages={messages} onSend={handleSend} projectId={projectId} />
-        <ChatInput onSend={handleSend} disabled={sending} />
-      </div>
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--bg-main)]">
+      <ChatThread messages={messages} onSend={handleSend} projectId={projectId} isThinking={sending} />
+      <ChatInput onSend={handleSend} disabled={sending} />
     </div>
   );
 }

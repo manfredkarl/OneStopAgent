@@ -163,6 +163,18 @@ RULES:
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             result = json.loads(text)
+
+            # Safety: the LLM may put the entire JSON blob as the response
+            # field value — extract the conversational text if so
+            resp = result.get("response", text)
+            if isinstance(resp, str) and resp.strip().startswith("{"):
+                try:
+                    inner = json.loads(resp)
+                    if isinstance(inner, dict) and "response" in inner:
+                        result["response"] = inner["response"]
+                except json.JSONDecodeError:
+                    pass
+
             return {
                 "response": result.get("response", text),
                 "azure_fit": result.get("azure_fit", "unclear"),

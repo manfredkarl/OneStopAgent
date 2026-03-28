@@ -249,17 +249,6 @@ Return ONLY valid JSON (no markdown fences) as an array:
                     "capabilities": ["Managed service", "High availability"],
                     "skuNote": "⚠️ LLM mapping failed — using default SKU",
                 }
-                for c in (self._last_components if hasattr(self, '_last_components') else [])
-            ] if not selections else selections
-            # Final fallback: pass through from components
-            selections = [
-                {
-                    "componentName": c.get("name", "Unknown"),
-                    "serviceName": c.get("azureService", c.get("name", "Unknown")),
-                    "sku": "Standard",
-                    "capabilities": ["Managed service", "High availability"],
-                    "skuNote": "⚠️ LLM mapping failed — using default SKU",
-                }
                 for c in components
             ]
 

@@ -9,6 +9,7 @@ interface Props {
   messages: ChatMessage[];
   onSend?: (message: string) => void;
   projectId?: string;
+  isThinking?: boolean;
 }
 
 const EMOJIS: Record<string, string> = {
@@ -20,7 +21,7 @@ function getAgentName(agentId: string): string {
   return AGENT_REGISTRY.find(a => a.agentId === agentId)?.displayName || agentId;
 }
 
-export default function ChatThread({ messages, onSend, projectId }: Props) {
+export default function ChatThread({ messages, onSend, projectId, isThinking }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,6 +160,24 @@ export default function ChatThread({ messages, onSend, projectId }: Props) {
             </div>
           );
         })}
+        {isThinking && (
+          <div className="flex gap-3 max-w-[85%]">
+            <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5 bg-[#0F6CBD]">
+              PM
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-[var(--text-muted)] mb-1">Project Manager</p>
+              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl rounded-tl-md px-4 py-3">
+                <div className="flex gap-1.5 items-center">
+                  <div className="w-2 h-2 rounded-full bg-[var(--accent)] animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 rounded-full bg-[var(--accent)] animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 rounded-full bg-[var(--accent)] animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <span className="text-sm text-[var(--text-muted)] ml-2">Thinking...</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>

@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createProject, listProjects } from '../api';
-import type { Project } from '../types';
-import ProjectCard from '../components/ProjectCard';
+import { createProject } from '../api';
+import type { AgentStatus } from '../types';
+
+interface Props {
+  agents: AgentStatus[];
+  onProjectCreated?: () => void;
+}
 
 interface UseCase {
   title: string;
@@ -156,19 +160,12 @@ const INDUSTRIES: Industry[] = [
   },
 ];
 
-export default function Landing() {
+export default function Landing({ agents: _agents, onProjectCreated }: Props) {
   const navigate = useNavigate();
   const [description, setDescription] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
-
-  useEffect(() => {
-    listProjects()
-      .then(data => setProjects(Array.isArray(data) ? data : data.projects || []))
-      .catch(() => {});
-  }, []);
 
   const handleCreate = async (desc?: string) => {
     const text = desc || description.trim();
@@ -177,6 +174,7 @@ export default function Landing() {
     try {
       const result = await createProject(text, customerName || undefined);
       const projectId = result.projectId || result.id;
+      onProjectCreated?.();
       navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);
     } catch (err) {
       console.error('Failed to create project:', err);
@@ -297,17 +295,6 @@ export default function Landing() {
           )}
         </div>
 
-        {/* Recent projects */}
-        {projects.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Recent Projects</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {projects.slice(0, 6).map(p => (
-                <ProjectCard key={p.id} project={p} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </main>
   );

@@ -11,6 +11,7 @@ Phases
 FRD-01 §2 (modes), §3 (PM class), §4 (execution plan), §6 (iteration), §8 (errors).
 """
 import asyncio
+import json
 from typing import AsyncGenerator
 
 from agents.state import AgentState
@@ -156,6 +157,16 @@ class Orchestrator:
             state.azure_fit_explanation = result["azure_fit_explanation"]
 
             greeting = result["response"]
+
+            # Safety: if the greeting itself is JSON (LLM failed to extract
+            # the response field properly), parse it and extract the text
+            if isinstance(greeting, str) and greeting.strip().startswith("{"):
+                try:
+                    inner = json.loads(greeting)
+                    if isinstance(inner, dict) and "response" in inner:
+                        greeting = inner["response"]
+                except json.JSONDecodeError:
+                    pass
 
             # Azure fit gate: weak/unclear → ask for more detail before showing plan
             if state.azure_fit and state.azure_fit != "strong":
@@ -466,7 +477,18 @@ class Orchestrator:
 
         # Run agent in thread pool with progress heartbeat
         loop = asyncio.get_event_loop()
-        future = loop.run_in_executor(None, agent.run, state)
+        done_event = asyncio.Event()
+        result_holder = [None]
+        error_holder = [None]
+
+        def _run():
+            try:
+                result_holder[0] = agent.run(state)
+            except Exception as e:
+                error_holder[0] = e
+            loop.call_soon_threadsafe(done_event.set)
+
+        loop.run_in_executor(None, _run)
 
         # Heartbeat: emit progress every 5s while agent runs
         _PROGRESS = [
@@ -475,20 +497,22 @@ class Orchestrator:
             "⏳ Synthesizing output...",
         ]
         elapsed = 0
-        while True:
-            done, _ = await asyncio.wait({future}, timeout=5.0)
-            if done:
-                break
-            elapsed += 5
-            idx = min(elapsed // 5 - 1, len(_PROGRESS) - 1)
-            yield self._msg(
-                project_id,
-                f"{_PROGRESS[idx]} ({elapsed}s)",
-                {"type": "progress", "agent": step},
-            )
+        while not done_event.is_set():
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                elapsed += 5
+                idx = min(elapsed // 5 - 1, len(_PROGRESS) - 1)
+                yield self._msg(
+                    project_id,
+                    f"{_PROGRESS[idx]} ({elapsed}s)",
+                    {"type": "progress", "agent": step},
+                )
 
         try:
-            state = future.result()
+            if error_holder[0]:
+                raise error_holder[0]
+            state = result_holder[0]
             self.states[project_id] = state  # update reference
             state.mark_step_completed(step)
 
