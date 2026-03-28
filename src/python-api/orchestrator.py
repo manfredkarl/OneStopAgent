@@ -663,13 +663,17 @@ class Orchestrator:
                 # Emit full agent result, reusing msg_id so the frontend
                 # replaces the streaming message with the formatted output
                 formatted = pm.format_agent_output(step, state)
+                meta: dict = {"type": "agent_result", "agent": step}
+                if step == "roi" and state.roi.get("dashboard"):
+                    meta["type"] = "roi_dashboard"
+                    meta["dashboard"] = state.roi["dashboard"]
                 yield ChatMessage(
                     id=msg_id,
                     project_id=project_id,
                     role="agent",
                     agent_id=step,
                     content=formatted,
-                    metadata={"type": "agent_result", "agent": step},
+                    metadata=meta,
                 )
 
                 # Approval gate check (FRD-01 §2.3)
@@ -782,12 +786,16 @@ class Orchestrator:
 
             # Emit formatted agent result
             formatted = pm.format_agent_output(step, state)
+            meta: dict = {"type": "agent_result", "agent": step}
+            if step == "roi" and state.roi.get("dashboard"):
+                meta["type"] = "roi_dashboard"
+                meta["dashboard"] = state.roi["dashboard"]
             yield ChatMessage(
                 project_id=project_id,
                 role="agent",
                 agent_id=step,
                 content=formatted,
-                metadata={"type": "agent_result", "agent": step},
+                metadata=meta,
             )
 
             # Approval gate check (FRD-01 §2.3)

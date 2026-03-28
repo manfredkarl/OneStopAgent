@@ -5,6 +5,7 @@ import { downloadPptx } from '../api';
 import MessageContent from './MessageContent';
 import ExecutionPlan from './ExecutionPlan';
 import AssumptionsInput from './AssumptionsInput';
+import ROIDashboard from './ROIDashboard';
 
 interface Props {
   messages: ChatMessage[];
@@ -169,6 +170,18 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                     />
                   </div>
                 </div>
+              </div>
+            );
+          }
+
+          if (msg.metadata?.type === 'roi_dashboard' && msg.metadata?.dashboard) {
+            return (
+              <div key={msg.id} className="max-w-[95%]">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-full bg-[#FFB900] flex items-center justify-center text-white text-xs font-bold">ROI</div>
+                  <p className="text-xs font-medium text-[var(--text-muted)]">ROI Calculator</p>
+                </div>
+                <ROIDashboard data={msg.metadata.dashboard} />
               </div>
             );
           }
