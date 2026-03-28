@@ -1,9 +1,20 @@
-"""Orchestration engine — runs agents in sequence, streams progress."""
-import json
+"""Orchestration engine — phase-based state machine with approval gates.
+
+Phases
+------
+  new         → first message, start brainstorming
+  plan_shown  → execution plan displayed, waiting for user confirmation
+  executing   → agents running in sequence
+  approval    → waiting for user to proceed / refine / skip
+  done        → all steps completed
+
+FRD-01 §2 (modes), §3 (PM class), §4 (execution plan), §6 (iteration), §8 (errors).
+"""
 import asyncio
 from typing import AsyncGenerator
+
 from agents.state import AgentState
-from agents.pm_agent import ProjectManager, AGENT_INFO
+from agents.pm_agent import ProjectManager, AGENT_INFO, Intent
 from agents.architect_agent import ArchitectAgent
 from agents.azure_specialist_agent import AzureSpecialistAgent
 from agents.cost_agent import CostAgent
@@ -13,8 +24,9 @@ from agents.envisioning_agent import EnvisioningAgent
 from agents.llm import llm
 from models.schemas import ChatMessage
 
-AGENTS = {
-    "envisioning": EnvisioningAgent(),
+# ── Agent registry (keyed by plan-step ID) ──────────────────────────────
+AGENTS: dict[str, object] = {
+    "brainstorm": EnvisioningAgent(),
     "architect": ArchitectAgent(),
     "azure_services": AzureSpecialistAgent(),
     "cost": CostAgent(),
@@ -25,9 +37,18 @@ AGENTS = {
 pm = ProjectManager()
 
 
-def format_agent_output(agent_id: str, state: AgentState) -> str:
+# ── Output formatters ───────────────────────────────────────────────────
+
+def format_agent_output(step: str, state: AgentState) -> str:
     """Format an agent's output as markdown for the chat."""
-    if agent_id == "architect":
+    if step == "brainstorm":
+        scenarios = state.envisioning.get("scenarios", [])
+        parts = [f"## 💡 Reference Scenarios ({len(scenarios)} found)\n"]
+        for s in scenarios:
+            parts.append(f"- **{s.get('title', '')}**: {s.get('description', '')}")
+        return "\n".join(parts)
+
+    if step == "architect":
         arch = state.architecture
         parts = [f"## 🏗️ Architecture Design\n\n{arch.get('narrative', '')}\n"]
         mermaid = arch.get("mermaidCode", "")
@@ -37,186 +58,544 @@ def format_agent_output(agent_id: str, state: AgentState) -> str:
         if comps:
             parts.append("### Components\n")
             for c in comps[:15]:
-                parts.append(f"- **{c.get('name', '')}** ({c.get('azureService', '')}) — {c.get('description', '')}")
+                parts.append(
+                    f"- **{c.get('name', '')}** ({c.get('azureService', '')}) "
+                    f"— {c.get('description', '')}"
+                )
         return "\n".join(parts)
 
-    elif agent_id == "azure_services":
+    if step == "azure_services":
         sels = state.services.get("selections", [])
         parts = [f"## ☁️ Azure Services ({len(sels)} mapped)\n"]
         for s in sels[:15]:
-            parts.append(f"- **{s.get('componentName', '')}** → {s.get('serviceName', '')} ({s.get('sku', '')}) in {s.get('region', 'eastus')}")
+            parts.append(
+                f"- **{s.get('componentName', '')}** → "
+                f"{s.get('serviceName', '')} ({s.get('sku', '')}) "
+                f"in {s.get('region', 'eastus')}"
+            )
         return "\n".join(parts)
 
-    elif agent_id == "cost":
+    if step == "cost":
         est = state.costs.get("estimate", {})
         monthly = est.get("totalMonthly", 0)
         annual = est.get("totalAnnual", 0)
         source = est.get("pricingSource", "unknown")
-        parts = [f"## 💰 Cost Estimate\n\n**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** — Source: {source}\n"]
-        parts.append("| Service | SKU | Monthly Cost |")
-        parts.append("|---------|-----|-------------|")
+        parts = [
+            f"## 💰 Cost Estimate\n\n"
+            f"**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** — Source: {source}\n",
+            "| Service | SKU | Monthly Cost |",
+            "|---------|-----|-------------|",
+        ]
         for item in est.get("items", [])[:20]:
-            parts.append(f"| {item.get('serviceName', '')} | {item.get('sku', '')} | ${item.get('monthlyCost', 0):,.2f} |")
+            parts.append(
+                f"| {item.get('serviceName', '')} | {item.get('sku', '')} "
+                f"| ${item.get('monthlyCost', 0):,.2f} |"
+            )
         if est.get("assumptions"):
             parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
         return "\n".join(parts)
 
-    elif agent_id == "business_value":
+    if step == "business_value":
         bv = state.business_value
         summary = bv.get("executiveSummary", "")
         drivers = bv.get("drivers", [])
         confidence = bv.get("confidenceLevel", "moderate")
-        parts = [f"## 📊 Business Value Assessment\n\n{summary}\n\n**Confidence:** {confidence}\n"]
+        parts = [
+            f"## 📊 Business Value Assessment\n\n{summary}\n\n"
+            f"**Confidence:** {confidence}\n"
+        ]
         if drivers:
             parts.append("### Value Drivers\n")
             for d in drivers:
-                est_text = f" — *{d.get('quantifiedEstimate', d.get('estimate', ''))}*" if d.get("quantifiedEstimate") or d.get("estimate") else ""
-                parts.append(f"- **{d.get('name', '')}**: {d.get('impact', d.get('description', ''))}{est_text}")
+                est_text = ""
+                q = d.get("quantifiedEstimate") or d.get("estimate")
+                if q:
+                    est_text = f" — *{q}*"
+                parts.append(
+                    f"- **{d.get('name', '')}**: "
+                    f"{d.get('impact', d.get('description', ''))}{est_text}"
+                )
         return "\n".join(parts)
 
-    elif agent_id == "presentation":
-        return f"## 📑 Presentation Ready\n\nPowerPoint deck generated. You can download it from the project."
+    if step == "roi":
+        roi = state.roi
+        if roi.get("roi_percent") is not None:
+            parts = ["## 📈 ROI Analysis\n"]
+            parts.append(f"- **ROI:** {roi['roi_percent']:.0f}%")
+            if roi.get("payback_months"):
+                parts.append(f"- **Payback:** {roi['payback_months']:.1f} months")
+            if roi.get("annual_cost"):
+                parts.append(f"- **Annual Cost:** ${roi['annual_cost']:,.2f}")
+            if roi.get("annual_value"):
+                parts.append(f"- **Annual Value:** ${roi['annual_value']:,.2f}")
+            return "\n".join(parts)
+        return "## 📈 ROI\n\nROI analysis completed — see qualitative benefits above."
 
-    elif agent_id == "envisioning":
-        scenarios = state.envisioning.get("scenarios", [])
-        parts = [f"## 💡 Reference Scenarios ({len(scenarios)} found)\n"]
-        for s in scenarios:
-            parts.append(f"- **{s.get('title', '')}**: {s.get('description', '')}")
-        return "\n".join(parts)
+    if step == "presentation":
+        return (
+            "## 📑 Presentation Ready\n\n"
+            "PowerPoint deck generated. You can download it from the project."
+        )
 
-    return f"{agent_id} completed."
+    return f"{step} completed."
+
+
+def completion_summary(project_id: str, state: AgentState) -> ChatMessage:
+    """Build a summary ChatMessage when all plan steps are finished."""
+    parts = ["## ✅ Solution Complete\n"]
+    if state.architecture:
+        parts.append(
+            f"- 🏗️ Architecture: "
+            f"{len(state.architecture.get('components', []))} components"
+        )
+    if state.services:
+        parts.append(
+            f"- ☁️ Services: "
+            f"{len(state.services.get('selections', []))} mapped"
+        )
+    if state.costs:
+        est = state.costs.get("estimate", {})
+        parts.append(f"- 💰 Cost: ${est.get('totalMonthly', 0):,.2f}/month")
+    if state.roi and state.roi.get("roi_percent") is not None:
+        parts.append(f"- 📈 ROI: {state.roi['roi_percent']:.0f}%")
+    if state.presentation_path:
+        parts.append("- 📑 Presentation: ready for download")
+    parts.append(
+        "\nYou can ask me to adjust anything, or say **different approach** to start over."
+    )
+    return ChatMessage(
+        project_id=project_id,
+        role="agent",
+        agent_id="pm",
+        content="\n".join(parts),
+        metadata={"type": "pm_response"},
+    )
+
+
+# ── Orchestrator ────────────────────────────────────────────────────────
 
 
 class Orchestrator:
-    """Manages project sessions and runs the agent pipeline."""
+    """Phase-based state machine orchestrator with approval gates.
+
+    Phases
+    ------
+    new         – first message, start brainstorming
+    plan_shown  – execution plan displayed, waiting for confirmation
+    executing   – agents running in sequence
+    approval    – waiting for proceed / refine / skip after a step
+    done        – all steps completed
+    """
+
+    # In fast-run mode, only pause at these major gates (FRD-01 §2.3)
+    FAST_RUN_GATES = {"brainstorm", "architect", "presentation"}
 
     def __init__(self):
         self.states: dict[str, AgentState] = {}
-        self.phases: dict[str, str] = {}  # project_id -> "clarify" | "ready" | "executing" | "done"
-        self.plans: dict[str, list[str]] = {}
+        self.phases: dict[str, str] = {}
+
+    # ── Helpers ─────────────────────────────────────────────────────
 
     def get_state(self, project_id: str) -> AgentState:
         if project_id not in self.states:
             self.states[project_id] = AgentState()
         return self.states[project_id]
 
+    def _msg(
+        self,
+        project_id: str,
+        content: str,
+        metadata: dict | None = None,
+        agent_id: str = "pm",
+    ) -> ChatMessage:
+        """Convenience builder for a ChatMessage."""
+        return ChatMessage(
+            project_id=project_id,
+            role="agent",
+            agent_id=agent_id,
+            content=content,
+            metadata=metadata or {"type": "pm_response"},
+        )
+
+    # ── Main entry point ────────────────────────────────────────────
+
     async def handle_message(
-        self, project_id: str, message: str, active_agents: list[str], description: str
+        self,
+        project_id: str,
+        message: str,
+        active_agents: list[str],
+        description: str,
     ) -> AsyncGenerator[ChatMessage, None]:
         """Handle a user message and yield response ChatMessages."""
         state = self.get_state(project_id)
-        phase = self.phases.get(project_id, "clarify")
+        phase = self.phases.get(project_id, "new")
 
-        if phase == "clarify":
-            # First message — store input and ask clarifications
+        # Classify intent (keyword match → LLM fallback)
+        intent, meta = pm.intent_interpreter.classify_with_llm_fallback(message)
+
+        # ── Phase: new ──────────────────────────────────────────────
+        if phase == "new":
             state.user_input = message
-            state.customer_name = ""
+            state.mode = "brainstorm"
 
-            loop = asyncio.get_event_loop()
-            clarification_text = await loop.run_in_executor(
-                None, pm.ask_clarifications, message
+            clarification = await asyncio.get_event_loop().run_in_executor(
+                None, pm.ask_clarifications, message,
             )
 
-            # Build and show plan
             plan = pm.build_plan(active_agents)
-            self.plans[project_id] = plan
+            state.plan_steps = plan
             plan_text = pm.format_plan(plan)
 
-            full_response = f"{clarification_text}\n\n{plan_text}"
-
-            self.phases[project_id] = "ready"
-
-            yield ChatMessage(
-                project_id=project_id,
-                role="agent",
-                agent_id="pm",
-                content=full_response,
-                metadata={"type": "pm_response"},
+            self.phases[project_id] = "plan_shown"
+            yield self._msg(
+                project_id,
+                f"{clarification}\n\n{plan_text}",
+                {"type": "pm_response"},
             )
 
-        elif phase == "ready":
-            # User confirmed — store clarifications and execute plan
-            state.clarifications = message
-            self.phases[project_id] = "executing"
+        # ── Phase: plan_shown ───────────────────────────────────────
+        elif phase == "plan_shown":
+            if intent in (Intent.PROCEED, Intent.FAST_RUN):
+                # Store clarifications only for normal proceed
+                state.clarifications = message if intent == Intent.PROCEED else ""
+                state.mode = "solution"
 
-            plan = self.plans.get(project_id, pm.build_plan(active_agents))
-
-            # Acknowledge
-            yield ChatMessage(
-                project_id=project_id,
-                role="agent",
-                agent_id="pm",
-                content=f"Starting execution with {len(plan)} agents...",
-                metadata={"type": "pm_response"},
-            )
-
-            # Execute each agent in sequence
-            loop = asyncio.get_event_loop()
-
-            for step in plan:
-                info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
-                agent = AGENTS.get(step)
-                if not agent:
-                    continue
-
-                # Announce
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content=f"{info['emoji']} **{info['name']}** is working...",
-                    metadata={"type": "agent_start", "agent": step},
-                )
-
-                # Run agent in thread pool (sync LLM calls inside)
-                try:
-                    state = await loop.run_in_executor(None, agent.run, state)
-                except Exception as e:
-                    yield ChatMessage(
-                        project_id=project_id,
-                        role="agent",
-                        agent_id=step,
-                        content=f"⚠️ {info['name']} failed: {str(e)}",
-                        metadata={"type": "agent_error", "agent": step},
+                if intent == Intent.FAST_RUN:
+                    state.execution_mode = "fast-run"
+                    yield self._msg(
+                        project_id,
+                        "Running in fast mode — I'll pause at architecture "
+                        "and before the final deck.",
+                        {"type": "pm_response"},
                     )
-                    continue
 
-                # Format and yield result
-                formatted = format_agent_output(step, state)
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=step,
-                    content=formatted,
-                    metadata={"type": "agent_result", "agent": step},
+                self.phases[project_id] = "executing"
+                async for msg in self.execute_plan(project_id, state):
+                    yield msg
+
+            elif intent == Intent.SKIP:
+                yield self._msg(
+                    project_id,
+                    "Got it. What else would you like to adjust, "
+                    "or say **proceed** to start?",
+                    {"type": "pm_response"},
                 )
 
-            # Done
+            else:
+                # Treat as additional clarification
+                if state.clarifications:
+                    state.clarifications += f"\n{message}"
+                else:
+                    state.clarifications = message
+                yield self._msg(
+                    project_id,
+                    "Got it. Anything else, or say **proceed** to start?",
+                    {"type": "pm_response"},
+                )
+
+        # ── Phase: approval ─────────────────────────────────────────
+        elif phase == "approval":
+            current = state.current_step
+
+            if intent == Intent.PROCEED:
+                state.awaiting_approval = False
+                self.phases[project_id] = "executing"
+                async for msg in self.continue_execution(project_id, state):
+                    yield msg
+
+            elif intent == Intent.SKIP:
+                state.mark_step_skipped(current)
+                state.awaiting_approval = False
+                self.phases[project_id] = "executing"
+                async for msg in self.continue_execution(project_id, state):
+                    yield msg
+
+            elif intent == Intent.QUESTION:
+                # Answer the question but stay in approval
+                answer = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: llm.invoke([
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an Azure solution project manager. "
+                                "Answer the user's question about the current "
+                                "step. Be brief."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Context: {state.to_context_string()}\n\n"
+                                f"User asks: {message}"
+                            ),
+                        },
+                    ]).content,
+                )
+                yield self._msg(
+                    project_id,
+                    f"{answer}\n\nSay **proceed** to continue, "
+                    "**refine** to adjust, or **skip** to move on.",
+                    {"type": "pm_response"},
+                )
+
+            else:
+                # Refine / unrecognised input → re-run step with feedback
+                state.clarifications += f"\nFeedback: {message}"
+                state.completed_steps = [
+                    s for s in state.completed_steps if s != current
+                ]
+                state.awaiting_approval = False
+                self.phases[project_id] = "executing"
+                async for msg in self.run_single_step(
+                    project_id, state, current
+                ):
+                    yield msg
+
+        # ── Phase: executing ────────────────────────────────────────
+        elif phase == "executing":
+            # FRD-01 §3.2 intent #9 — message during execution
+            yield self._msg(
+                project_id,
+                "I'll address that after the current step completes.",
+                {"type": "pm_response"},
+            )
+
+        # ── Phase: done ─────────────────────────────────────────────
+        elif phase == "done":
+            if intent == Intent.ITERATION:
+                agents_to_rerun = (
+                    meta.get("agents_to_rerun")
+                    or pm.get_agents_to_rerun(message)
+                )
+                state.clarifications += f"\nIteration: {message}"
+                async for msg in self.iterate(
+                    project_id, state, agents_to_rerun
+                ):
+                    yield msg
+
+            elif intent == Intent.BRAINSTORM:
+                # Reset to brainstorm mode
+                self.phases[project_id] = "new"
+                state.mode = "brainstorm"
+                state.completed_steps.clear()
+                state.skipped_steps.clear()
+                state.failed_steps.clear()
+                yield self._msg(
+                    project_id,
+                    "Starting fresh! Tell me about your project.",
+                    {"type": "pm_response"},
+                )
+
+            else:
+                # Conversational follow-up (question, input, etc.)
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: llm.invoke([
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an Azure solution project manager. "
+                                "The solution has been designed. Help the user "
+                                "with follow-up questions or modifications. "
+                                "Be brief."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Context: {state.to_context_string()}\n\n"
+                                f"User says: {message}"
+                            ),
+                        },
+                    ]).content,
+                )
+                yield self._msg(
+                    project_id, response, {"type": "pm_response"}
+                )
+
+    # ── Execution engine ────────────────────────────────────────────
+
+    async def execute_plan(
+        self, project_id: str, state: AgentState,
+    ) -> AsyncGenerator[ChatMessage, None]:
+        """Execute the full plan from the beginning."""
+        yield self._msg(
+            project_id,
+            f"Starting execution with {len(state.plan_steps)} agents...",
+            {"type": "pm_response"},
+        )
+        async for msg in self.continue_execution(project_id, state):
+            yield msg
+
+    async def continue_execution(
+        self, project_id: str, state: AgentState,
+    ) -> AsyncGenerator[ChatMessage, None]:
+        """Continue execution from the next pending step."""
+        next_step = state.next_pending_step()
+        if not next_step:
             self.phases[project_id] = "done"
+            yield completion_summary(project_id, state)
+            return
+
+        async for msg in self.run_single_step(project_id, state, next_step):
+            yield msg
+
+    async def run_single_step(
+        self, project_id: str, state: AgentState, step: str,
+    ) -> AsyncGenerator[ChatMessage, None]:
+        """Run one agent step, then gate for approval."""
+        info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
+        agent = AGENTS.get(step)
+
+        # Skip unavailable agents gracefully (FRD-01 §8)
+        if not agent:
+            state.mark_step_skipped(step)
+            yield self._msg(
+                project_id,
+                f"⏭️ {info['name']} skipped (not available)",
+                {"type": "plan_update", "step": step, "status": "skipped"},
+            )
+            async for msg in self.continue_execution(project_id, state):
+                yield msg
+            return
+
+        # Emit plan_update: running
+        yield ChatMessage(
+            project_id=project_id,
+            role="agent",
+            agent_id="pm",
+            content="",
+            metadata={"type": "plan_update", "step": step, "status": "running"},
+        )
+
+        state.mark_step_running(step)
+        yield self._msg(
+            project_id,
+            f"{info['emoji']} **{info['name']}** is working...",
+            {"type": "agent_start", "agent": step},
+        )
+
+        # Run agent in thread pool (agents use synchronous LLM calls)
+        loop = asyncio.get_event_loop()
+        try:
+            state = await loop.run_in_executor(None, agent.run, state)
+            self.states[project_id] = state  # update reference
+            state.mark_step_completed(step)
+
+            # Emit plan_update: completed
             yield ChatMessage(
                 project_id=project_id,
                 role="agent",
                 agent_id="pm",
-                content="✅ All agents have completed. Review the results above. You can ask me to adjust anything or generate a presentation.",
-                metadata={"type": "pm_response"},
+                content="",
+                metadata={
+                    "type": "plan_update",
+                    "step": step,
+                    "status": "completed",
+                },
             )
 
-        elif phase in ("executing", "done"):
-            # Follow-up message — let PM respond conversationally
-            loop = asyncio.get_event_loop()
-
-            response = await loop.run_in_executor(
-                None,
-                lambda: llm.invoke([
-                    {"role": "system", "content": "You are an Azure solution project manager. The solution has been designed. Help the user with follow-up questions or modifications. Be brief."},
-                    {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser says: {message}"}
-                ]).content
+            # Emit formatted agent result
+            formatted = format_agent_output(step, state)
+            yield ChatMessage(
+                project_id=project_id,
+                role="agent",
+                agent_id=step,
+                content=formatted,
+                metadata={"type": "agent_result", "agent": step},
             )
 
+            # Approval gate check (FRD-01 §2.3)
+            if self.should_pause(state, step):
+                summary = pm.approval_summary(step, state)
+                state.awaiting_approval = True
+                state.current_step = step  # remember for refine
+                self.phases[project_id] = "approval"
+                yield self._msg(
+                    project_id,
+                    summary,
+                    {"type": "approval", "step": step},
+                )
+            else:
+                # Fast-run or non-gate step — continue automatically
+                async for msg in self.continue_execution(
+                    project_id, state
+                ):
+                    yield msg
+
+        except Exception as e:
+            # Graceful degradation (FRD-01 §8)
+            state.mark_step_failed(step)
             yield ChatMessage(
                 project_id=project_id,
                 role="agent",
                 agent_id="pm",
-                content=response,
-                metadata={"type": "pm_response"},
+                content="",
+                metadata={
+                    "type": "plan_update",
+                    "step": step,
+                    "status": "failed",
+                },
             )
+            yield self._msg(
+                project_id,
+                f"⚠️ {info['name']} failed: {str(e)}",
+                {"type": "agent_error", "agent": step},
+            )
+            # Continue to next step — pipeline never stops (FRD-01 §8)
+            async for msg in self.continue_execution(project_id, state):
+                yield msg
+
+    # ── Approval gate ───────────────────────────────────────────────
+
+    def should_pause(self, state: AgentState, step: str) -> bool:
+        """Determine if we should pause for approval after this step."""
+        if state.execution_mode == "fast-run":
+            # Fast-run: only 3 major gates (FRD-01 §2.3)
+            return step in self.FAST_RUN_GATES
+        # Guided mode: pause after every step
+        return True
+
+    # ── Iteration (FRD-01 §6) ──────────────────────────────────────
+
+    async def iterate(
+        self,
+        project_id: str,
+        state: AgentState,
+        agents_to_rerun: list[str],
+    ) -> AsyncGenerator[ChatMessage, None]:
+        """Re-run specific agents for iteration."""
+        self.phases[project_id] = "executing"
+
+        # Clear prior status for agents being re-run
+        rerun_set = set(agents_to_rerun)
+        state.completed_steps = [
+            s for s in state.completed_steps if s not in rerun_set
+        ]
+        state.failed_steps = [
+            s for s in state.failed_steps if s not in rerun_set
+        ]
+        state.skipped_steps = [
+            s for s in state.skipped_steps if s not in rerun_set
+        ]
+
+        # Temporarily scope plan to just the re-run agents (preserve order)
+        original_plan = list(state.plan_steps)
+        state.plan_steps = [s for s in original_plan if s in rerun_set]
+
+        names = [
+            AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun
+        ]
+        yield self._msg(
+            project_id,
+            f"Re-running {len(agents_to_rerun)} agents "
+            f"({', '.join(names)}) with your feedback...",
+            {"type": "pm_response"},
+        )
+
+        async for msg in self.execute_plan(project_id, state):
+            yield msg
+
+        # Restore full plan
+        state.plan_steps = original_plan
