@@ -11,6 +11,8 @@ interface Driver {
 
 interface Projection {
   years: number[];
+  implementationCost?: number;
+  recurringAnnualCost?: number;
   cumulativeSavings: number[];
   cumulativeCost: number[];
   cumulativeValue: number[];
@@ -21,6 +23,9 @@ interface ROIDashboardData {
   annualImpact: number;
   azureMonthlyCost: number;
   savingsPercentage: number;
+
+  /** True when current cost was estimated from Azure cost, not user-provided data. */
+  currentCostEstimated?: boolean;
 
   currentCost: {
     total: number;
@@ -35,6 +40,8 @@ interface ROIDashboardData {
   paybackMonths: number | null;
 
   drivers: Driver[];
+  /** Non-monetised driver names for the qualitative benefits section. */
+  qualitativeDrivers?: string[];
   projection: Projection;
   methodology: string;
 }
@@ -57,11 +64,13 @@ export default function ROIDashboard({ data }: Props) {
     annualImpact,
     azureMonthlyCost,
     savingsPercentage,
+    currentCostEstimated,
     currentCost,
     aiCost,
     roiPercent,
     paybackMonths,
     drivers,
+    qualitativeDrivers,
     projection,
     methodology,
   } = data;
@@ -70,11 +79,16 @@ export default function ROIDashboard({ data }: Props) {
   const hasAiCost = aiCost && aiCost.total > 0;
   const hasDrivers = drivers && drivers.length > 0;
   const hasProjection = projection && projection.years?.length > 0;
+  const hasQualitative = qualitativeDrivers && qualitativeDrivers.filter(Boolean).length > 0;
 
+  // AI bar is proportionally shorter when AI < current; wider (or full) when AI >= current
   const aiBarWidth =
     hasCurrentCost && hasAiCost
       ? Math.min((aiCost.total / currentCost.total) * 100, 100)
       : 0;
+
+  // Savings can be negative — surface that clearly
+  const savingsIsNegative = monthlySavings < 0;
 
   const maxCumulativeValue =
     hasProjection
@@ -94,17 +108,20 @@ export default function ROIDashboard({ data }: Props) {
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
             Monthly Savings
           </p>
-          <p className="text-2xl font-bold text-green-500">
-            ${fmt(monthlySavings)}
+          <p className={`text-2xl font-bold ${savingsIsNegative ? "text-red-400" : "text-green-500"}`}>
+            {savingsIsNegative ? "-" : ""}${fmt(Math.abs(monthlySavings))}
           </p>
-          <p className="text-xs text-green-400">
-            {savingsPercentage}% cost reduction
+          <p className={`text-xs ${savingsIsNegative ? "text-red-400" : "text-green-400"}`}>
+            {savingsIsNegative ? `${Math.abs(savingsPercentage)}% cost increase` : `${savingsPercentage}% cost reduction`}
           </p>
+          {currentCostEstimated && (
+            <p className="text-xs text-amber-400 mt-1">⚠️ Estimated baseline</p>
+          )}
         </div>
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-            Annual Impact
+            Annual Value
           </p>
           <p className="text-2xl font-bold text-[var(--accent)]">
             ${fmt(annualImpact)}
@@ -130,13 +147,28 @@ export default function ROIDashboard({ data }: Props) {
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
             Current Spend
+            {currentCostEstimated && (
+              <span className="ml-1 text-amber-400">⚠️</span>
+            )}
           </p>
           <p className="text-2xl font-bold text-orange-400">
             ${fmt(currentCost.total)}
             <span className="text-sm font-normal">/mo</span>
           </p>
+          {currentCostEstimated && (
+            <p className="text-xs text-amber-400">Estimated</p>
+          )}
         </div>
       </div>
+
+      {/* ── Estimated baseline notice ─────────────────────────── */}
+      {currentCostEstimated && (
+        <div className="bg-amber-900/20 border border-amber-500/40 rounded-xl p-4 text-sm text-amber-300">
+          <span className="font-semibold">⚠️ Estimated baseline:</span> Current cost is approximated
+          at 3× the Azure platform cost because labor, hourly rate, and manual hours were not provided.
+          Enter those assumptions for an accurate cost comparison.
+        </div>
+      )}
 
       {/* ── Cost Comparison Bars ──────────────────────────────── */}
       {hasCurrentCost && hasAiCost && (
@@ -149,7 +181,9 @@ export default function ROIDashboard({ data }: Props) {
           <div className="mb-4">
             <div className="flex justify-between mb-1">
               <span className="text-sm font-semibold text-[var(--text-primary)]">
-                Today
+                Today{currentCostEstimated && (
+                  <> <span className="text-xs text-amber-400">(estimated)</span></>
+                )}
               </span>
               <span className="text-sm font-semibold text-[var(--text-primary)]">
                 ${fmt(currentCost.total)}/mo
@@ -173,7 +207,7 @@ export default function ROIDashboard({ data }: Props) {
             </div>
           </div>
 
-          {/* AI bar — proportionally shorter */}
+          {/* AI bar — proportionally shorter (or wider when AI > current) */}
           <div className="mb-4">
             <div className="flex justify-between mb-1">
               <span className="text-sm font-semibold text-[var(--accent)]">
@@ -205,10 +239,17 @@ export default function ROIDashboard({ data }: Props) {
             </div>
           </div>
 
-          {/* Savings callout */}
-          <p className="text-sm text-green-500 font-semibold">
-            📉 ${fmt(monthlySavings)}/mo savings ({savingsPercentage}% reduction)
-          </p>
+          {/* Savings or cost-increase callout */}
+          {savingsIsNegative ? (
+            <p className="text-sm text-red-400 font-semibold">
+              📈 AI costs ${fmt(Math.abs(monthlySavings))}/mo more than current process ({Math.abs(savingsPercentage)}% increase).
+              Value may come from quality, speed, or risk reduction — see drivers below.
+            </p>
+          ) : (
+            <p className="text-sm text-green-500 font-semibold">
+              📉 ${fmt(monthlySavings)}/mo savings ({savingsPercentage}% reduction)
+            </p>
+          )}
 
           {/* Legend */}
           <div className="flex flex-wrap gap-4 mt-3 text-xs text-[var(--text-muted)]">
@@ -257,18 +298,48 @@ export default function ROIDashboard({ data }: Props) {
         </div>
       )}
 
+      {/* ── Qualitative Benefits ───────────────────────────────── */}
+      {hasQualitative && (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">
+            Qualitative Benefits
+          </h3>
+          <p className="text-xs text-[var(--text-muted)] mb-3">
+            These benefits are not easily expressed in dollar terms but contribute
+            to overall business value.
+          </p>
+          <ul className="space-y-2">
+            {qualitativeDrivers!.filter(Boolean).map((name) => (
+              <li key={name} className="flex items-start gap-2 text-sm text-[var(--text-primary)]">
+                <span className="text-[var(--accent)] mt-0.5">✦</span>
+                {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* ── 3-Year Projection ─────────────────────────────────── */}
       {hasProjection && (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-4">
+          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-1">
             3-Year Projection
           </h3>
+          {projection.implementationCost != null && (
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              Year 1 includes a one-time implementation cost of{" "}
+              <span className="font-semibold">${fmt(projection.implementationCost)}</span>.
+              Years 2–3 reflect recurring platform cost of{" "}
+              <span className="font-semibold">${fmt(projection.recurringAnnualCost ?? 0)}/yr</span> only.
+            </p>
+          )}
           <div className="grid grid-cols-3 gap-4">
             {projection.years.map((year, i) => {
               const savings = projection.cumulativeSavings[i] ?? 0;
               const cost = projection.cumulativeCost[i] ?? 0;
               const savingsPct = (savings / maxCumulativeValue) * 100;
               const costPct = (cost / maxCumulativeValue) * 100;
+              const savingsNeg = savings < 0;
               return (
                 <div key={year} className="text-center">
                   <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
@@ -278,8 +349,8 @@ export default function ROIDashboard({ data }: Props) {
                     {/* Savings bar */}
                     <div className="flex flex-col items-center w-10">
                       <div
-                        style={{ height: `${Math.max(savingsPct, 5)}%` }}
-                        className="w-full bg-green-500 rounded-t-md"
+                        style={{ height: `${Math.max(Math.abs(savingsPct), 5)}%` }}
+                        className={`w-full ${savingsNeg ? "bg-red-500" : "bg-green-500"} rounded-t-md`}
                         title={`Cumulative savings: $${fmt(savings)}`}
                       />
                     </div>
@@ -292,8 +363,12 @@ export default function ROIDashboard({ data }: Props) {
                       />
                     </div>
                   </div>
-                  <p className="text-sm font-bold text-green-500">${fmt(savings)}</p>
-                  <p className="text-xs text-[var(--text-muted)]">savings</p>
+                  <p className={`text-sm font-bold ${savingsNeg ? "text-red-400" : "text-green-500"}`}>
+                    {savingsNeg ? "-" : ""}${fmt(Math.abs(savings))}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {savingsNeg ? "net cost" : "savings"}
+                  </p>
                   <p className="text-xs text-blue-400 mt-1">${fmt(cost)} cost</p>
                 </div>
               );
