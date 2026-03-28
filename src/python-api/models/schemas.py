@@ -35,6 +35,7 @@ class ChatMessage(BaseModel):
 class CreateProjectRequest(BaseModel):
     description: str = Field(min_length=10, max_length=5000)
     customer_name: Optional[str] = Field(default=None, max_length=200)
+    active_agents: Optional[list[str]] = None
 
 
 class SendMessageRequest(BaseModel):

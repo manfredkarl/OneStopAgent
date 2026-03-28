@@ -50,6 +50,9 @@ async def info():
 @app.post("/api/projects")
 async def create_project(req: CreateProjectRequest, x_user_id: str = Header()):
     project = store.create_project(x_user_id, req.description, req.customer_name)
+    # Override default active_agents if provided by frontend
+    if req.active_agents is not None:
+        project.active_agents = req.active_agents
     return {"projectId": project.id}
 
 

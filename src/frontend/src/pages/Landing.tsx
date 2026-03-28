@@ -160,7 +160,7 @@ const INDUSTRIES: Industry[] = [
   },
 ];
 
-export default function Landing({ agents: _agents, onProjectCreated }: Props) {
+export default function Landing({ agents, onProjectCreated }: Props) {
   const navigate = useNavigate();
   const [description, setDescription] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -172,7 +172,9 @@ export default function Landing({ agents: _agents, onProjectCreated }: Props) {
     if (!text) return;
     setLoading(true);
     try {
-      const result = await createProject(text, customerName || undefined);
+      // Pass active agents so the project respects sidebar toggles
+      const activeAgents = agents.filter(a => a.active).map(a => a.agentId);
+      const result = await createProject(text, customerName || undefined, activeAgents);
       const projectId = result.projectId || result.id;
       onProjectCreated?.();
       navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);

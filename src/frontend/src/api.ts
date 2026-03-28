@@ -14,11 +14,11 @@ function normalizeMessage(msg: any): ChatMessage {
   };
 }
 
-export async function createProject(description: string, customerName?: string) {
+export async function createProject(description: string, customerName?: string, activeAgents?: string[]) {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
-    body: JSON.stringify({ description, customer_name: customerName }),
+    body: JSON.stringify({ description, customer_name: customerName, active_agents: activeAgents }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
