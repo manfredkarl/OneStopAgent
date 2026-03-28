@@ -34,10 +34,12 @@ export interface PlanStep {
 
 export const AGENT_REGISTRY = [
   { agentId: 'pm', displayName: 'Project Manager', abbreviation: 'PM', required: true, defaultActive: true },
-  { agentId: 'envisioning', displayName: 'Envisioning', abbreviation: 'EN', required: false, defaultActive: false },
-  { agentId: 'architect', displayName: 'System Architect', abbreviation: 'SA', required: true, defaultActive: true },
-  { agentId: 'azure-specialist', displayName: 'Azure Specialist', abbreviation: 'AE', required: false, defaultActive: true },
-  { agentId: 'cost', displayName: 'Cost Specialist', abbreviation: 'CS', required: false, defaultActive: true },
+  { agentId: 'envisioning', displayName: 'Brainstorming', abbreviation: 'BS', required: false, defaultActive: true },
+  { agentId: 'knowledge', displayName: 'Knowledge', abbreviation: 'KB', required: false, defaultActive: true },
+  { agentId: 'architect', displayName: 'Architect', abbreviation: 'SA', required: true, defaultActive: true },
+  { agentId: 'azure-specialist', displayName: 'Azure Specialist', abbreviation: 'AZ', required: false, defaultActive: true },
+  { agentId: 'cost', displayName: 'Cost', abbreviation: 'CS', required: false, defaultActive: true },
   { agentId: 'business-value', displayName: 'Business Value', abbreviation: 'BV', required: false, defaultActive: true },
-  { agentId: 'presentation', displayName: 'Presentation', abbreviation: 'PR', required: false, defaultActive: true },
+  { agentId: 'roi', displayName: 'ROI', abbreviation: 'ROI', required: false, defaultActive: true },
+  { agentId: 'presentation', displayName: 'Presentation', abbreviation: 'PT', required: false, defaultActive: true },
 ];

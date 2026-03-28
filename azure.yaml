@@ -7,11 +7,11 @@ infra:
 
 services:
   api:
-    project: ./src/api
+    project: ./src/python-api
     host: containerapp
-    language: ts
+    language: python
   web:
-    project: ./src/web
+    project: ./src/frontend
     host: containerapp
     language: ts
 resources:

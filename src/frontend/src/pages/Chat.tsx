@@ -89,7 +89,7 @@ export default function Chat() {
             )}
           </div>
         )}
-        <ChatThread messages={messages} />
+        <ChatThread messages={messages} onSend={handleSend} />
         <ChatInput onSend={handleSend} disabled={sending} />
       </div>
     </div>

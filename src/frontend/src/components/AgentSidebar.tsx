@@ -36,8 +36,15 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
   };
 
   const COLORS: Record<string, string> = {
-    pm: '#0F6CBD', envisioning: '#8764B8', architect: '#008272',
-    'azure-specialist': '#005A9E', cost: '#D83B01', 'business-value': '#107C10', presentation: '#B4009E',
+    pm: '#0F6CBD',
+    envisioning: '#8764B8',
+    knowledge: '#00A4EF',
+    architect: '#008272',
+    'azure-specialist': '#005A9E',
+    cost: '#D83B01',
+    'business-value': '#107C10',
+    roi: '#FFB900',
+    presentation: '#B4009E',
   };
 
   return (
