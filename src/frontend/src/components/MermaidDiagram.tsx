@@ -9,6 +9,11 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
     const trimmed = (mermaidCode || '').trim();
     if (!trimmed || trimmed.length < 10) { setFailed(true); return; }
 
+    // Sanitize: remove <br> tags that some LLMs put in node labels
+    const sanitized = trimmed
+      .replace(/<br\s*\/?>/gi, '\\n')  // <br> → \n (mermaid line break)
+      .replace(/<[^>]+>/g, '');         // strip any other HTML tags
+
     (async () => {
       try {
         const mermaid = (await import('mermaid')).default;
@@ -17,17 +22,14 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
           theme: 'default',
           securityLevel: 'loose',
           suppressErrorRendering: true,
-          logLevel: 'fatal' as any,
+          logLevel: 'fatal' as unknown as number,
         });
-        // Parse first to check validity without rendering
-        await mermaid.parse(trimmed);
+        await mermaid.parse(sanitized);
         const id = `m${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
-        const { svg: rendered } = await mermaid.render(id, trimmed);
-        // Clean up any orphaned error elements mermaid may have created
+        const { svg: rendered } = await mermaid.render(id, sanitized);
         document.querySelectorAll(`#d${id}, .error-icon, .error-text`).forEach(el => el.remove());
         if (!cancelled) { setSvg(rendered); setFailed(false); }
       } catch {
-        // Silently fail — remove any error elements mermaid injected into the DOM
         document.querySelectorAll('.error-icon, .error-text, [id^="dmermaid"]').forEach(el => el.remove());
         if (!cancelled) setFailed(true);
       }
@@ -36,7 +38,14 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
     return () => { cancelled = true; };
   }, [mermaidCode]);
 
-  if (failed) return null; // Don't show anything for invalid diagrams
+  if (failed) {
+    // Show the raw code as a readable fallback instead of nothing
+    return (
+      <div className="my-3 p-4 bg-[var(--bg-secondary)] rounded-xl overflow-x-auto">
+        <pre className="text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap">{mermaidCode}</pre>
+      </div>
+    );
+  }
 
   if (svg) {
     return (

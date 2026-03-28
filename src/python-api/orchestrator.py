@@ -156,10 +156,25 @@ def format_agent_output(step: str, state: AgentState) -> str:
                 q = d.get("quantifiedEstimate") or d.get("estimate")
                 if q:
                     est_text = f" — *{q}*"
+                monetizable = "💰" if d.get("monetizable") else "📋"
                 parts.append(
-                    f"- **{d.get('name', '')}**: "
+                    f"- {monetizable} **{d.get('name', '')}**: "
                     f"{d.get('impact', d.get('description', ''))}{est_text}"
                 )
+        # Add source references from retrieved patterns
+        patterns = state.retrieved_patterns
+        if patterns:
+            parts.append("\n### 📚 Sources & References\n")
+            for p in patterns[:3]:
+                url = p.get("url", "")
+                title = p.get("title", "Microsoft Learn")
+                if url:
+                    parts.append(f"- [{title}]({url})")
+                else:
+                    parts.append(f"- {title}")
+            parts.append("\n*Value estimates based on Microsoft case studies and industry benchmarks.*")
+        else:
+            parts.append("\n*⚠️ Value estimates based on LLM knowledge — not grounded in live sources.*")
         return "\n".join(parts)
 
     if step == "roi":
