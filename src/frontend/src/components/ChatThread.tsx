@@ -11,18 +11,10 @@ interface Props {
   projectId?: string;
 }
 
-const AGENT_COLORS = [
-  '#0F6CBD', '#107C10', '#C239B3', '#F7630C', '#D13438', '#00B7C3', '#8764B8',
-];
-
-function getAgentColor(agentId: string): string {
-  const idx = AGENT_REGISTRY.findIndex(a => a.agentId === agentId);
-  return AGENT_COLORS[idx >= 0 ? idx % AGENT_COLORS.length : 0];
-}
-
-function getAgentAbbr(agentId: string): string {
-  return AGENT_REGISTRY.find(a => a.agentId === agentId)?.abbreviation || agentId.slice(0, 2).toUpperCase();
-}
+const EMOJIS: Record<string, string> = {
+  pm: '\uD83C\uDFAF', architect: '\uD83C\uDFD7\uFE0F', cost: '\uD83D\uDCB0',
+  'business-value': '\uD83D\uDCCA', roi: '\uD83D\uDCC8', presentation: '\uD83D\uDCD1',
+};
 
 function getAgentName(agentId: string): string {
   return AGENT_REGISTRY.find(a => a.agentId === agentId)?.displayName || agentId;
@@ -35,7 +27,6 @@ export default function ChatThread({ messages, onSend, projectId }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Filter out empty messages and plan_update status events
   const visibleMessages = messages.filter(msg => {
     if (!msg.content && msg.metadata?.type === 'plan_update') return false;
     if (!msg.content?.trim()) return false;
@@ -44,124 +35,119 @@ export default function ChatThread({ messages, onSend, projectId }: Props) {
 
   if (visibleMessages.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] text-sm">
-        Send a message to get started
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-[var(--accent)] flex items-center justify-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <p className="text-lg font-semibold text-[var(--text-primary)]">How can I help you today?</p>
+        <p className="text-sm text-[var(--text-muted)] max-w-md">Describe your project and I'll design an Azure solution with architecture, cost estimates, and business value analysis.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-      {visibleMessages.map(msg => {
-        if (msg.role === 'user') {
-          return (
-            <div key={msg.id} className="flex justify-end">
-              <div className="max-w-[70%] bg-[var(--accent)] text-white rounded-2xl rounded-br-md px-4 py-2.5 text-sm">
-                {msg.content}
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+        {visibleMessages.map(msg => {
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id} className="flex justify-end">
+                <div className="max-w-[80%] bg-[var(--bg-user-msg)] rounded-3xl px-5 py-3 text-[15px] leading-relaxed text-[var(--text-primary)]">
+                  {msg.content}
+                </div>
               </div>
-            </div>
-          );
-        }
+            );
+          }
 
-        const agentId = msg.agentId || 'pm';
-        const color = getAgentColor(agentId);
+          const agentId = msg.agentId || 'pm';
 
-        // Check for execution plan in metadata
-        if (msg.metadata?.type === 'execution_plan' && msg.metadata?.steps) {
-          return (
-            <div key={msg.id} className="max-w-[85%]">
-              <ExecutionPlan steps={msg.metadata.steps as PlanStep[]} />
-            </div>
-          );
-        }
-
-        // Approval gate — render with action buttons
-        if (msg.metadata?.type === 'approval') {
-          return (
-            <div key={msg.id} className="flex gap-3 max-w-[85%]">
-              <div
-                className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5"
-                style={{ backgroundColor: getAgentColor('pm') }}
-              >
-                {getAgentAbbr('pm')}
+          if (msg.metadata?.type === 'execution_plan' && msg.metadata?.steps) {
+            return (
+              <div key={msg.id}>
+                <ExecutionPlan steps={msg.metadata.steps as PlanStep[]} />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-[var(--text-muted)] mb-1">Project Manager</p>
-                <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl rounded-tl-md px-4 py-3">
-                  <MessageContent content={msg.content} />
-                  <div className="flex gap-2 mt-3 pt-3 border-t border-[var(--border)]">
-                    <button onClick={() => onSend?.('proceed')} className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium hover:bg-[var(--accent-hover)] cursor-pointer">
-                      ✅ Proceed
+            );
+          }
+
+          if (msg.metadata?.type === 'agent_start') {
+            return (
+              <div key={msg.id} className="flex items-center gap-2 py-1">
+                <div className="h-px flex-1 bg-[var(--border-light)]" />
+                <span className="text-xs text-[var(--text-muted)] px-2 shrink-0">{msg.content}</span>
+                <div className="h-px flex-1 bg-[var(--border-light)]" />
+              </div>
+            );
+          }
+
+          if (msg.metadata?.type === 'agent_error') {
+            return (
+              <div key={msg.id} className="flex gap-3 items-start">
+                <span className="text-xl shrink-0 mt-0.5">{EMOJIS[agentId] || '\uD83D\uDD27'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-muted)] mb-1">{getAgentName(agentId)}</p>
+                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 rounded-2xl px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                    {msg.content}
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.metadata?.type === 'approval') {
+            return (
+              <div key={msg.id} className="flex gap-3 items-start">
+                <span className="text-xl shrink-0 mt-0.5">{EMOJIS['pm']}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-muted)] mb-1.5">Project Manager</p>
+                  <div className="prose-content">
+                    <MessageContent content={msg.content} />
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button
+                      onClick={() => onSend?.('proceed')}
+                      className="px-4 py-2 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] transition-colors cursor-pointer"
+                    >
+                      Proceed
                     </button>
-                    <button onClick={() => onSend?.('skip')} className="px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] text-xs font-medium hover:bg-[var(--border)] cursor-pointer">
-                      ⏭️ Skip
+                    <button
+                      onClick={() => onSend?.('skip')}
+                      className="px-4 py-2 rounded-xl bg-[var(--bg-subtle)] text-[var(--text-secondary)] text-sm font-medium hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+                    >
+                      Skip
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-          );
-        }
+            );
+          }
 
-        // Agent error — styled with error color
-        if (msg.metadata?.type === 'agent_error') {
           return (
-            <div key={msg.id} className="flex gap-3 max-w-[85%]">
-              <div
-                className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5"
-                style={{ backgroundColor: color }}
-              >
-                {getAgentAbbr(agentId)}
-              </div>
+            <div key={msg.id} className="flex gap-3 items-start">
+              <span className="text-xl shrink-0 mt-0.5">{EMOJIS[agentId] || '\uD83D\uDD27'}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-[var(--text-muted)] mb-1">{getAgentName(agentId)}</p>
-                <div className="bg-red-50 border border-red-200 rounded-2xl rounded-tl-md px-4 py-3 text-sm text-red-700">
-                  {msg.content}
+                <p className="text-xs font-medium text-[var(--text-muted)] mb-1.5">{getAgentName(agentId)}</p>
+                <div className="prose-content">
+                  <MessageContent content={msg.content} />
                 </div>
-              </div>
-            </div>
-          );
-        }
-
-        // Agent start — announcement with emoji (content already has emoji)
-        if (msg.metadata?.type === 'agent_start') {
-          return (
-            <div key={msg.id} className="flex justify-center py-1">
-              <span className="text-xs text-[var(--text-muted)] bg-[var(--bg-secondary)] px-3 py-1 rounded-full">
-                {msg.content}
-              </span>
-            </div>
-          );
-        }
-
-        // Default rendering for agent_result, pm_response, and other types
-        return (
-          <div key={msg.id} className="flex gap-3 max-w-[85%]">
-            <div
-              className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold mt-0.5"
-              style={{ backgroundColor: color }}
-            >
-              {getAgentAbbr(agentId)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-[var(--text-muted)] mb-1">{getAgentName(agentId)}</p>
-              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl rounded-tl-md px-4 py-3">
-                <MessageContent content={msg.content} />
-                {/* Download button for presentation */}
                 {agentId === 'presentation' && projectId && (
                   <button
                     onClick={() => downloadPptx(projectId).catch(console.error)}
-                    className="mt-3 px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] cursor-pointer flex items-center gap-2"
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] transition-colors cursor-pointer shadow-sm"
                   >
-                    📥 Download PowerPoint
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download PowerPoint
                   </button>
                 )}
               </div>
             </div>
-          </div>
-        );
-      })}
-      <div ref={bottomRef} />
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

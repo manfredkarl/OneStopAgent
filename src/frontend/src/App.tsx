@@ -6,10 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen flex flex-col">
-        <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center px-5 shrink-0">
-          <a href="/" className="text-sm font-bold text-[var(--accent)] no-underline">OneStopAgent</a>
-        </header>
+      <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-main)]">
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<Landing />} />

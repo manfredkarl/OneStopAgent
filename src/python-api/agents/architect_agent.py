@@ -1,7 +1,8 @@
 """System Architect Agent — generates Azure architecture with Mermaid diagrams.
 
-Reads retrieved_patterns from KnowledgeAgent (FRD-03 §2) to ground designs
-in published Microsoft reference architectures.
+Retrieves Microsoft reference architectures (via MCP or local fallback) and uses
+them to ground architecture designs. Single LLM call produces Mermaid diagram,
+components, and narrative together so they stay consistent.
 """
 
 import json
@@ -10,70 +11,71 @@ import re
 
 from agents.llm import llm
 from agents.state import AgentState
+from services.mcp import mcp_client, MCPUnavailableError
+from data.knowledge_base import search_local_patterns
 
 logger = logging.getLogger(__name__)
-
-# §2.5 — used when LLM is completely unavailable
-FALLBACK_ARCHITECTURE = {
-    "mermaidCode": (
-        "flowchart TD\n"
-        "  A[Client] --> B[Web App]\n"
-        "  B --> C[API Layer]\n"
-        "  C --> D[Database]\n"
-        "  C --> E[Cache]"
-    ),
-    "components": [
-        {"name": "Web App", "azureService": "Azure App Service", "description": "Web application frontend"},
-        {"name": "API Layer", "azureService": "Azure App Service", "description": "REST API backend"},
-        {"name": "Database", "azureService": "Azure SQL Database", "description": "Relational data storage"},
-        {"name": "Cache", "azureService": "Azure Cache for Redis", "description": "Performance caching"},
-    ],
-    "narrative": "A standard three-tier Azure architecture with web frontend, API layer, and managed database.",
-    "basedOn": "custom design",
-}
 
 
 class ArchitectAgent:
     name = "System Architect"
     emoji = "🏗️"
 
-    # ── public entry point ───────────────────────────────────────────
-
     def run(self, state: AgentState) -> AgentState:
-        """Generate architecture grounded in retrieved patterns (§2)."""
+        """Retrieve reference patterns, then generate architecture grounded in them."""
+        self._retrieve_patterns(state)
+
         try:
             pattern = self._select_pattern(state.retrieved_patterns)
             requirements = state.to_context_string()
-
-            mermaid_code = self._generate_mermaid(requirements, pattern)
-            components = self._extract_components(requirements, pattern)
-            narrative = self._generate_narrative(requirements, components, pattern)
-
-            state.architecture = {
-                "mermaidCode": mermaid_code,
-                "components": components,
-                "narrative": narrative,
-                "basedOn": pattern["title"] if pattern else "custom design",
-            }
+            state.architecture = self._generate_architecture(requirements, pattern)
         except Exception:
-            logger.exception("ArchitectAgent failed — using fallback template")
-            state.architecture = dict(FALLBACK_ARCHITECTURE)
+            logger.exception("ArchitectAgent failed — using LLM-less fallback")
+            state.architecture = self._build_fallback(state)
 
         return state
 
-    # ── §2.3.1 pattern selection ─────────────────────────────────────
+    # ── pattern retrieval (merged from KnowledgeAgent) ────────────────
+
+    @staticmethod
+    def _retrieve_patterns(state: AgentState) -> None:
+        """Query MCP for Azure patterns matching the use case, with local fallback."""
+        query = f"{state.user_input} {state.clarifications}".strip()
+
+        industry = state.brainstorming.get("industry", "")
+        if industry and industry != "Cross-Industry":
+            query += f" {industry}"
+
+        try:
+            patterns = mcp_client.search(query=query, top_k=5)
+            logger.info("MCP returned %d patterns for query: %s", len(patterns), query[:50])
+            state.retrieved_patterns = patterns
+            return
+        except MCPUnavailableError as e:
+            logger.warning("MCP unavailable, falling back to local knowledge base: %s", e)
+
+        local_patterns = search_local_patterns(query=query, top_k=5)
+        for pattern in local_patterns:
+            pattern["_source"] = "local"
+            pattern["_ungrounded"] = True
+
+        state.retrieved_patterns = local_patterns
+        if local_patterns:
+            logger.info("Local KB returned %d patterns (ungrounded)", len(local_patterns))
+        else:
+            logger.warning("No patterns found in local knowledge base either")
 
     @staticmethod
     def _select_pattern(patterns: list[dict]) -> dict | None:
-        """Select the pattern with the highest confidence_score."""
         if not patterns:
             return None
         return max(patterns, key=lambda p: p.get("confidence_score", 0.0))
 
-    # ── §2.3.2 Mermaid generation ────────────────────────────────────
+    # ── Single LLM call for mermaid + components + narrative ──────────
 
     @staticmethod
-    def _generate_mermaid(requirements: str, pattern: dict | None) -> str:
+    def _generate_architecture(requirements: str, pattern: dict | None) -> dict:
+        """Generate mermaid, components, and narrative in one LLM call."""
         pattern_context = ""
         if pattern:
             pattern_context = (
@@ -89,98 +91,111 @@ class ArchitectAgent:
             {
                 "role": "system",
                 "content": (
-                    "Generate a Mermaid flowchart TD diagram for an Azure architecture.\n"
+                    "You are an Azure solutions architect. Design a complete Azure architecture.\n"
                     f"{pattern_context}"
-                    "RULES:\n"
+                    "Return ONLY valid JSON (no markdown fences) with this structure:\n"
+                    "{\n"
+                    '  "mermaidCode": "flowchart TD\\n  A[Client] --> B[Web App]\\n  ...",\n'
+                    '  "components": [\n'
+                    '    {"name": "Component Name", "azureService": "Azure Service Name", "description": "What it does"}\n'
+                    "  ],\n"
+                    '  "narrative": "2-3 sentence architecture description for a business audience."\n'
+                    "}\n\n"
+                    "MERMAID RULES:\n"
                     "- Use 'flowchart TD' syntax\n"
-                    "- Maximum 20 nodes\n"
-                    "- Include specific Azure service names as nodes\n"
-                    "- Show data flow between components\n"
-                    "- Do NOT use HTML tags like <br> in node labels — use short text only\n"
-                    "- Node labels should be concise: e.g. [Azure SQL Database] not [Azure SQL Database<br>Product Data]\n"
-                    "- Return ONLY the Mermaid code, no markdown fences, no explanation"
+                    "- Maximum 15 nodes\n"
+                    "- Each node label must be a specific Azure service name\n"
+                    "- Show data flow between components with arrows (-->)\n"
+                    "- Do NOT use HTML tags like <br> in node labels\n"
+                    "- Node labels should be concise: e.g. [Azure SQL Database]\n"
+                    "- Use unique single-letter or short IDs for nodes (A, B, C...)\n"
+                    "- Every component in the components array MUST appear as a node in the diagram\n\n"
+                    "COMPONENT RULES:\n"
+                    "- Use real Azure service names (Azure App Service, Azure Cosmos DB, etc.)\n"
+                    "- Include ALL services shown in the Mermaid diagram\n"
+                    "- 5-15 components depending on complexity\n\n"
+                    "NARRATIVE RULES:\n"
+                    "- 2-3 sentences for a business audience\n"
+                    "- Reference the specific Azure services used\n"
+                    "- Mention the reference architecture if one was provided"
                 ),
             },
-            {"role": "user", "content": f"Design an Azure architecture for: {requirements}"},
+            {"role": "user", "content": f"Design an Azure architecture for:\n{requirements}"},
         ])
 
-        code = response.content.strip()
+        text = response.content.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-        # Fence cleanup (§2.3.2)
-        code = re.sub(r"^```(?:mermaid)?\s*\n?", "", code)
-        code = re.sub(r"\n?```\s*$", "", code)
+        result = json.loads(text)
 
-        if not code.strip().startswith(("flowchart", "graph")):
-            code = "flowchart TD\n" + code
+        # Validate and clean the mermaid code
+        mermaid = result.get("mermaidCode", "")
+        mermaid = re.sub(r"^```(?:mermaid)?\s*\n?", "", mermaid)
+        mermaid = re.sub(r"\n?```\s*$", "", mermaid)
+        if not mermaid.strip().startswith(("flowchart", "graph")):
+            mermaid = "flowchart TD\n" + mermaid
 
-        node_count = len(re.findall(r"^\s*\w+[\[\(\{]", code, re.MULTILINE))
-        if node_count > 20:
-            logger.warning("Mermaid diagram has %d nodes (max 20)", node_count)
+        components = result.get("components", [])
+        if not isinstance(components, list) or not components:
+            raise ValueError("No components returned")
 
-        return code
+        narrative = result.get("narrative", "")
+        if not narrative:
+            comp_names = ", ".join(c.get("azureService", c.get("name", "")) for c in components[:5])
+            narrative = f"Azure architecture using {comp_names}."
 
-    # ── §2.3.3 component extraction ──────────────────────────────────
+        return {
+            "mermaidCode": mermaid,
+            "components": components,
+            "narrative": narrative,
+            "basedOn": pattern["title"] if pattern else "custom design",
+        }
 
-    @staticmethod
-    def _extract_components(requirements: str, pattern: dict | None) -> list[dict]:
-        try:
-            response = llm.invoke([
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract Azure architecture components. Return ONLY a JSON array: "
-                        '[{"name": "...", "azureService": "...", "description": "..."}]'
-                    ),
-                },
-                {"role": "user", "content": requirements},
-            ])
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            components = json.loads(text)
-            if not isinstance(components, list):
-                raise ValueError("Expected JSON array")
-            return components
-        except (json.JSONDecodeError, ValueError, Exception):
-            if pattern and pattern.get("components"):
-                return pattern["components"]
-            return [
-                {"name": "Web Frontend", "azureService": "Azure App Service", "description": "Web hosting"},
-                {"name": "API Backend", "azureService": "Azure App Service", "description": "API layer"},
-                {"name": "Database", "azureService": "Azure SQL Database", "description": "Data storage"},
-            ]
-
-    # ── §2.3.4 narrative generation ──────────────────────────────────
+    # ── Fallback (LLM failure) ───────────────────────────────────────
 
     @staticmethod
-    def _generate_narrative(
-        requirements: str, components: list[dict], pattern: dict | None
-    ) -> str:
-        pattern_note = ""
-        if pattern:
-            pattern_note = (
-                f"This design is based on the '{pattern['title']}' "
-                "reference architecture from Microsoft. "
-            )
-        try:
-            response = llm.invoke([
-                {
-                    "role": "system",
-                    "content": (
-                        "Write a 2-3 sentence architecture description for a business audience. "
-                        f"{pattern_note}"
-                        "Be specific about Azure services used."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Components: {json.dumps(components)}\nFor: {requirements}",
-                },
-            ])
-            return response.content.strip()
-        except Exception:
-            comp_names = ", ".join(
-                c.get("azureService", c.get("name", "")) for c in components[:5]
-            )
-            base = f"Based on '{pattern['title']}'" if pattern else "Custom Azure architecture"
-            return f"{base} using {comp_names} to deliver a scalable, secure solution."
+    def _build_fallback(state: AgentState) -> dict:
+        """Build a fallback architecture from brainstorming scenarios if available."""
+        scenarios = state.brainstorming.get("scenarios", [])
+
+        # Try to build something useful from the scenarios' azure_services
+        services: list[str] = []
+        for s in scenarios:
+            services.extend(s.get("azure_services", []))
+
+        if not services:
+            services = ["Azure App Service", "Azure SQL Database", "Azure Cache for Redis"]
+
+        # Deduplicate while preserving order
+        seen: set[str] = set()
+        unique_services: list[str] = []
+        for svc in services:
+            if svc not in seen:
+                seen.add(svc)
+                unique_services.append(svc)
+
+        # Build simple mermaid from services
+        lines = ["flowchart TD", "  Client[Client Browser]"]
+        components = []
+        prev_id = "Client"
+        for i, svc in enumerate(unique_services[:12]):
+            node_id = chr(65 + i)  # A, B, C, ...
+            lines.append(f"  {prev_id} --> {node_id}[{svc}]")
+            components.append({
+                "name": svc.replace("Azure ", ""),
+                "azureService": svc,
+                "description": f"Managed {svc.replace('Azure ', '').lower()} service",
+            })
+            prev_id = node_id
+
+        return {
+            "mermaidCode": "\n".join(lines),
+            "components": components,
+            "narrative": (
+                f"Architecture using {', '.join(unique_services[:4])} "
+                "to deliver a scalable Azure solution. "
+                "⚠️ Generated from fallback — review and refine."
+            ),
+            "basedOn": "fallback (LLM unavailable)",
+        }

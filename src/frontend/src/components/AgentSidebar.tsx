@@ -8,6 +8,15 @@ interface Props {
   onAgentsChange: (agents: AgentStatus[]) => void;
 }
 
+const EMOJIS: Record<string, string> = {
+  pm: '🎯',
+  architect: '🏗️',
+  cost: '💰',
+  'business-value': '📊',
+  roi: '📈',
+  presentation: '📑',
+};
+
 export default function AgentSidebar({ projectId, agents, onAgentsChange }: Props) {
   const handleToggle = async (agentId: string, currentActive: boolean) => {
     const reg = AGENT_REGISTRY.find(a => a.agentId === agentId);
@@ -29,73 +38,72 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
         active: r.defaultActive,
       }));
 
-  const statusDot: Record<string, string> = {
-    idle: 'bg-gray-400',
-    working: 'bg-[var(--accent)] animate-pulse',
-    error: 'bg-[var(--error)]',
-  };
-
-  const COLORS: Record<string, string> = {
-    pm: '#0F6CBD',
-    envisioning: '#8764B8',
-    knowledge: '#00A4EF',
-    architect: '#008272',
-    'azure-specialist': '#005A9E',
-    cost: '#D83B01',
-    'business-value': '#107C10',
-    roi: '#FFB900',
-    presentation: '#B4009E',
-  };
-
   return (
-    <aside className="w-60 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col overflow-y-auto">
-      <div className="px-4 pt-4 pb-2">
-        <h2 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Agents</h2>
-      </div>
-      <div className="flex-1 px-2 space-y-0.5">
+    <aside className="w-64 shrink-0 bg-[var(--bg-sidebar)] flex flex-col border-r border-[var(--border-light)]">
+      {/* Brand */}
+      <a href="/" className="flex items-center gap-2.5 px-5 h-14 shrink-0 no-underline group">
+        <div className="w-8 h-8 rounded-lg bg-[var(--accent)] flex items-center justify-center">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span className="text-[15px] font-semibold text-[var(--text-primary)] tracking-tight group-hover:text-[var(--accent)] transition-colors">OneStopAgent</span>
+      </a>
+
+      {/* Divider */}
+      <div className="mx-4 border-t border-[var(--border-light)]" />
+
+      {/* Agent list */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+        <p className="px-2 pb-2 text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-widest">Agents</p>
         {agentList.map(agent => {
           const reg = AGENT_REGISTRY.find(r => r.agentId === agent.agentId);
-          const abbr = reg?.abbreviation || agent.agentId.slice(0, 2).toUpperCase();
-          const color = COLORS[agent.agentId] || '#0F6CBD';
+          const isWorking = agent.status === 'working';
+          const isError = agent.status === 'error';
+
           return (
-            <div
+            <button
               key={agent.agentId}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors ${
-                agent.active ? 'hover:bg-[var(--bg-secondary)]' : 'opacity-50'
-              }`}
+              onClick={() => reg?.required ? undefined : handleToggle(agent.agentId, agent.active)}
+              disabled={reg?.required}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all duration-150 ${
+                agent.active
+                  ? 'hover:bg-[var(--bg-hover)] cursor-pointer'
+                  : 'opacity-45 cursor-pointer hover:opacity-60'
+              } ${reg?.required ? '!cursor-default' : ''}`}
             >
-              {/* Avatar */}
-              <div
-                className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[10px] font-bold shrink-0 relative"
-                style={{ backgroundColor: color }}
-              >
-                {abbr}
-                <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[var(--bg-primary)] ${statusDot[agent.status] || statusDot.idle}`} />
-              </div>
+              {/* Emoji icon */}
+              <span className="text-lg shrink-0 leading-none">{EMOJIS[agent.agentId] || '🔧'}</span>
 
               {/* Name */}
-              <span className={`flex-1 text-sm truncate ${agent.active ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] line-through'}`}>
+              <span className={`flex-1 text-[13.5px] truncate ${
+                agent.active ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-muted)] line-through'
+              }`}>
                 {agent.displayName}
               </span>
 
-              {/* Toggle switch */}
-              {agent.agentId !== 'pm' && (
-                <button
-                  onClick={() => handleToggle(agent.agentId, agent.active)}
-                  disabled={reg?.required}
-                  title={reg?.required ? 'Required agent' : agent.active ? 'Deactivate' : 'Activate'}
-                  className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${
-                    reg?.required ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-                  } ${agent.active ? 'bg-[var(--accent)]' : 'bg-gray-300'}`}
-                >
-                  <span className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${
-                    agent.active ? 'translate-x-[14px]' : ''
-                  }`} />
-                </button>
-              )}
-            </div>
+              {/* Status dot */}
+              <span className="relative shrink-0 flex items-center justify-center w-4 h-4">
+                {isWorking ? (
+                  <span className="w-2.5 h-2.5 rounded-full bg-[var(--green)] dot-pulse" />
+                ) : isError ? (
+                  <span className="w-2.5 h-2.5 rounded-full bg-[var(--red)]" />
+                ) : agent.active ? (
+                  <span className="w-2.5 h-2.5 rounded-full bg-[var(--green)]" />
+                ) : (
+                  <span className="w-2.5 h-2.5 rounded-full bg-[var(--text-muted)] opacity-40" />
+                )}
+              </span>
+            </button>
           );
         })}
+      </div>
+
+      {/* Footer */}
+      <div className="px-5 py-3 border-t border-[var(--border-light)]">
+        <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">AI-powered Azure solution design</p>
       </div>
     </aside>
   );

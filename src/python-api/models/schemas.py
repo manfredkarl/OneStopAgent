@@ -11,10 +11,7 @@ class Project(BaseModel):
     customer_name: Optional[str] = None
     active_agents: list[str] = Field(
         default_factory=lambda: [
-            "envisioning",
-            "knowledge",
             "architect",
-            "azure-specialist",
             "cost",
             "business-value",
             "roi",

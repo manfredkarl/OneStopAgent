@@ -39,44 +39,49 @@ export default function Landing() {
   };
 
   return (
-    <main className="flex-1 flex flex-col items-center justify-center px-6 py-12">
-      <div className="max-w-2xl w-full space-y-8">
+    <main className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-[var(--bg-main)]">
+      <div className="max-w-2xl w-full space-y-10">
         {/* Hero */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-[var(--text-primary)]">OneStopAgent</h1>
-          <p className="text-[var(--text-secondary)]">
-            AI-powered solution architecture — describe your project and let our agents design it.
+        <div className="text-center space-y-3">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-[var(--accent)] flex items-center justify-center shadow-lg">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <h1 className="text-4xl font-bold text-[var(--text-primary)] tracking-tight">OneStopAgent</h1>
+          <p className="text-[var(--text-secondary)] text-lg">
+            Describe your project and let our agents design it.
           </p>
         </div>
 
         {/* Input form */}
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 space-y-4 shadow-[var(--shadow-card)]">
+        <div className="bg-[var(--bg-input)] border border-[var(--border-light)] rounded-2xl p-6 space-y-4 shadow-[var(--shadow-float)]">
           <textarea
             value={description}
             onChange={e => setDescription(e.target.value)}
             placeholder="Describe your project requirements..."
             rows={4}
-            className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+            className="w-full resize-none rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
           />
           <div className="flex gap-3 items-center">
             <input
               value={customerName}
               onChange={e => setCustomerName(e.target.value)}
               placeholder="Customer name (optional)"
-              className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+              className="flex-1 rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
             />
             <button
               onClick={() => handleCreate()}
               disabled={loading || !description.trim()}
-              className="px-6 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
-              {loading ? 'Creating...' : 'Create Project'}
+              {loading ? 'Creating...' : 'Start'}
             </button>
           </div>
         </div>
 
         {/* Example prompts */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Try an example</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {EXAMPLES.map((ex, i) => (
@@ -84,7 +89,7 @@ export default function Landing() {
                 key={i}
                 onClick={() => handleCreate(ex)}
                 disabled={loading}
-                className="text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 text-sm text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] transition-colors cursor-pointer disabled:opacity-50"
+                className="text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 text-sm text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer disabled:opacity-50"
               >
                 {ex}
               </button>
@@ -94,7 +99,7 @@ export default function Landing() {
 
         {/* Recent projects */}
         {projects.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Recent Projects</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {projects.slice(0, 6).map(p => (

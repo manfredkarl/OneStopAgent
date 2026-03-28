@@ -1,8 +1,120 @@
-"""Presentation Agent — generates executive-ready PowerPoint deck."""
+"""Presentation Agent — generates executive-ready PowerPoint deck via PptxGenJS.
+
+Uses the LLM to generate a complete PptxGenJS Node.js script with professional
+design (color palettes, shapes, charts, icons, modern layout), then executes it
+to produce the .pptx file.
+"""
 import json
 from agents.llm import llm
 from agents.state import AgentState
-from services.presentation import create_pptx
+from services.presentation import execute_pptxgenjs
+
+
+# ── Design reference (from Anthropic PPTX skill) ────────────────────────
+
+PPTXGENJS_REFERENCE = r"""
+## PptxGenJS Quick Reference
+
+### Setup
+```javascript
+const pptxgen = require("pptxgenjs");
+let pres = new pptxgen();
+pres.layout = 'LAYOUT_16x9';  // 10" x 5.625"
+pres.author = 'OneStopAgent';
+let slide = pres.addSlide();
+```
+
+### Text
+```javascript
+slide.addText("Title", { x: 0.5, y: 0.5, w: 9, h: 0.8, fontSize: 36, fontFace: "Arial", color: "363636", bold: true });
+// Rich text arrays
+slide.addText([
+  { text: "Bold ", options: { bold: true, breakLine: true } },
+  { text: "Normal", options: {} }
+], { x: 0.5, y: 1.5, w: 8, h: 2 });
+// Bullets
+slide.addText([
+  { text: "Item 1", options: { bullet: true, breakLine: true } },
+  { text: "Item 2", options: { bullet: true } }
+], { x: 0.5, y: 2, w: 8, h: 2 });
+```
+
+### Shapes
+```javascript
+slide.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: 10, h: 0.5, fill: { color: "1E2761" } });
+slide.addShape(pres.shapes.RECTANGLE, { x: 0.5, y: 1, w: 0.08, h: 1.5, fill: { color: "0891B2" } }); // accent bar
+```
+
+### Tables
+```javascript
+slide.addTable([
+  [{ text: "Header", options: { fill: { color: "1E2761" }, color: "FFFFFF", bold: true } }, ...],
+  ["Cell 1", "Cell 2"]
+], { x: 0.5, y: 1.5, w: 9, border: { pt: 0.5, color: "E2E8F0" }, colW: [3, 3, 3] });
+```
+
+### Charts
+```javascript
+slide.addChart(pres.charts.BAR, [{
+  name: "Cost", labels: ["Service A", "Service B"], values: [150, 300]
+}], {
+  x: 0.5, y: 1.5, w: 9, h: 3.5, barDir: "col",
+  chartColors: ["0D9488", "14B8A6", "5EEAD4"],
+  chartArea: { fill: { color: "FFFFFF" }, roundedCorners: true },
+  catAxisLabelColor: "64748B", valAxisLabelColor: "64748B",
+  valGridLine: { color: "E2E8F0", size: 0.5 }, catGridLine: { style: "none" },
+  showValue: true, dataLabelPosition: "outEnd", dataLabelColor: "1E293B"
+});
+```
+
+### Backgrounds
+```javascript
+slide.background = { color: "1E2761" };  // dark slide
+slide.background = { color: "F8FAFC" };  // light content slide
+```
+
+### Save
+```javascript
+pres.writeFile({ fileName: OUTPUT_PATH });
+```
+
+## CRITICAL RULES
+- NEVER use "#" with hex colors (causes corruption)
+- NEVER encode opacity in hex strings (e.g. "00000020") — use opacity property
+- Use bullet: true, NEVER unicode "•"
+- Use breakLine: true between array items
+- Each pres = new pptxgen() must be fresh — never reuse
+- NEVER reuse option objects — PptxGenJS mutates them in-place
+- Avoid lineSpacing with bullets — use paraSpaceAfter instead
+- NEVER use accent lines under titles
+"""
+
+DESIGN_GUIDANCE = """
+## Slide Design Principles
+
+### Color Strategy
+- Pick one dominant color (60-70% weight), 1-2 supporting tones, one sharp accent
+- Dark backgrounds for title + conclusion, light for content ("sandwich" structure)
+- Choose colors that match the customer's industry/topic
+
+### Layout Variety
+- NEVER repeat the same layout on consecutive slides
+- Mix: two-column, icon rows, stat callouts, tables, charts, full-width
+- Every slide needs a visual element (shape, chart, icon, or table) — no text-only slides
+- Large stat callouts: big numbers 48-60pt with small labels below
+
+### Typography
+- Slide titles: 28-36pt bold
+- Section headers: 18-22pt bold
+- Body text: 12-14pt
+- Always left-align body text; center only titles
+- 0.5" minimum margins from slide edges
+
+### Shapes for Visual Interest
+- Use colored rectangles as background sections
+- Thin accent bars (0.08" wide) beside key content
+- Cards: white rectangles with subtle shadows for grouped content
+"""
 
 
 class PresentationAgent:
@@ -10,171 +122,118 @@ class PresentationAgent:
     emoji = "📑"
 
     def run(self, state: AgentState) -> AgentState:
-        # Step 1: Build slide data from state
-        slides = self._build_slides(state)
-
-        # Step 2: Use LLM to polish slide content
-        polished = self._polish_with_llm(slides, state)
-
-        # Step 3: Render to PPTX
-        path = create_pptx(polished, state.customer_name or "Customer")
+        """Generate a professional PptxGenJS script via LLM, then execute it."""
+        slide_data = self._build_slide_data(state)
+        script = self._generate_pptxgenjs_script(slide_data, state)
+        path = execute_pptxgenjs(script, state.customer_name or "Customer")
         state.presentation_path = path
         return state
 
-    def _build_slides(self, state: AgentState) -> list[dict]:
-        """Build raw slide data from state — 9 slides per FRD-05 §3.4."""
-        slides = []
+    def _build_slide_data(self, state: AgentState) -> dict:
+        """Extract all relevant data from state for the LLM to design slides."""
         customer = state.customer_name or "Customer"
 
-        # Slide 1: Title (always)
-        slides.append({
-            "type": "title",
-            "title": f"{customer} — Azure Solution Proposal",
-            "subtitle": "Generated by OneStopAgent",
-        })
+        data = {
+            "customer": customer,
+            "problem": state.user_input,
+            "clarifications": state.clarifications or "",
+            "industry": state.brainstorming.get("industry", "Cross-Industry"),
+        }
 
-        # Slide 2: Problem/Opportunity
-        slides.append({
-            "type": "content",
-            "title": "Problem & Opportunity",
-            "body": state.user_input,
-            "notes": state.clarifications or "",
-        })
-
-        # Slide 3: Solution Overview
         if state.architecture:
-            slides.append({
-                "type": "content",
-                "title": "Solution Overview",
-                "body": state.architecture.get("narrative", ""),
-                "based_on": state.architecture.get("basedOn", ""),
-            })
+            data["architecture"] = {
+                "narrative": state.architecture.get("narrative", ""),
+                "basedOn": state.architecture.get("basedOn", ""),
+                "components": state.architecture.get("components", [])[:12],
+            }
 
-        # Slide 4: Architecture (component table)
-        if state.architecture.get("components"):
-            slides.append({
-                "type": "table",
-                "title": "Architecture Components",
-                "headers": ["Component", "Azure Service", "Description"],
-                "rows": [
-                    [c.get("name", ""), c.get("azureService", ""), c.get("description", "")]
-                    for c in state.architecture["components"][:12]
-                ],
-            })
-
-        # Slide 5: Azure Services
         if state.services.get("selections"):
-            slides.append({
-                "type": "table",
-                "title": "Azure Services & SKUs",
-                "headers": ["Service", "SKU", "Region"],
-                "rows": [
-                    [s.get("serviceName", ""), s.get("sku", ""), s.get("region", "")]
-                    for s in state.services["selections"][:12]
-                ],
-            })
+            data["services"] = [
+                {"name": s.get("serviceName", ""), "sku": s.get("sku", ""), "region": s.get("region", "")}
+                for s in state.services["selections"][:12]
+            ]
 
-        # Slide 6: Cost Estimate
         if state.costs.get("estimate"):
             est = state.costs["estimate"]
-            slides.append({
-                "type": "table",
-                "title": f"Cost Estimate — ${est.get('totalMonthly', 0):,.2f}/month",
-                "headers": ["Service", "SKU", "Monthly Cost"],
-                "rows": [
-                    [i.get("serviceName", ""), i.get("sku", ""), f"${i.get('monthlyCost', 0):,.2f}"]
-                    for i in est.get("items", [])[:15]
+            data["costs"] = {
+                "totalMonthly": est.get("totalMonthly", 0),
+                "totalAnnual": est.get("totalAnnual", 0),
+                "pricingSource": est.get("pricingSource", "N/A"),
+                "items": [
+                    {"service": i.get("serviceName", ""), "sku": i.get("sku", ""), "monthly": i.get("monthlyCost", 0)}
+                    for i in est.get("items", [])[:12]
                 ],
-                "footer": f"Annual: ${est.get('totalAnnual', 0):,.2f} | Source: {est.get('pricingSource', 'N/A')}",
-            })
+            }
 
-        # Slide 7: Business Value
         if state.business_value.get("drivers"):
-            drivers = state.business_value["drivers"]
-            body_lines = []
-            for d in drivers:
-                line = f"• {d.get('name', '')}: {d.get('estimate', d.get('impact', ''))}"
-                body_lines.append(line)
-            slides.append({
-                "type": "content",
-                "title": "Business Value",
-                "body": "\n".join(body_lines),
-                "notes": state.business_value.get("executiveSummary", ""),
-            })
+            data["businessValue"] = {
+                "summary": state.business_value.get("executiveSummary", ""),
+                "confidence": state.business_value.get("confidenceLevel", "moderate"),
+                "drivers": [
+                    {"name": d.get("name", ""), "impact": d.get("impact", d.get("estimate", ""))}
+                    for d in state.business_value["drivers"]
+                ],
+            }
 
-        # Slide 8: ROI (NEW per FRD-05)
         if state.roi:
             roi = state.roi
-            if roi.get("roi_percent") is not None:
-                body = (
-                    f"ROI: {roi['roi_percent']:.0f}%\n"
-                    f"Payback: {roi.get('payback_months', 'N/A'):.1f} months\n\n"
-                    f"Annual Azure cost: ${roi['annual_cost']:,.2f}\n"
-                    f"Annual value: ${roi['annual_value']:,.2f}"
-                )
-                if roi.get("monetized_drivers"):
-                    body += "\n\nMonetized value drivers:"
-                    for d in roi["monetized_drivers"]:
-                        body += f"\n• {d['name']}: ${d['annual_value']:,.2f}/year"
-            else:
-                body = "ROI could not be calculated quantitatively.\n\nQualitative benefits:"
-                for b in roi.get("qualitative_benefits", []):
-                    body += f"\n• {b}"
-            slides.append({
-                "type": "content",
-                "title": "Return on Investment",
-                "body": body,
-            })
+            data["roi"] = {
+                "percent": roi.get("roi_percent"),
+                "paybackMonths": roi.get("payback_months"),
+                "annualCost": roi.get("annual_cost"),
+                "annualValue": roi.get("annual_value"),
+                "monetizedDrivers": roi.get("monetized_drivers", []),
+                "qualitativeBenefits": roi.get("qualitative_benefits", []),
+            }
 
-        # Slide 9: Next Steps (always)
-        slides.append({
-            "type": "content",
-            "title": "Recommended Next Steps",
-            "body": (
-                "1. Schedule deep-dive architecture review\n"
-                "2. Set up Azure subscription and landing zone\n"
-                "3. Build proof-of-concept (4-6 weeks)\n"
-                "4. Define success metrics and KPIs\n"
-                "5. Plan phased rollout with pilot group"
-            ),
-        })
+        return data
 
-        return slides
+    def _generate_pptxgenjs_script(self, slide_data: dict, state: AgentState) -> str:
+        """Use LLM to generate a complete PptxGenJS Node.js script."""
+        data_json = json.dumps(slide_data, indent=2, default=str)
 
-    def _polish_with_llm(self, slides: list[dict], state: AgentState) -> list[dict]:
-        """Use LLM to polish slide content for executive audience."""
-        try:
-            customer = state.customer_name or "Customer"
-            prompt = (
-                "Polish these presentation slides for an executive audience.\n"
-                "For each slide, improve the language to be concise, professional, and impactful.\n"
-                "Use bullet points, highlight key numbers, remove technical jargon.\n"
-                f"Customer: {customer}\n\n"
-                f"Slides: {json.dumps(slides, default=str)}\n\n"
-                "Return the SAME JSON structure with improved \"body\" and \"notes\" text.\n"
-                "Return ONLY valid JSON array."
-            )
+        response = llm.invoke([
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert presentation designer. Generate a COMPLETE, EXECUTABLE "
+                    "Node.js script using PptxGenJS that creates a professional executive deck.\n\n"
+                    "The script must:\n"
+                    "1. require('pptxgenjs') and create a new presentation\n"
+                    "2. Create 8-12 visually distinct slides\n"
+                    "3. Use the OUTPUT_PATH placeholder for the file name: pres.writeFile({ fileName: OUTPUT_PATH })\n"
+                    "4. Be a complete, runnable script — no imports other than pptxgenjs\n"
+                    "5. Use modern, professional design (not default PowerPoint templates)\n\n"
+                    "Return ONLY the JavaScript code, no markdown fences, no explanation.\n\n"
+                    f"{PPTXGENJS_REFERENCE}\n\n"
+                    f"{DESIGN_GUIDANCE}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Create an executive Azure solution proposal deck for this data:\n\n"
+                    f"{data_json}\n\n"
+                    "REQUIRED SLIDES (in order):\n"
+                    "1. Title slide — dark background, customer name, 'Azure Solution Proposal'\n"
+                    "2. Problem & Opportunity — the user's challenge with visual emphasis\n"
+                    "3. Solution Overview — architecture narrative with key highlights\n"
+                    "4. Architecture Components — table or card layout showing Azure services\n"
+                    "5. Azure Services & SKUs — table with service selections\n"
+                    "6. Cost Estimate — bar chart of top costs + summary stats\n"
+                    "7. Business Value — value drivers with impact metrics\n"
+                    "8. ROI — large stat callouts (ROI %, payback period, annual value)\n"
+                    "9. Next Steps — actionable recommendations\n\n"
+                    "Skip any slide where data is missing. Add a closing slide.\n"
+                    "Use a bold color palette appropriate for the customer's industry.\n"
+                    "Make every slide visually distinct — vary layouts across slides."
+                ),
+            },
+        ])
 
-            response = llm.invoke([
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a presentation content expert. Return ONLY valid JSON "
-                        "array of slide objects. Keep the same structure, improve the text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ])
+        script = response.content.strip()
+        # Strip markdown fences if present
+        if script.startswith("```"):
+            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            polished = json.loads(text)
-            if isinstance(polished, list) and len(polished) == len(slides):
-                return polished
-        except Exception:
-            pass
-
-        # Fallback: use raw slides
-        return slides
+        return script

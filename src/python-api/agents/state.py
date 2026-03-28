@@ -28,7 +28,6 @@ class AgentState:
 
     # ── Agent outputs ────────────────────────────────────────────────
     brainstorming: dict[str, Any] = field(default_factory=dict)
-    envisioning: dict[str, Any] = field(default_factory=dict)
     architecture: dict[str, Any] = field(default_factory=dict)
     services: dict[str, Any] = field(default_factory=dict)
     costs: dict[str, Any] = field(default_factory=dict)

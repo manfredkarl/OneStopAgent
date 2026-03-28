@@ -17,7 +17,7 @@ export default function ProjectCard({ project }: Props) {
   return (
     <button
       onClick={() => navigate(`/project/${project.id}`)}
-      className="w-full text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+      className="w-full text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 hover:bg-[var(--bg-hover)] hover:border-[var(--accent)] transition-all cursor-pointer"
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <p className="text-sm font-medium text-[var(--text-primary)] line-clamp-2 flex-1">

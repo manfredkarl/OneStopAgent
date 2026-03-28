@@ -1,117 +1,65 @@
-"""PowerPoint generation service using python-pptx."""
+"""PowerPoint generation service — executes PptxGenJS scripts via Node.js."""
 
+import logging
 import os
+import subprocess
+import tempfile
 import uuid
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.dml.color import RGBColor
 
+logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "output")
+# node_modules lives next to this service's parent package.json
+NODE_MODULES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "node_modules"))
 
 
-def create_pptx(slides: list[dict], customer_name: str = "Customer") -> str:
-    """Create a PPTX file from structured slide data. Returns the file path."""
+def execute_pptxgenjs(script: str, customer_name: str = "Customer") -> str:
+    """Write a PptxGenJS script to a temp file, execute it, return the .pptx path.
+
+    The script must use the literal string ``OUTPUT_PATH`` as the fileName
+    argument to ``pres.writeFile()``. This function replaces it with the
+    real output path before execution.
+    """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)  # 16:9
-    prs.slide_height = Inches(7.5)
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in customer_name).strip().replace(" ", "_")
+    filename = f"OneStopAgent-{safe_name}-{uuid.uuid4().hex[:8]}.pptx"
+    output_path = os.path.join(OUTPUT_DIR, filename)
 
-    for slide_data in slides:
-        slide_type = slide_data.get("type", "content")
+    # Inject the real output path — use forward slashes for Node on all platforms
+    abs_output = os.path.abspath(output_path).replace("\\", "/")
+    script = script.replace("OUTPUT_PATH", f'"{abs_output}"')
 
-        if slide_type == "title":
-            _add_title_slide(prs, slide_data)
-        elif slide_type == "table":
-            _add_table_slide(prs, slide_data)
-        else:
-            _add_content_slide(prs, slide_data)
+    # Write script to temp file
+    script_fd, script_path = tempfile.mkstemp(suffix=".js", prefix="pptxgen_")
+    try:
+        with os.fdopen(script_fd, "w", encoding="utf-8") as f:
+            f.write(script)
 
-    filename = f"OneStopAgent-{customer_name.replace(' ', '_')}-{uuid.uuid4().hex[:8]}.pptx"
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    prs.save(filepath)
-    return filepath
+        env = {**os.environ, "NODE_PATH": NODE_MODULES}
+        result = subprocess.run(
+            ["node", script_path],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=OUTPUT_DIR,
+            env=env,
+        )
 
+        if result.returncode != 0:
+            logger.error("PptxGenJS script failed (exit %d):\nstdout: %s\nstderr: %s",
+                         result.returncode, result.stdout[:500], result.stderr[:500])
+            raise RuntimeError(f"PptxGenJS script failed: {result.stderr[:300]}")
 
-def _add_title_slide(prs, data):
-    slide = prs.slides.add_slide(prs.slide_layouts[0])  # Title layout
-    slide.shapes.title.text = data.get("title", "")
-    if slide.placeholders[1]:
-        slide.placeholders[1].text = data.get("subtitle", "")
+        if not os.path.isfile(output_path):
+            raise FileNotFoundError(f"PptxGenJS ran but output not found at {output_path}")
 
+        logger.info("Generated PPTX: %s", output_path)
+        return output_path
 
-def _add_content_slide(prs, data):
-    slide = prs.slides.add_slide(prs.slide_layouts[1])  # Title + content
-    slide.shapes.title.text = data.get("title", "")
-    body = slide.placeholders[1].text_frame
-    body.clear()
-
-    text = data.get("body", "")
-    for i, line in enumerate(text.split("\n")):
-        if i == 0:
-            body.paragraphs[0].text = line.strip()
-            body.paragraphs[0].font.size = Pt(14)
-        else:
-            p = body.add_paragraph()
-            p.text = line.strip()
-            p.font.size = Pt(14)
-
-    # Add speaker notes
-    notes = data.get("notes", "")
-    if notes:
-        notes_slide = slide.notes_slide
-        notes_slide.notes_text_frame.text = notes
-
-
-def _add_table_slide(prs, data):
-    slide = prs.slides.add_slide(prs.slide_layouts[5])  # Blank layout
-
-    # Add title
-    txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(12), Inches(0.8))
-    tf = txBox.text_frame
-    tf.text = data.get("title", "")
-    tf.paragraphs[0].font.size = Pt(24)
-    tf.paragraphs[0].font.bold = True
-    tf.paragraphs[0].font.color.rgb = RGBColor(0x0F, 0x6C, 0xBD)
-
-    headers = data.get("headers", [])
-    rows = data.get("rows", [])
-
-    if not headers or not rows:
-        return
-
-    n_cols = len(headers)
-    n_rows = len(rows) + 1  # +1 for header
-
-    table_shape = slide.shapes.add_table(
-        n_rows, n_cols,
-        Inches(0.5), Inches(1.3),
-        Inches(12), Inches(min(n_rows * 0.4, 5.5))
-    )
-    table = table_shape.table
-
-    # Header row
-    for j, h in enumerate(headers):
-        cell = table.cell(0, j)
-        cell.text = h
-        for paragraph in cell.text_frame.paragraphs:
-            paragraph.font.size = Pt(11)
-            paragraph.font.bold = True
-
-    # Data rows
-    for i, row in enumerate(rows):
-        for j, val in enumerate(row):
-            cell = table.cell(i + 1, j)
-            cell.text = str(val)
-            for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(10)
-
-    # Footer
-    footer = data.get("footer", "")
-    if footer:
-        txBox2 = slide.shapes.add_textbox(Inches(0.5), Inches(6.8), Inches(12), Inches(0.5))
-        tf2 = txBox2.text_frame
-        tf2.text = footer
-        tf2.paragraphs[0].font.size = Pt(9)
-        tf2.paragraphs[0].font.italic = True
+    finally:
+        # Clean up temp script
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass

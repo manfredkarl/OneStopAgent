@@ -16,22 +16,16 @@ from typing import AsyncGenerator
 from agents.state import AgentState
 from agents.pm_agent import ProjectManager, AGENT_INFO, Intent
 from agents.architect_agent import ArchitectAgent
-from agents.azure_specialist_agent import AzureSpecialistAgent
 from agents.cost_agent import CostAgent
 from agents.business_value_agent import BusinessValueAgent
 from agents.presentation_agent import PresentationAgent
-from agents.brainstorming_agent import BrainstormingAgent
-from agents.knowledge_agent import KnowledgeAgent
 from agents.roi_agent import ROIAgent
 from agents.llm import llm
 from models.schemas import ChatMessage
 
 # ── Agent registry (keyed by plan-step ID) ──────────────────────────────
 AGENTS: dict[str, object] = {
-    "brainstorm": BrainstormingAgent(),
-    "knowledge": KnowledgeAgent(),
     "architect": ArchitectAgent(),
-    "azure_services": AzureSpecialistAgent(),
     "cost": CostAgent(),
     "business_value": BusinessValueAgent(),
     "roi": ROIAgent(),
@@ -41,172 +35,8 @@ AGENTS: dict[str, object] = {
 pm = ProjectManager()
 
 
-# ── Output formatters ───────────────────────────────────────────────────
-
-def format_agent_output(step: str, state: AgentState) -> str:
-    """Format an agent's output as markdown for the chat."""
-    if step == "brainstorm":
-        bs = state.brainstorming
-        fit = state.azure_fit
-        explanation = state.azure_fit_explanation
-        scenarios = bs.get("scenarios", [])
-        industry = bs.get("industry", "N/A")
-
-        parts = [f"## 💡 Azure Opportunity Analysis\n"]
-        parts.append(f"**Industry:** {industry}")
-        parts.append(f"**Azure Fit:** {fit.upper()} — {explanation}\n")
-
-        if scenarios:
-            parts.append("### Suggested Scenarios\n")
-            for i, s in enumerate(scenarios, 1):
-                parts.append(f"**{i}. {s.get('title', '')}**")
-                parts.append(f"{s.get('description', '')}")
-                services = ", ".join(s.get("azure_services", []))
-                if services:
-                    parts.append(f"*Azure Services: {services}*")
-                reason = s.get("azure_fit_reason", "")
-                if reason:
-                    parts.append(f"💡 {reason}")
-                parts.append("")
-
-        return "\n".join(parts)
-
-    if step == "knowledge":
-        patterns = state.retrieved_patterns
-        ungrounded = any(p.get("_ungrounded") for p in patterns)
-
-        parts = [f"## 📚 Microsoft Reference Architectures ({len(patterns)} found)\n"]
-        if ungrounded:
-            parts.append("⚠️ *Based on local reference data (Microsoft Learn not available)*\n")
-
-        for p in patterns[:5]:
-            score = p.get("confidence_score", 0)
-            parts.append(f"**{p.get('title', 'Untitled')}** (relevance: {score:.0%})")
-            parts.append(f"{p.get('summary', '')}")
-            url = p.get("url", "")
-            if url:
-                parts.append(f"[View on Microsoft Learn]({url})")
-            services = ", ".join(p.get("recommended_services", []))
-            if services:
-                parts.append(f"*Services: {services}*")
-            parts.append("")
-
-        return "\n".join(parts)
-
-    if step == "architect":
-        arch = state.architecture
-        parts = [f"## 🏗️ Architecture Design\n\n{arch.get('narrative', '')}\n"]
-        mermaid = arch.get("mermaidCode", "")
-        if mermaid:
-            parts.append(f"```mermaid\n{mermaid}\n```\n")
-        comps = arch.get("components", [])
-        if comps:
-            parts.append("### Components\n")
-            for c in comps[:15]:
-                parts.append(
-                    f"- **{c.get('name', '')}** ({c.get('azureService', '')}) "
-                    f"— {c.get('description', '')}"
-                )
-        return "\n".join(parts)
-
-    if step == "azure_services":
-        sels = state.services.get("selections", [])
-        parts = [f"## ☁️ Azure Services ({len(sels)} mapped)\n"]
-        for s in sels[:15]:
-            parts.append(
-                f"- **{s.get('componentName', '')}** → "
-                f"{s.get('serviceName', '')} ({s.get('sku', '')}) "
-                f"in {s.get('region', 'eastus')}"
-            )
-        return "\n".join(parts)
-
-    if step == "cost":
-        est = state.costs.get("estimate", {})
-        monthly = est.get("totalMonthly", 0)
-        annual = est.get("totalAnnual", 0)
-        source = est.get("pricingSource", "unknown")
-        parts = [
-            f"## 💰 Cost Estimate\n\n"
-            f"**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** — Source: {source}\n",
-            "| Service | SKU | Monthly Cost |",
-            "|---------|-----|-------------|",
-        ]
-        for item in est.get("items", [])[:20]:
-            parts.append(
-                f"| {item.get('serviceName', '')} | {item.get('sku', '')} "
-                f"| ${item.get('monthlyCost', 0):,.2f} |"
-            )
-        if est.get("assumptions"):
-            parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
-        return "\n".join(parts)
-
-    if step == "business_value":
-        bv = state.business_value
-        summary = bv.get("executiveSummary", "")
-        drivers = bv.get("drivers", [])
-        confidence = bv.get("confidenceLevel", "moderate")
-        parts = [
-            f"## 📊 Business Value Assessment\n\n{summary}\n\n"
-            f"**Confidence:** {confidence}\n"
-        ]
-        if drivers:
-            parts.append("### Value Drivers\n")
-            for d in drivers:
-                est_text = ""
-                q = d.get("quantifiedEstimate") or d.get("estimate")
-                if q:
-                    est_text = f" — *{q}*"
-                monetizable = "💰" if d.get("monetizable") else "📋"
-                parts.append(
-                    f"- {monetizable} **{d.get('name', '')}**: "
-                    f"{d.get('impact', d.get('description', ''))}{est_text}"
-                )
-        # Add source references from retrieved patterns
-        patterns = state.retrieved_patterns
-        if patterns:
-            parts.append("\n### 📚 Sources & References\n")
-            for p in patterns[:3]:
-                url = p.get("url", "")
-                title = p.get("title", "Microsoft Learn")
-                if url:
-                    parts.append(f"- [{title}]({url})")
-                else:
-                    parts.append(f"- {title}")
-            parts.append("\n*Value estimates based on Microsoft case studies and industry benchmarks.*")
-        else:
-            parts.append("\n*⚠️ Value estimates based on LLM knowledge — not grounded in live sources.*")
-        return "\n".join(parts)
-
-    if step == "roi":
-        roi = state.roi
-        if roi.get("roi_percent") is not None:
-            parts = [f"## 📈 ROI Analysis\n"]
-            parts.append(f"**ROI: {roi['roi_percent']:.0f}%** | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
-            parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.2f}")
-            parts.append(f"- Annual value generated: ${roi['annual_value']:,.2f}\n")
-            if roi.get("monetized_drivers"):
-                parts.append("### Monetized Value Drivers\n")
-                for d in roi["monetized_drivers"]:
-                    parts.append(f"- **{d['name']}**: ${d['annual_value']:,.2f}/year ({d['method']})")
-            if roi.get("qualitative_benefits"):
-                parts.append(f"\n### Qualitative Benefits\n")
-                for b in roi["qualitative_benefits"]:
-                    parts.append(f"- {b}")
-        else:
-            parts = ["## 📈 ROI Analysis\n", "ROI could not be calculated quantitatively.\n"]
-            if roi.get("qualitative_benefits"):
-                parts.append("### Qualitative Benefits\n")
-                for b in roi["qualitative_benefits"]:
-                    parts.append(f"- {b}")
-        return "\n".join(parts)
-
-    if step == "presentation":
-        path = state.presentation_path
-        if path:
-            return "## 📑 Presentation Ready\n\nPowerPoint deck generated.\n\n📥 Ready for download."
-        return "## 📑 Presentation\n\n⚠️ Deck generation failed."
-
-    return f"{step} completed."
+# ── Output formatting now lives in ProjectManager ───────────────────────
+# The orchestrator delegates to pm.format_agent_output(step, state).
 
 
 def completion_summary(project_id: str, state: AgentState) -> ChatMessage:
@@ -257,7 +87,12 @@ class Orchestrator:
     """
 
     # In fast-run mode, only pause at these major gates (FRD-01 §2.3)
-    FAST_RUN_GATES = {"brainstorm", "architect", "presentation"}
+    # In fast-run mode, pause at these major gates:
+    # 1. After brainstorm (Mode A → Mode B transition)
+    # 2. After business_value (review value case before architecture)
+    # 3. After architect (review design before committing to services + cost)
+    # 4. Before presentation (final review)
+    FAST_RUN_GATES = {"business_value", "architect", "presentation"}
 
     def __init__(self):
         self.states: dict[str, AgentState] = {}
@@ -300,27 +135,53 @@ class Orchestrator:
         phase = self.phases.get(project_id, "new")
 
         # Classify intent (keyword match → LLM fallback)
-        intent, meta = pm.intent_interpreter.classify_with_llm_fallback(message)
+        intent, meta = pm.intent_interpreter.classify(message)
 
         # ── Phase: new ──────────────────────────────────────────────
         if phase == "new":
             state.user_input = message
             state.mode = "brainstorm"
 
-            clarification = await asyncio.get_event_loop().run_in_executor(
-                None, pm.ask_clarifications, message,
+            # Brainstorm + classify Azure fit in one call
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, pm.brainstorm_greeting, message,
             )
 
-            plan = pm.build_plan(active_agents)
-            state.plan_steps = plan
-            plan_text = pm.format_plan(plan)
+            # Populate state from structured response
+            state.brainstorming = {
+                "scenarios": result["scenarios"],
+                "industry": result["industry"],
+            }
+            state.azure_fit = result["azure_fit"]
+            state.azure_fit_explanation = result["azure_fit_explanation"]
 
-            self.phases[project_id] = "plan_shown"
-            yield self._msg(
-                project_id,
-                f"{clarification}\n\n{plan_text}",
-                {"type": "pm_response"},
-            )
+            greeting = result["response"]
+
+            # Azure fit gate: weak/unclear → ask for more detail before showing plan
+            if state.azure_fit and state.azure_fit != "strong":
+                self.phases[project_id] = "plan_shown"  # stay conversational
+                plan = pm.build_plan(active_agents)
+                state.plan_steps = plan
+                yield self._msg(
+                    project_id,
+                    f"{greeting}\n\n"
+                    f"> ⚠️ **Azure fit: {state.azure_fit}** — "
+                    f"{state.azure_fit_explanation}\n\n"
+                    "Could you provide more details so I can better assess "
+                    "the Azure opportunity? Or say **proceed** to continue anyway.",
+                    {"type": "pm_response"},
+                )
+            else:
+                plan = pm.build_plan(active_agents)
+                state.plan_steps = plan
+                plan_text = pm.format_plan(state)
+
+                self.phases[project_id] = "plan_shown"
+                yield self._msg(
+                    project_id,
+                    f"{greeting}\n\n{plan_text}",
+                    {"type": "pm_response"},
+                )
 
         # ── Phase: plan_shown ───────────────────────────────────────
         elif phase == "plan_shown":
@@ -566,7 +427,7 @@ class Orchestrator:
             )
 
             # Emit formatted agent result
-            formatted = format_agent_output(step, state)
+            formatted = pm.format_agent_output(step, state)
             yield ChatMessage(
                 project_id=project_id,
                 role="agent",
@@ -574,22 +435,6 @@ class Orchestrator:
                 content=formatted,
                 metadata={"type": "agent_result", "agent": step},
             )
-
-            # Azure fit gate (FRD-02 §2.5): weak/unclear pauses for more detail
-            if step == "brainstorm" and state.azure_fit and state.azure_fit != "strong":
-                yield self._msg(
-                    project_id,
-                    f"Azure fit is **{state.azure_fit}**. "
-                    f"{state.azure_fit_explanation}\n\n"
-                    "Could you provide more details about your use case "
-                    "so I can better assess the Azure opportunity? "
-                    "Or say **proceed** to continue anyway.",
-                    {"type": "approval", "step": step},
-                )
-                state.awaiting_approval = True
-                state.current_step = step
-                self.phases[project_id] = "approval"
-                return
 
             # Approval gate check (FRD-01 §2.3)
             if self.should_pause(state, step):

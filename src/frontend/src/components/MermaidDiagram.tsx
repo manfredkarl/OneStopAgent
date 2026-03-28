@@ -41,7 +41,7 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
   if (failed) {
     // Show the raw code as a readable fallback instead of nothing
     return (
-      <div className="my-3 p-4 bg-[var(--bg-secondary)] rounded-xl overflow-x-auto">
+      <div className="my-3 p-4 bg-[var(--bg-subtle)] rounded-xl overflow-x-auto">
         <pre className="text-xs font-mono text-[var(--text-secondary)] whitespace-pre-wrap">{mermaidCode}</pre>
       </div>
     );
@@ -50,14 +50,14 @@ export default function MermaidDiagram({ mermaidCode }: { mermaidCode: string })
   if (svg) {
     return (
       <div
-        className="my-3 p-4 bg-white rounded-xl border border-[var(--border)] overflow-x-auto [&_svg]:max-w-full"
+        className="my-3 p-4 bg-white rounded-xl border border-[var(--border-light)] overflow-x-auto [&_svg]:max-w-full"
         dangerouslySetInnerHTML={{ __html: svg }}
       />
     );
   }
 
   return (
-    <div className="my-3 p-3 bg-[var(--bg-secondary)] rounded-xl text-sm text-[var(--text-muted)] animate-pulse">
+    <div className="my-3 p-3 bg-[var(--bg-subtle)] rounded-xl text-sm text-[var(--text-muted)] animate-pulse">
       Rendering diagram...
     </div>
   );
