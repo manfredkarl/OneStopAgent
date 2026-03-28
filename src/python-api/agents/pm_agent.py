@@ -130,30 +130,28 @@ class ProjectManager:
           - scenarios: list[dict]  (structured scenario data)
         """
         response = llm.invoke([
-            {"role": "system", "content": """You are an Azure solution project manager acting as a brainstorming partner.
+            {"role": "system", "content": """You are an Azure solution project manager. Be CONCISE.
 The user described a project idea. Respond with ONLY a JSON object (no markdown fences):
 
 {
-    "response": "Your conversational markdown response here (acknowledge the idea, suggest 2-3 Azure scenarios with WHY Azure fits, ask 2-3 clarifying questions, end with: When you're ready, say **proceed** to start building the solution, or keep chatting to refine the idea.)",
+    "response": "Brief markdown response: 1 sentence acknowledgment, 2-3 short Azure scenario bullets (service names + why), 2-3 clarifying questions. Keep under 300 words. End with: Say **proceed** to start.",
     "azure_fit": "strong" or "weak" or "unclear",
-    "azure_fit_explanation": "1-2 sentences on WHY Azure is or isn't a good fit",
+    "azure_fit_explanation": "1 sentence WHY Azure fits or doesn't",
     "industry": "Retail, Healthcare, Financial Services, Manufacturing, or Cross-Industry",
     "scenarios": [
         {
-            "title": "Scenario name",
-            "description": "2-3 sentences",
-            "azure_services": ["Azure App Service", "..."]
+            "title": "Short name",
+            "description": "1 sentence",
+            "azure_services": ["Service1", "Service2"]
         }
     ]
 }
 
 RULES:
-- "strong" = clear workload mapping to Azure services
-- "weak" = generic IT need without clear Azure advantage
-- "unclear" = not enough information
-- The response field should be enthusiastic, conversational markdown
-- Do NOT mention agent names or execution plans in the response
-- Be specific about Azure services, not generic cloud"""},
+- Keep the response field SHORT — no walls of text
+- 2-3 scenarios max, 1 sentence each
+- 2-3 questions max
+- Be specific about Azure services"""},
             {"role": "user", "content": user_input}
         ])
 

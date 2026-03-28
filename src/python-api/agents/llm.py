@@ -13,6 +13,7 @@ llm = AzureChatOpenAI(
     azure_deployment="gpt-5.4",
     azure_ad_token=_token,
     api_version="2024-10-21",
-    temperature=0.7,
+    temperature=0.5,
     streaming=True,
+    max_tokens=2000,
 )
