@@ -96,6 +96,8 @@ class ArchitectAgent:
                     "- Maximum 20 nodes\n"
                     "- Include specific Azure service names as nodes\n"
                     "- Show data flow between components\n"
+                    "- Do NOT use HTML tags like <br> in node labels — use short text only\n"
+                    "- Node labels should be concise: e.g. [Azure SQL Database] not [Azure SQL Database<br>Product Data]\n"
                     "- Return ONLY the Mermaid code, no markdown fences, no explanation"
                 ),
             },

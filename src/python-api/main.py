@@ -189,7 +189,33 @@ async def test_reset():
 
 
 # ---------------------------------------------------------------------------
-# Entrypoint
+# PPTX Download
+# ---------------------------------------------------------------------------
+
+@app.get("/api/projects/{project_id}/export/pptx")
+async def download_pptx(project_id: str, x_user_id: str = Header()):
+    """Download the generated PowerPoint deck."""
+    import os
+    from fastapi.responses import FileResponse
+
+    project = store.get_project(project_id, x_user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get presentation path from orchestrator state
+    state = orchestrator.get_state(project_id)
+    path = state.presentation_path
+
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Presentation not generated yet. Run all agents first.")
+
+    filename = os.path.basename(path)
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 import { useRef, useEffect } from 'react';
 import type { ChatMessage, PlanStep } from '../types';
 import { AGENT_REGISTRY } from '../types';
+import { downloadPptx } from '../api';
 import MessageContent from './MessageContent';
 import ExecutionPlan from './ExecutionPlan';
 
 interface Props {
   messages: ChatMessage[];
   onSend?: (message: string) => void;
+  projectId?: string;
 }
 
 const AGENT_COLORS = [
@@ -26,7 +28,7 @@ function getAgentName(agentId: string): string {
   return AGENT_REGISTRY.find(a => a.agentId === agentId)?.displayName || agentId;
 }
 
-export default function ChatThread({ messages, onSend }: Props) {
+export default function ChatThread({ messages, onSend, projectId }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -145,6 +147,15 @@ export default function ChatThread({ messages, onSend }: Props) {
               <p className="text-xs font-medium text-[var(--text-muted)] mb-1">{getAgentName(agentId)}</p>
               <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl rounded-tl-md px-4 py-3">
                 <MessageContent content={msg.content} />
+                {/* Download button for presentation */}
+                {agentId === 'presentation' && projectId && (
+                  <button
+                    onClick={() => downloadPptx(projectId).catch(console.error)}
+                    className="mt-3 px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] cursor-pointer flex items-center gap-2"
+                  >
+                    📥 Download PowerPoint
+                  </button>
+                )}
               </div>
             </div>
           </div>

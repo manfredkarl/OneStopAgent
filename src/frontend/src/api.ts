@@ -111,3 +111,22 @@ export async function sendMessage(projectId: string, message: string): Promise<C
   const data = await res.json();
   return (Array.isArray(data) ? data : [data]).map(normalizeMessage);
 }
+
+export async function downloadPptx(projectId: string): Promise<void> {
+  const res = await fetch(${BASE_URL}/api/projects//export/pptx, {
+    headers: { 'x-user-id': 'demo-user' },
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err || 'Download failed');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'OneStopAgent-Presentation.pptx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
