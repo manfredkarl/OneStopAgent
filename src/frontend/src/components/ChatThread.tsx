@@ -27,9 +27,14 @@ export default function ChatThread({ messages, onSend, projectId }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const visibleMessages = messages.filter(msg => {
+  const visibleMessages = messages.filter((msg, idx) => {
     if (!msg.content && msg.metadata?.type === 'plan_update') return false;
     if (!msg.content?.trim()) return false;
+    // Only keep the last progress message (older ones are stale)
+    if (msg.metadata?.type === 'progress') {
+      const hasLaterProgress = messages.slice(idx + 1).some(m => m.metadata?.type === 'progress');
+      if (hasLaterProgress) return false;
+    }
     return true;
   });
 
@@ -77,6 +82,14 @@ export default function ChatThread({ messages, onSend, projectId }: Props) {
                 <div className="h-px flex-1 bg-[var(--border-light)]" />
                 <span className="text-xs text-[var(--text-muted)] px-2 shrink-0">{msg.content}</span>
                 <div className="h-px flex-1 bg-[var(--border-light)]" />
+              </div>
+            );
+          }
+
+          if (msg.metadata?.type === 'progress') {
+            return (
+              <div key={msg.id} className="text-center text-xs text-[var(--text-muted)] py-1 animate-pulse">
+                {msg.content}
               </div>
             );
           }

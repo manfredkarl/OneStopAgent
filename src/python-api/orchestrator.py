@@ -241,22 +241,26 @@ class Orchestrator:
                     yield msg
 
             elif intent == Intent.QUESTION:
-                # Answer the question but stay in approval
+                # Answer the question about current step output — stay in approval
+                step_name = current or (
+                    state.completed_steps[-1] if state.completed_steps else ""
+                )
+                agent_output = pm.format_agent_output(step_name, state) if step_name else ""
                 answer = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: llm.invoke([
                         {
                             "role": "system",
                             "content": (
-                                "You are an Azure solution project manager. "
-                                "Answer the user's question about the current "
-                                "step. Be brief."
+                                f"You are the Project Manager. The user is asking about "
+                                f"the {step_name} step output. Answer based on the data "
+                                f"below. Be concise."
                             ),
                         },
                         {
                             "role": "user",
                             "content": (
-                                f"Context: {state.to_context_string()}\n\n"
+                                f"Output:\n{agent_output[:2000]}\n\n"
                                 f"User asks: {message}"
                             ),
                         },
@@ -269,8 +273,40 @@ class Orchestrator:
                     {"type": "pm_response"},
                 )
 
-            else:
-                # Refine / unrecognised input → re-run step with feedback
+            elif intent == Intent.INPUT:
+                # User is providing additional context (e.g. answering an
+                # ROI question) — re-run the current agent with the new info
+                state.clarifications += f"\nAdditional input: {message}"
+                last_step = current or (
+                    state.completed_steps[-1] if state.completed_steps else ""
+                )
+                if last_step:
+                    state.completed_steps = [
+                        s for s in state.completed_steps if s != last_step
+                    ]
+                    info = AGENT_INFO.get(
+                        last_step, {"name": last_step, "emoji": "🔧"}
+                    )
+                    yield self._msg(
+                        project_id,
+                        f"Got it — re-running **{info['name']}** with your input...",
+                        {"type": "pm_response"},
+                    )
+                    state.awaiting_approval = False
+                    self.phases[project_id] = "executing"
+                    async for msg in self.run_single_step(
+                        project_id, state, last_step
+                    ):
+                        yield msg
+                else:
+                    yield self._msg(
+                        project_id,
+                        "Thanks for the input. Say **proceed** to continue.",
+                        {"type": "pm_response"},
+                    )
+
+            elif intent == Intent.REFINE:
+                # Explicit refine → re-run step with feedback
                 state.clarifications += f"\nFeedback: {message}"
                 state.completed_steps = [
                     s for s in state.completed_steps if s != current
@@ -281,6 +317,28 @@ class Orchestrator:
                     project_id, state, current
                 ):
                     yield msg
+
+            elif intent == Intent.FAST_RUN:
+                # Switch to fast-run and continue from here
+                state.execution_mode = "fast-run"
+                state.awaiting_approval = False
+                yield self._msg(
+                    project_id,
+                    "Switching to fast mode — running remaining agents without pauses.",
+                    {"type": "pm_response"},
+                )
+                self.phases[project_id] = "executing"
+                async for msg in self.continue_execution(project_id, state):
+                    yield msg
+
+            else:
+                # Default: treat as additional context, stay in approval
+                state.clarifications += f"\n{message}"
+                yield self._msg(
+                    project_id,
+                    "Got it. Say **proceed** to continue, **refine** to adjust, or just keep chatting.",
+                    {"type": "pm_response"},
+                )
 
         # ── Phase: executing ────────────────────────────────────────
         elif phase == "executing":
@@ -406,10 +464,31 @@ class Orchestrator:
             {"type": "agent_start", "agent": step},
         )
 
-        # Run agent in thread pool (agents use synchronous LLM calls)
+        # Run agent in thread pool with progress heartbeat
         loop = asyncio.get_event_loop()
+        future = loop.run_in_executor(None, agent.run, state)
+
+        # Heartbeat: emit progress every 5s while agent runs
+        _PROGRESS = [
+            "⏳ Analyzing requirements...",
+            "⏳ Generating insights...",
+            "⏳ Synthesizing output...",
+        ]
+        elapsed = 0
+        while True:
+            done, _ = await asyncio.wait({future}, timeout=5.0)
+            if done:
+                break
+            elapsed += 5
+            idx = min(elapsed // 5 - 1, len(_PROGRESS) - 1)
+            yield self._msg(
+                project_id,
+                f"{_PROGRESS[idx]} ({elapsed}s)",
+                {"type": "progress", "agent": step},
+            )
+
         try:
-            state = await loop.run_in_executor(None, agent.run, state)
+            state = future.result()
             self.states[project_id] = state  # update reference
             state.mark_step_completed(step)
 
