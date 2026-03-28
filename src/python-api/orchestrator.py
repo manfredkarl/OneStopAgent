@@ -22,6 +22,7 @@ from agents.business_value_agent import BusinessValueAgent
 from agents.presentation_agent import PresentationAgent
 from agents.brainstorming_agent import BrainstormingAgent
 from agents.knowledge_agent import KnowledgeAgent
+from agents.roi_agent import ROIAgent
 from agents.llm import llm
 from models.schemas import ChatMessage
 
@@ -33,6 +34,7 @@ AGENTS: dict[str, object] = {
     "azure_services": AzureSpecialistAgent(),
     "cost": CostAgent(),
     "business_value": BusinessValueAgent(),
+    "roi": ROIAgent(),
     "presentation": PresentationAgent(),
 }
 
@@ -163,16 +165,25 @@ def format_agent_output(step: str, state: AgentState) -> str:
     if step == "roi":
         roi = state.roi
         if roi.get("roi_percent") is not None:
-            parts = ["## 📈 ROI Analysis\n"]
-            parts.append(f"- **ROI:** {roi['roi_percent']:.0f}%")
-            if roi.get("payback_months"):
-                parts.append(f"- **Payback:** {roi['payback_months']:.1f} months")
-            if roi.get("annual_cost"):
-                parts.append(f"- **Annual Cost:** ${roi['annual_cost']:,.2f}")
-            if roi.get("annual_value"):
-                parts.append(f"- **Annual Value:** ${roi['annual_value']:,.2f}")
-            return "\n".join(parts)
-        return "## 📈 ROI\n\nROI analysis completed — see qualitative benefits above."
+            parts = [f"## 📈 ROI Analysis\n"]
+            parts.append(f"**ROI: {roi['roi_percent']:.0f}%** | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
+            parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.2f}")
+            parts.append(f"- Annual value generated: ${roi['annual_value']:,.2f}\n")
+            if roi.get("monetized_drivers"):
+                parts.append("### Monetized Value Drivers\n")
+                for d in roi["monetized_drivers"]:
+                    parts.append(f"- **{d['name']}**: ${d['annual_value']:,.2f}/year ({d['method']})")
+            if roi.get("qualitative_benefits"):
+                parts.append(f"\n### Qualitative Benefits\n")
+                for b in roi["qualitative_benefits"]:
+                    parts.append(f"- {b}")
+        else:
+            parts = ["## 📈 ROI Analysis\n", "ROI could not be calculated quantitatively.\n"]
+            if roi.get("qualitative_benefits"):
+                parts.append("### Qualitative Benefits\n")
+                for b in roi["qualitative_benefits"]:
+                    parts.append(f"- {b}")
+        return "\n".join(parts)
 
     if step == "presentation":
         return (
