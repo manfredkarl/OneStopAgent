@@ -186,10 +186,10 @@ def format_agent_output(step: str, state: AgentState) -> str:
         return "\n".join(parts)
 
     if step == "presentation":
-        return (
-            "## 📑 Presentation Ready\n\n"
-            "PowerPoint deck generated. You can download it from the project."
-        )
+        path = state.presentation_path
+        if path:
+            return "## 📑 Presentation Ready\n\nPowerPoint deck generated.\n\n📥 Ready for download."
+        return "## 📑 Presentation\n\n⚠️ Deck generation failed."
 
     return f"{step} completed."
 
