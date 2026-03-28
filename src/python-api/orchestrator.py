@@ -20,13 +20,15 @@ from agents.azure_specialist_agent import AzureSpecialistAgent
 from agents.cost_agent import CostAgent
 from agents.business_value_agent import BusinessValueAgent
 from agents.presentation_agent import PresentationAgent
-from agents.envisioning_agent import EnvisioningAgent
+from agents.brainstorming_agent import BrainstormingAgent
+from agents.knowledge_agent import KnowledgeAgent
 from agents.llm import llm
 from models.schemas import ChatMessage
 
 # ── Agent registry (keyed by plan-step ID) ──────────────────────────────
 AGENTS: dict[str, object] = {
-    "brainstorm": EnvisioningAgent(),
+    "brainstorm": BrainstormingAgent(),
+    "knowledge": KnowledgeAgent(),
     "architect": ArchitectAgent(),
     "azure_services": AzureSpecialistAgent(),
     "cost": CostAgent(),
@@ -42,10 +44,51 @@ pm = ProjectManager()
 def format_agent_output(step: str, state: AgentState) -> str:
     """Format an agent's output as markdown for the chat."""
     if step == "brainstorm":
-        scenarios = state.envisioning.get("scenarios", [])
-        parts = [f"## 💡 Reference Scenarios ({len(scenarios)} found)\n"]
-        for s in scenarios:
-            parts.append(f"- **{s.get('title', '')}**: {s.get('description', '')}")
+        bs = state.brainstorming
+        fit = state.azure_fit
+        explanation = state.azure_fit_explanation
+        scenarios = bs.get("scenarios", [])
+        industry = bs.get("industry", "N/A")
+
+        parts = [f"## 💡 Azure Opportunity Analysis\n"]
+        parts.append(f"**Industry:** {industry}")
+        parts.append(f"**Azure Fit:** {fit.upper()} — {explanation}\n")
+
+        if scenarios:
+            parts.append("### Suggested Scenarios\n")
+            for i, s in enumerate(scenarios, 1):
+                parts.append(f"**{i}. {s.get('title', '')}**")
+                parts.append(f"{s.get('description', '')}")
+                services = ", ".join(s.get("azure_services", []))
+                if services:
+                    parts.append(f"*Azure Services: {services}*")
+                reason = s.get("azure_fit_reason", "")
+                if reason:
+                    parts.append(f"💡 {reason}")
+                parts.append("")
+
+        return "\n".join(parts)
+
+    if step == "knowledge":
+        patterns = state.retrieved_patterns
+        ungrounded = any(p.get("_ungrounded") for p in patterns)
+
+        parts = [f"## 📚 Microsoft Reference Architectures ({len(patterns)} found)\n"]
+        if ungrounded:
+            parts.append("⚠️ *Based on local reference data (Microsoft Learn not available)*\n")
+
+        for p in patterns[:5]:
+            score = p.get("confidence_score", 0)
+            parts.append(f"**{p.get('title', 'Untitled')}** (relevance: {score:.0%})")
+            parts.append(f"{p.get('summary', '')}")
+            url = p.get("url", "")
+            if url:
+                parts.append(f"[View on Microsoft Learn]({url})")
+            services = ", ".join(p.get("recommended_services", []))
+            if services:
+                parts.append(f"*Services: {services}*")
+            parts.append("")
+
         return "\n".join(parts)
 
     if step == "architect":
@@ -505,6 +548,22 @@ class Orchestrator:
                 content=formatted,
                 metadata={"type": "agent_result", "agent": step},
             )
+
+            # Azure fit gate (FRD-02 §2.5): weak/unclear pauses for more detail
+            if step == "brainstorm" and state.azure_fit and state.azure_fit != "strong":
+                yield self._msg(
+                    project_id,
+                    f"Azure fit is **{state.azure_fit}**. "
+                    f"{state.azure_fit_explanation}\n\n"
+                    "Could you provide more details about your use case "
+                    "so I can better assess the Azure opportunity? "
+                    "Or say **proceed** to continue anyway.",
+                    {"type": "approval", "step": step},
+                )
+                state.awaiting_approval = True
+                state.current_step = step
+                self.phases[project_id] = "approval"
+                return
 
             # Approval gate check (FRD-01 §2.3)
             if self.should_pause(state, step):
