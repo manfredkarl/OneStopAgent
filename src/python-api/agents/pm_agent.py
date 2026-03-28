@@ -1,7 +1,19 @@
 """Project Manager — plans and orchestrates the agent pipeline."""
+import json
+import re
 from enum import Enum
 from agents.llm import llm
 from agents.state import AgentState
+
+
+def _extract_response_field_partial(partial_json: str) -> str:
+    """Extract the partial value of the 'response' key from a streaming JSON string.
+
+    Handles both incomplete (streaming) and complete JSON.
+    Returns the extracted text, or "" if the key hasn't appeared yet.
+    """
+    match = re.search(r'"response"\s*:\s*"((?:[^"\\]|\\.)*)', partial_json)
+    return match.group(1) if match else ""
 
 
 class Intent(Enum):
@@ -155,7 +167,6 @@ RULES:
             {"role": "user", "content": user_input}
         ])
 
-        import json
         try:
             text = response.content.strip()
             if text.startswith("```"):
@@ -184,6 +195,85 @@ RULES:
             # LLM returned plain text instead of JSON — still usable
             return {
                 "response": response.content,
+                "azure_fit": "unclear",
+                "azure_fit_explanation": "Could not assess Azure fit from the response.",
+                "industry": "Cross-Industry",
+                "scenarios": [],
+            }
+
+    async def brainstorm_greeting_streaming(
+        self, user_input: str, on_token
+    ) -> dict:
+        """Async streaming version of brainstorm_greeting.
+
+        Calls on_token(str) for each token belonging to the 'response' field
+        as the LLM generates it. Accumulates the full JSON and parses at end.
+        Returns the same structure as brainstorm_greeting().
+        """
+        messages = [
+            {"role": "system", "content": """You are an Azure solution project manager. Be CONCISE.
+The user described a project idea. Respond with ONLY a JSON object (no markdown fences):
+
+{
+    "response": "Brief markdown response: 1 sentence acknowledgment, 2-3 short Azure scenario bullets (service names + why), 2-3 clarifying questions. Keep under 300 words. End with: Say **proceed** to start.",
+    "azure_fit": "strong" or "weak" or "unclear",
+    "azure_fit_explanation": "1 sentence WHY Azure fits or doesn't",
+    "industry": "Retail, Healthcare, Financial Services, Manufacturing, or Cross-Industry",
+    "scenarios": [
+        {
+            "title": "Short name",
+            "description": "1 sentence",
+            "azure_services": ["Service1", "Service2"]
+        }
+    ]
+}
+
+RULES:
+- Keep the response field SHORT — no walls of text
+- 2-3 scenarios max, 1 sentence each
+- 2-3 questions max
+- Be specific about Azure services"""},
+            {"role": "user", "content": user_input},
+        ]
+
+        full_text = ""
+        extracted_len = 0  # chars of the response field already sent
+
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                full_text += chunk.content
+                response_so_far = _extract_response_field_partial(full_text)
+                if len(response_so_far) > extracted_len:
+                    new_text = response_so_far[extracted_len:]
+                    on_token(new_text)
+                    extracted_len = len(response_so_far)
+
+        # Parse accumulated full JSON (same logic as brainstorm_greeting)
+        try:
+            text = full_text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            result = json.loads(text)
+
+            resp = result.get("response", text)
+            if isinstance(resp, str) and resp.strip().startswith("{"):
+                try:
+                    inner = json.loads(resp)
+                    if isinstance(inner, dict) and "response" in inner:
+                        result["response"] = inner["response"]
+                except json.JSONDecodeError:
+                    pass
+
+            return {
+                "response": result.get("response", text),
+                "azure_fit": result.get("azure_fit", "unclear"),
+                "azure_fit_explanation": result.get("azure_fit_explanation", ""),
+                "industry": result.get("industry", "Cross-Industry"),
+                "scenarios": result.get("scenarios", []),
+            }
+        except (json.JSONDecodeError, Exception):
+            return {
+                "response": full_text,
                 "azure_fit": "unclear",
                 "azure_fit_explanation": "Could not assess Azure fit from the response.",
                 "industry": "Cross-Industry",

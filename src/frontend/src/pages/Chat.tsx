@@ -39,15 +39,31 @@ export default function Chat({ agents: _agents, onAgentsChange, onProjectCreated
 
     try {
       await sendMessageStreaming(projectId, message, (incoming) => {
-        setMessages(prev => {
-          const idx = prev.findIndex(m => m.id === incoming.id);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = incoming;
-            return updated;
-          }
-          return [...prev, incoming];
-        });
+        if (incoming.metadata?.type === 'agent_token') {
+          // In-place token append: find message by msg_id or create new streaming message
+          const msgId = incoming.metadata.msg_id as string;
+          const token = (incoming.metadata.token ?? incoming.content) as string;
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === msgId);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], content: updated[idx].content + token };
+              return updated;
+            }
+            // First token for this stream — create placeholder message
+            return [...prev, { ...incoming, id: msgId, content: token }];
+          });
+        } else {
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === incoming.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = incoming;
+              return updated;
+            }
+            return [...prev, incoming];
+          });
+        }
       });
     } catch (err) {
       console.error('Send failed:', err);

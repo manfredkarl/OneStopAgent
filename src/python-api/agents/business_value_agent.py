@@ -3,6 +3,7 @@
 Returns exactly 3 value drivers, each with a source link,
 an aggregated annual impact range, and explicit assumptions.
 """
+import asyncio
 import json
 import logging
 from agents.llm import llm
@@ -138,5 +139,52 @@ Return ONLY valid JSON (no markdown fences):
                 "confidence": "conservative",
                 "sources": [],
             }
+
+        return state
+
+    async def run_streaming(
+        self, state: AgentState, on_token
+    ) -> AgentState:
+        """Async streaming — runs full agent, then streams an executive summary.
+
+        Approach B per spec: value drivers are computed synchronously, then a
+        2-sentence plain-text summary is streamed token-by-token via on_token(str).
+        """
+        loop = asyncio.get_event_loop()
+        state = await loop.run_in_executor(None, self.run, state)
+
+        bv = state.business_value
+        drivers = bv.get("drivers", [])
+        impact_range = bv.get("annual_impact_range")
+
+        driver_text = "; ".join(
+            f"{d.get('name', '')}: {d.get('metric', '')}" for d in drivers[:3]
+        )
+        impact_text = ""
+        if impact_range:
+            low = impact_range.get("low", 0)
+            high = impact_range.get("high", 0)
+            impact_text = f"${low:,.0f}–${high:,.0f} annual impact"
+
+        async for chunk in llm.astream([
+            {
+                "role": "system",
+                "content": (
+                    "You are a value engineer. "
+                    "Summarize the business value analysis in 2 sentences. "
+                    "Be specific with numbers. Plain text only."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Value drivers: {driver_text}\n"
+                    + (f"Annual impact: {impact_text}\n" if impact_text else "")
+                    + "\nSummarize in 2 sentences."
+                ),
+            },
+        ]):
+            if chunk.content:
+                on_token(chunk.content)
 
         return state
