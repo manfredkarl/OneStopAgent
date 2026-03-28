@@ -144,11 +144,13 @@ async def get_agents(project_id: str, x_user_id: str = Header()):
         raise HTTPException(status_code=404, detail="Project not found")
     all_agents = [
         {"agentId": "pm", "displayName": "Project Manager", "status": "idle", "active": True},
-        {"agentId": "envisioning", "displayName": "Envisioning", "status": "idle", "active": "envisioning" in project.active_agents},
+        {"agentId": "envisioning", "displayName": "Brainstorming", "status": "idle", "active": "envisioning" in project.active_agents},
+        {"agentId": "knowledge", "displayName": "Knowledge Retrieval", "status": "idle", "active": "knowledge" in project.active_agents},
         {"agentId": "architect", "displayName": "System Architect", "status": "idle", "active": True},
         {"agentId": "azure-specialist", "displayName": "Azure Specialist", "status": "idle", "active": "azure-specialist" in project.active_agents},
         {"agentId": "cost", "displayName": "Cost Specialist", "status": "idle", "active": "cost" in project.active_agents},
         {"agentId": "business-value", "displayName": "Business Value", "status": "idle", "active": "business-value" in project.active_agents},
+        {"agentId": "roi", "displayName": "ROI Calculator", "status": "idle", "active": "roi" in project.active_agents},
         {"agentId": "presentation", "displayName": "Presentation", "status": "idle", "active": "presentation" in project.active_agents},
     ]
     return {"agents": all_agents}
