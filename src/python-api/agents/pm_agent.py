@@ -224,8 +224,8 @@ RULES:
             monthly = est.get("totalMonthly", 0)
             source = est.get("pricingSource", "unknown")
             sels = state.services.get("selections", [])
-            summary = f"Mapped {len(sels)} Azure services and estimated monthly cost: **${monthly:,.2f}** (source: {source})."
-            insight = f"Annual projection: **${est.get('totalAnnual', 0):,.2f}**"
+            summary = f"Mapped {len(sels)} Azure services and estimated monthly cost: **${monthly:,.0f}** (source: {source})."
+            insight = f"Annual projection: **${est.get('totalAnnual', 0):,.0f}**"
 
         elif step == "business_value":
             drivers = state.business_value.get("drivers", [])
@@ -339,14 +339,14 @@ RULES:
                 )
             parts.append(
                 f"\n### \U0001f4b0 Cost Estimate\n\n"
-                f"**Total: ${monthly:,.2f}/month (${annual:,.2f}/year)** \u2014 Source: {source}\n"
+                f"**Total: ${monthly:,.0f}/month (${annual:,.0f}/year)** \u2014 Source: {source}\n"
             )
             parts.append("| Service | SKU | Monthly Cost |")
             parts.append("|---------|-----|-------------|")
             for item in est.get("items", [])[:20]:
                 parts.append(
                     f"| {item.get('serviceName', '')} | {item.get('sku', '')} "
-                    f"| ${item.get('monthlyCost', 0):,.2f} |"
+                    f"| ${item.get('monthlyCost', 0):,.0f} |"
                 )
             if est.get("assumptions"):
                 parts.append(f"\n*Assumptions: {', '.join(est['assumptions'][:5])}*")
@@ -377,6 +377,15 @@ RULES:
                     if info:
                         line += f"\n  *To refine: {info}*"
                     parts.append(line)
+            # Add source references from web search results
+            sources = bv.get("sources", [])
+            if sources:
+                parts.append("\n### 🔍 Research Sources\n")
+                for s in sources:
+                    if s.get("url"):
+                        parts.append(f"- [{s['title'][:60]}]({s['url']})")
+                    else:
+                        parts.append(f"- {s['title'][:60]}")
             # Add source references from retrieved patterns
             patterns = state.retrieved_patterns
             if patterns:
@@ -399,12 +408,12 @@ RULES:
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 parts.append(f"**ROI: {roi['roi_percent']:.0f}%** | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
-                parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.2f}")
-                parts.append(f"- Annual value generated: ${roi['annual_value']:,.2f}\n")
+                parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.0f}")
+                parts.append(f"- Annual value generated: ${roi['annual_value']:,.0f}\n")
                 if roi.get("monetized_drivers"):
                     parts.append("### Monetized Value Drivers\n")
                     for d in roi["monetized_drivers"]:
-                        parts.append(f"- **{d['name']}**: ${d['annual_value']:,.2f}/year")
+                        parts.append(f"- **{d['name']}**: ${d['annual_value']:,.0f}/year")
                 if roi.get("qualitative_benefits"):
                     parts.append("\n### Qualitative Benefits\n")
                     for b in roi["qualitative_benefits"]:

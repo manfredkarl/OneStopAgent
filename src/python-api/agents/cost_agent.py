@@ -150,6 +150,16 @@ class CostAgent:
                 "⚠️ Estimate exceeds $100K/month — recommend detailed pricing review with Azure team"
             )
 
+        # Skew check: if one service is >90% of total cost, flag it
+        if total_monthly > 0 and items:
+            for item in items:
+                pct = (item["monthlyCost"] / total_monthly) * 100
+                if pct > 90:
+                    assumptions.append(
+                        f"⚠️ {item['serviceName']} ({item['sku']}) accounts for {pct:.0f}% of total cost — "
+                        f"verify this is correct or consider alternative SKUs"
+                    )
+
         # ── Populate both state fields ───────────────────────────────
         state.services = {"selections": selections}
         state.costs = {

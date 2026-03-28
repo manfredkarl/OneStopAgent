@@ -6,8 +6,12 @@ If architecture/cost data is available (e.g., during iteration re-runs),
 it incorporates that too.
 """
 import json
+import logging
 from agents.llm import llm
 from agents.state import AgentState
+from services.web_search import search_industry_benchmarks
+
+logger = logging.getLogger(__name__)
 
 
 class BusinessValueAgent:
@@ -20,6 +24,14 @@ class BusinessValueAgent:
         customer = state.customer_name or "the customer"
         description = state.user_input
         clarifications = state.clarifications
+
+        # Search for real industry metrics
+        use_case = description[:100]
+        search_results: list[dict[str, str]] = []
+        try:
+            search_results = search_industry_benchmarks(industry, use_case)
+        except Exception as e:
+            logger.warning(f"Industry benchmark search failed: {e}")
 
         # Build context from whatever is available
         context_parts = []
@@ -56,6 +68,18 @@ class BusinessValueAgent:
 
         extra_context = "\n".join(context_parts)
 
+        # Build search context for the LLM prompt
+        search_context = ""
+        if search_results:
+            search_context = "\n\nREAL INDUSTRY DATA (from web search — use these to ground your estimates):\n"
+            for r in search_results[:5]:
+                search_context += f"- {r.get('title', '')}: {r.get('snippet', '')}\n"
+                if r.get('url'):
+                    search_context += f"  Source: {r['url']}\n"
+            search_context += "\nBase your value driver estimates on this real data where possible.\n"
+        else:
+            search_context = "\n\n⚠️ No web search results available — use your best knowledge for estimates.\n"
+
         prompt = f"""Analyze the business value of this Azure solution.
 
 CUSTOMER: {customer}
@@ -63,6 +87,7 @@ INDUSTRY: {industry}
 USE CASE: {description}
 {f"ADDITIONAL CONTEXT: {clarifications}" if clarifications else ""}
 {extra_context}
+{search_context}
 
 Generate 3-5 value drivers. RULES:
 - Each driver MUST be specific to the {industry} industry and this use case
@@ -109,6 +134,12 @@ Return ONLY valid JSON (no markdown fences):
                 driver.setdefault("info_needed", None)
 
             state.business_value = result
+
+            # Attach web search sources so they can be rendered downstream
+            state.business_value["sources"] = [
+                {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("snippet", "")[:100]}
+                for r in search_results[:5]
+            ]
 
         except Exception:
             # Fallback — generic but structured per §2.4 schema
