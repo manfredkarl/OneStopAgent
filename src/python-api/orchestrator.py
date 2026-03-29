@@ -262,14 +262,30 @@ class Orchestrator:
                 )
 
             else:
-                # Treat as additional clarification
+                # Treat as additional clarification — store and acknowledge
                 if state.clarifications:
                     state.clarifications += f"\n{message}"
                 else:
                     state.clarifications = message
+
+                # Use LLM to briefly acknowledge the input so user knows it was captured
+                try:
+                    ack = llm.invoke([
+                        {"role": "system", "content": (
+                            "You are a project manager. The user just answered your questions about their Azure project. "
+                            "Briefly acknowledge their input in 1-2 sentences — reference specifics they mentioned "
+                            "(e.g. users, region, industry, scale). Then ask if there's anything else or if they want to proceed. "
+                            "Be concise. Use **proceed** in bold."
+                        )},
+                        {"role": "user", "content": f"User's original request: {state.user_input}\n\nUser's additional input: {message}"},
+                    ])
+                    ack_text = ack.content.strip()
+                except Exception:
+                    ack_text = "Got it. Anything else, or say **proceed** to start?"
+
                 yield self._msg(
                     project_id,
-                    "Got it. Anything else, or say **proceed** to start?",
+                    ack_text,
                     {"type": "pm_response"},
                 )
 
