@@ -56,7 +56,6 @@ const AI_TEXT = ["text-white", "text-white", "text-white", "text-gray-800"];
 export default function ROIDashboard({ data }: Props) {
   const {
     monthlySavings,
-    annualImpact,
     azureMonthlyCost,
     savingsPercentage,
     currentCost,
