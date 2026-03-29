@@ -1,115 +1,130 @@
-# spec2cloud · Next.js + TypeScript Shell
+# OneStopAgent
 
-**Transform product specifications into production-ready applications on Azure — AI-powered, human-approved, spec-driven.**
+**From customer idea to Azure solution proposal — architecture, costs, business value, and PowerPoint — in one guided conversation.**
 
-spec2cloud is a spec-driven development framework where **specifications are the single source of truth**. Tests are generated from specs, implementation makes those tests pass, and the result is deployed to Azure — all orchestrated by an AI agent with **43 specialized skills**. Every step is resumable, auditable, and requires human approval before anything ships.
-
-This is the **Next.js + TypeScript shell** — a pre-configured template with the full tech stack wired up and ready to go.
-
-## Why spec2cloud?
-
-- **Specifications are the source of truth** — not code, not comments, not wikis
-- **Tests before code** — every feature has tests before implementation begins
-- **Human approval at every gate** — nothing ships without your sign-off
-- **Resumable from any point** — state persisted in git, pick up where you left off
-- **Works for new and existing apps** — greenfield builds new, brownfield modernizes existing
-- **Live research** — agents query Microsoft Learn, Context7, and DeepWiki before writing a single line
-
-## Two Paths, One Pipeline
-
-**Greenfield** — Start with a product idea → PRD → FRD → UI prototypes → Tests → Contracts → Implementation → Deployed on Azure.
-
-**Brownfield** — Start with existing code → Extract specs → Testability gate → Green baseline or behavioral docs → Assess → Plan → Same delivery pipeline.
-
-Both converge on the same **Phase 2 delivery**: Tests → Contracts → Implementation → Deploy.
+OneStopAgent is an internal Microsoft web application for Azure sellers. Describe a customer need in plain language, and a team of AI agents collaborates to produce a fully scoped Azure solution with architecture diagrams, real cost estimates, ROI analysis, and a downloadable executive deck.
 
 ## How It Works
 
-<p align="center">
-  <img src="docs/spec2cloud-flow.gif" alt="spec2cloud animated flow — Ralph Loop, phase pipeline, and increment delivery" width="100%">
-</p>
+```
+Seller describes need → PM asks clarifying questions → Agents execute in sequence → Solution delivered
+```
 
-> **[▶ Interactive version](docs/spec2cloud-flow.html)** — open in your browser for playback controls and speed adjustment.
-
-Human approval gates pause the pipeline at every critical transition — nothing ships without your sign-off.
-
-1. **Write a PRD** — plain-language product requirements in `specs/prd.md`
-2. **Agents refine** — PRD → FRDs, reviewed through product + technical lenses
-3. **Prototype** — interactive HTML wireframes you browse and approve in your browser
-4. **Test-first** — Gherkin scenarios + Playwright e2e + Vitest unit tests, all failing (red baseline)
-5. **Contracts** — API specs, shared TypeScript types, and infra requirements generated from specs
-6. **Implement** — agents write code to make tests green (API slice → Web slice → Integration)
-7. **Ship** — `azd up` deploys to Azure Container Apps; smoke tests verify production
+1. **Describe the opportunity** — e.g. "Predictive maintenance for a manufacturing company with 500 production lines"
+2. **Answer 2-3 clarifying questions** — scale, region, compliance, timeline
+3. **Agents build the solution** — each one reads the previous agent's output:
+   - 🏗️ **Architect** — Mermaid diagram + component breakdown using Azure patterns
+   - 💰 **Cost & Services** — Azure SKU mapping + real pricing from the Azure Retail Prices API
+   - 📊 **Business Value** — Industry-benchmarked value drivers with user-provided assumptions
+   - 📈 **ROI Calculator** — Pure-math ROI with visual dashboard (cost comparison, 3-year projection)
+   - 📑 **Presentation** — Professional PowerPoint deck via PptxGenJS template
+4. **Review and iterate** — modify architecture, adjust assumptions, re-run any agent
+5. **Download the deck** — ready to present to the customer
 
 ## Quick Start
 
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- Azure CLI (`az login`) with access to Azure OpenAI
+
+### Backend
 ```bash
-# Create your repo from this template
-gh repo create my-app --template EmeaAppGbb/shell-typescript
-cd my-app && npm install
-cd src/web && npm install && cd ../..
-cd src/api && npm install && cd ../..
+# Get Azure OpenAI token
+export AZURE_OPENAI_TOKEN=$(az account get-access-token --resource "https://cognitiveservices.azure.com" --query accessToken -o tsv)
 
-# Run locally (Aspire recommended)
-npm run dev:aspire        # API + Web + Docs with service discovery
-
-# Write your PRD and let agents take over
-code specs/prd.md
-
-# Deploy to Azure
-azd auth login && azd up
+cd src/python-api
+pip install -r requirements.txt
+uvicorn main:app --port 8000
 ```
 
-## This Shell's Tech Stack
+### Frontend
+```bash
+cd src/frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:4200** in your browser.
+
+## Architecture
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js · TypeScript · App Router · Tailwind CSS |
-| Backend | Express.js · TypeScript · Node.js |
-| Testing | Playwright (e2e) · Cucumber.js (BDD) · Vitest + Supertest (unit) |
-| Docs | MkDocs Material — auto-generated from wireframes + Gherkin + screenshots |
-| Local orchestration | .NET Aspire (service discovery & dashboard) |
-| Deployment | Azure Container Apps via Azure Developer CLI (`azd`) |
-| AI research | Microsoft Learn · Context7 · DeepWiki · Azure Best Practices MCP |
+| Frontend | React + TypeScript + Vite + Tailwind CSS |
+| Backend | Python + FastAPI + SSE streaming |
+| LLM | Azure OpenAI (GPT-5.4) via LangChain |
+| Pricing | Azure Retail Prices REST API (public, no auth) |
+| Slides | PptxGenJS (primary) + python-pptx (fallback) |
+| Diagrams | Mermaid (rendered client-side as SVG) |
 
-## Key Commands
+### Key Design Decisions
 
-| Command | What it does |
-|---------|-------------|
-| `npm run dev:aspire` | Run all services with Aspire |
-| `npm run dev:all` | API + Web + Docs concurrently |
-| `npm run test:all` | Unit + BDD + e2e tests |
-| `npm run build:all` | Production build (API + Web) |
-| `npm run docs:full` | Capture screenshots + generate docs |
-| `azd up` | Provision + deploy to Azure |
+- **Controlled orchestration** — deterministic pipeline, not autonomous ReAct agents. The Project Manager is a Python class, not a LangChain agent.
+- **Shared state** — a single `AgentState` dataclass flows between agents. Each reads what it needs and writes its output.
+- **Two-phase inputs** — both Cost and Business Value agents ask usage/assumption questions first, then calculate with real numbers.
+- **Template-based slides** — a tested PptxGenJS script template handles all layout; the LLM only generates text content as JSON.
 
-## Learn More
+## Project Structure
 
-| Start Here | Then Explore | Go Deeper |
-|-----------|-------------|-----------|
-| [Quick Start](docs/quickstart.md) | [Greenfield Guide](docs/greenfield.md) | [Skills Catalog](docs/skills.md) |
-| [Core Concepts](docs/concepts.md) | [Brownfield Guide](docs/brownfield.md) | [State & Gates](docs/state-and-gates.md) |
-| [Microhack](docs/microhack.md) | [Examples](docs/examples/) | [Architecture](docs/architecture.md) |
+```
+src/
+├── python-api/                     # FastAPI backend
+│   ├── main.py                     # Routes, SSE streaming, PPTX download
+│   ├── orchestrator.py             # Phase state machine, approval gates
+│   ├── agents/
+│   │   ├── llm.py                  # Azure OpenAI connection
+│   │   ├── state.py                # Shared AgentState dataclass
+│   │   ├── pm_agent.py             # Project Manager + intent classifier
+│   │   ├── architect_agent.py      # Mermaid diagrams + components
+│   │   ├── cost_agent.py           # SKU mapping + Azure Pricing API
+│   │   ├── business_value_agent.py # Two-phase value driver analysis
+│   │   ├── roi_agent.py            # Pure-math ROI + visual dashboard
+│   │   └── presentation_agent.py   # PptxGenJS template + LLM text
+│   ├── services/
+│   │   ├── pricing.py              # Azure Retail Prices API client
+│   │   ├── presentation.py         # PptxGenJS execution + python-pptx fallback
+│   │   ├── web_search.py           # DuckDuckGo for BV benchmarks
+│   │   └── mcp.py                  # Microsoft Learn MCP client
+│   ├── data/
+│   │   └── knowledge_base.py       # Reference architecture patterns
+│   └── templates/
+│       └── slide_master.pptx       # Branded PPTX template
+└── frontend/                       # React SPA
+    └── src/
+        ├── pages/
+        │   ├── Landing.tsx          # Industry cards, agent toggles
+        │   └── Chat.tsx             # Chat interface with SSE
+        └── components/
+            ├── AgentSidebar.tsx     # Agent toggles + status
+            ├── ChatThread.tsx       # Messages, approvals, dashboards
+            ├── AssumptionsInput.tsx  # Number input fields
+            ├── ROIDashboard.tsx     # KPI cards, cost bars, projection
+            ├── MessageContent.tsx   # Markdown + Mermaid rendering
+            └── MermaidDiagram.tsx   # SVG diagram renderer
+```
 
-## Extending
+## Features
 
-- **Skills** (`.github/skills/`) — 43 specialized agent procedures following the [agentskills.io](https://agentskills.io) standard
-- **Orchestrator** (`AGENTS.md`) — the central loop; modify phases, gates, or add new ones
-- **Other shells** — swap Next.js/Express for any framework; see [available shells](docs/shells.md)
-- **Community skills** — discover and publish skills at [skills.sh](https://skills.sh/)
+- **Natural language input** — describe the opportunity, the PM handles the rest
+- **Agent toggles** — turn agents on/off to customize the scoping flow
+- **Real Azure pricing** — Cost agent queries the live Azure Retail Prices API
+- **Assumption-driven** — both cost and business value ask for real numbers before calculating
+- **ROI dashboard** — visual cost comparison, value drivers, 3-year projection
+- **Architecture diagrams** — Mermaid flowcharts rendered as interactive SVG
+- **Executive deck** — professional PowerPoint generated via PptxGenJS template
+- **SSE streaming** — agent output streams to the UI in real-time
+- **Guided + fast-run modes** — pause at each step for approval, or run the full pipeline
+
+## Open Issues
+
+- [#3 — Token streaming](https://github.com/manfredkarl/OneStopAgent/issues/3) — stream LLM output token-by-token
+- [#6 — ROI dashboard logic](https://github.com/manfredkarl/OneStopAgent/issues/6) — rethink calculation methodology
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Please read our [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## Security
-
-To report vulnerabilities, see [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
 [ISC](LICENSE)
-
----
-
-**From idea to production — spec-driven, AI-powered, human-approved.**

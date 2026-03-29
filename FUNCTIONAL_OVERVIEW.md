@@ -23,10 +23,10 @@ The seller opens the app, describes a customer need in plain language, and a tea
 4. **Agents execute automatically** — the PM calls specialist agents in sequence, each building on the previous one's output:
 
    - **🏗️ System Architect** — Designs an Azure architecture with a Mermaid diagram showing all components and their relationships
-   - **☁️ Azure Specialist** — Maps each architecture component to specific Azure services with SKU recommendations scaled to the user count
-   - **💰 Cost Specialist** — Queries the Azure Retail Prices API to estimate monthly and annual costs with a detailed breakdown table
-   - **📊 Business Value** — Analyzes ROI and business impact with quantified value drivers specific to the customer's industry and use case
-   - **📑 Presentation** — Generates a downloadable PowerPoint deck compiling all the outputs
+   - **💰 Cost & Services** — Maps architecture components to Azure services with SKUs, then queries the Azure Retail Prices API for cost estimates. Asks usage questions first (concurrent users, API calls/day, etc.)
+   - **📊 Business Value** — Two-phase analysis: asks for business assumptions (employees, hourly rate, etc.), then calculates industry-benchmarked value drivers with web search for real sources
+   - **📈 ROI Calculator** — Pure-math ROI with visual dashboard showing cost comparison, value drivers, and 3-year projection
+   - **📑 Presentation** — Generates a professional PowerPoint deck using a PptxGenJS template with LLM-polished text content
 
 5. **Seller reviews and iterates** — can ask the PM to modify the architecture, adjust assumptions, or re-run any agent
 
@@ -128,7 +128,7 @@ Agent responses stream to the frontend in real-time using **Server-Sent Events**
 
 ### Azure OpenAI Integration
 
-- Uses **Azure OpenAI GPT-4.1** deployed on Azure AI Foundry
+- Uses **Azure OpenAI GPT-5.4** deployed on Azure AI Foundry
 - Authenticated via **Azure CLI credential** (`az account get-access-token`)
 - Token passed as `AZURE_OPENAI_TOKEN` environment variable at server startup
 - LangChain's `AzureChatOpenAI` handles the API calls
@@ -146,10 +146,12 @@ The Cost Specialist agent queries the **Azure Retail Prices REST API** (`https:/
 
 ### PowerPoint Generation
 
-The Presentation agent uses **python-pptx** to generate real `.pptx` files:
+The Presentation agent uses a **template-based PptxGenJS approach**:
 
-- 8-slide deck: Title, Requirements, Architecture, Components, Services, Costs, Business Value, Next Steps
-- Architecture components and cost breakdowns rendered as formatted tables
+- A hardcoded, tested PptxGenJS template handles all layout and design (Microsoft color palette, Segoe UI fonts)
+- The LLM only generates polished text content (tagline, bullets, narrative) as structured JSON
+- The template produces 9 conditional slides: title, executive summary, architecture, services, cost summary with bar chart, business value cards, ROI stats, next steps, and closing
+- Falls back to **python-pptx** if Node.js execution fails
 - Files saved to `output/` directory, downloadable via API endpoint
 
 ## Architecture
@@ -164,8 +166,8 @@ The Presentation agent uses **python-pptx** to generate real `.pptx` files:
 
 ### Backend
 - **Python + FastAPI** at `src/python-api/`
-- **LangChain / LangGraph** ReAct agent as the PM orchestrator
-- 6 specialist agents implemented as LangChain `@tool` functions
+- **Controlled orchestration** — ProjectManager is a Python class with LLM-based intent classification
+- 5 specialist agents as Python classes with `run(state) -> state` methods
 - **CORS enabled** for local development
 - In-memory project and conversation storage
 
@@ -173,27 +175,26 @@ The Presentation agent uses **python-pptx** to generate real `.pptx` files:
 
 | Agent | What It Does | How It Works |
 |-------|-------------|--------------|
-| **Project Manager** | Orchestrates the conversation, decides which agents to call | LangGraph ReAct agent with 6 tools — uses LLM reasoning to decide when and what to call |
-| **System Architect** | Generates Azure architecture diagrams | Calls GPT-4.1 to produce Mermaid flowchart + component list based on requirements |
-| **Azure Specialist** | Selects specific Azure services and SKUs | Maps architecture components to services with scale-appropriate SKUs (B1 for small, P2v3 for large) |
-| **Cost Specialist** | Estimates Azure costs | Queries `https://prices.azure.com/api/retail/prices` for real pricing, falls back to reference prices |
-| **Business Value** | Analyzes ROI and business impact | Calls GPT-4.1 with full solution context to generate industry-specific value drivers and executive summary |
-| **Presentation** | Generates PowerPoint deck | Uses python-pptx to create an 8-slide deck with architecture, services, costs, and value analysis |
-| **Envisioning** | Suggests scenarios for vague requirements | Searches a knowledge base of reference architectures and past scenarios |
+| **Project Manager** | Orchestrates the conversation, decides which agents to call | Python class with LLM-based intent classification (proceed, refine, skip, brainstorm, etc.) |
+| **System Architect** | Generates Azure architecture diagrams | Calls LLM to produce Mermaid flowchart + component list with pattern grounding from knowledge base |
+| **Cost & Services** | Selects Azure services/SKUs and estimates costs | Two-phase: asks usage questions first, then maps components to SKUs and queries Azure Retail Prices API |
+| **Business Value** | Analyzes value drivers with real assumptions | Two-phase: generates assumption questions, user fills inputs, then calculates with web-searched benchmarks |
+| **ROI Calculator** | Calculates return on investment | Pure math — no LLM calls. Produces visual dashboard with cost comparison and 3-year projection |
+| **Presentation** | Generates executive PowerPoint deck | PptxGenJS template with LLM-generated text content. Falls back to python-pptx |
 
 ## Key Features
 
-- **Natural language input** — describe what you need, the PM figures out the rest
-- **LangChain agent orchestration** — ReAct pattern with dynamic tool selection
-- **Streaming responses** — SSE delivers agent output in real-time, token by token
+- **Controlled multi-agent orchestration** — deterministic pipeline with approval gates
+- **Two-phase inputs** — Cost and BV agents ask for real assumptions before calculating
+- **Streaming responses** — SSE delivers agent output in real-time
 - **Real Azure pricing** — cost estimates use the live Azure Retail Prices API
+- **ROI visual dashboard** — KPI cards, cost comparison bars, value drivers, 3-year projection
 - **Contextual analysis** — business value is specific to the customer's industry and use case
-- **Scale-aware** — SKU selection and cost calculation adapt to the specified user count
+- **Scale-aware** — SKU selection adapts to user-provided usage metrics
 - **Agent control** — toggle agents on/off to customize the scoping process
-- **Markdown output** — formatted responses with headings, tables, bullet lists
 - **Architecture diagrams** — Mermaid flowcharts rendered as interactive SVG
-- **Downloadable deck** — PowerPoint file ready to present to the customer
-- **Conversation memory** — PM remembers context across the entire session
+- **Executive deck** — professional PowerPoint generated via PptxGenJS template
+- **Guided + fast-run modes** — pause at each step for approval, or run the full pipeline
 
 ## Running It
 
@@ -227,41 +228,45 @@ Open `http://localhost:4200` in your browser.
 OneStopAgent/
 ├── src/
 │   ├── python-api/              # Python backend (FastAPI + controlled orchestration)
-│   │   ├── main.py              # FastAPI routes, SSE streaming, message handling
-│   │   ├── orchestrator.py      # Execution engine — runs agents in sequence
+│   │   ├── main.py              # FastAPI routes, SSE streaming, PPTX download
+│   │   ├── orchestrator.py      # Phase state machine, approval gates, agent execution
 │   │   ├── requirements.txt     # fastapi, langchain-openai, python-pptx, etc.
 │   │   ├── agents/
 │   │   │   ├── llm.py                    # Azure OpenAI connection (AzureChatOpenAI)
-│   │   │   ├── state.py                  # Shared AgentState object
-│   │   │   ├── pm_agent.py               # ProjectManager class (planner, NOT ReAct)
-│   │   │   ├── architect_agent.py        # System Architect (Mermaid + components via LLM)
-│   │   │   ├── azure_specialist_agent.py # Azure service + SKU selection
-│   │   │   ├── cost_agent.py             # Cost estimation via Azure Pricing API
-│   │   │   ├── business_value_agent.py   # ROI analysis via LLM
-│   │   │   ├── presentation_agent.py     # PowerPoint generation (python-pptx)
-│   │   │   └── envisioning_agent.py      # Reference scenario matching
+│   │   │   ├── state.py                  # Shared AgentState dataclass
+│   │   │   ├── pm_agent.py               # ProjectManager + IntentInterpreter
+│   │   │   ├── architect_agent.py        # System Architect (Mermaid + components)
+│   │   │   ├── cost_agent.py             # Two-phase: usage questions → SKU mapping + pricing
+│   │   │   ├── business_value_agent.py   # Two-phase: assumptions → value drivers
+│   │   │   ├── roi_agent.py              # Pure-math ROI + visual dashboard data
+│   │   │   └── presentation_agent.py     # PptxGenJS template + LLM text content
 │   │   ├── services/
-│   │   │   ├── pricing.py       # Azure Retail Prices API client + reference prices
-│   │   │   ├── presentation.py  # python-pptx deck builder (8 slides)
-│   │   │   └── project_store.py # In-memory project + chat storage
-│   │   └── data/
-│   │       └── knowledge_base.py # 8 reference scenarios for envisioning
+│   │   │   ├── pricing.py       # Azure Retail Prices API client
+│   │   │   ├── presentation.py  # PptxGenJS execution + python-pptx fallback
+│   │   │   ├── web_search.py    # DuckDuckGo search for BV benchmarks
+│   │   │   └── mcp.py           # Microsoft Learn MCP client
+│   │   ├── data/
+│   │   │   └── knowledge_base.py # Reference architecture patterns
+│   │   └── templates/
+│   │       └── slide_master.pptx # Branded PPTX template
 │   └── frontend/                # React SPA (Vite + TypeScript)
 │       └── src/
 │           ├── pages/
-│           │   ├── Landing.tsx   # Project creation + example prompt cards
+│           │   ├── Landing.tsx   # Industry cards + agent toggles
 │           │   └── Chat.tsx      # Chat interface with SSE streaming
 │           ├── components/
-│           │   ├── AgentSidebar.tsx    # Agent list with toggle switches
-│           │   ├── ChatThread.tsx      # Message bubbles with avatars
-│           │   ├── ChatInput.tsx       # Message input with Enter-to-send
-│           │   ├── MessageContent.tsx  # Markdown (marked) + Mermaid rendering
-│           │   ├── MermaidDiagram.tsx  # Async mermaid SVG renderer
-│           │   └── ErrorBoundary.tsx   # React error boundary
+│           │   ├── AgentSidebar.tsx     # Agent toggles + status dots
+│           │   ├── ChatThread.tsx       # Messages, approvals, dashboards
+│           │   ├── ChatInput.tsx        # Text input with Enter-to-send
+│           │   ├── AssumptionsInput.tsx  # Number input fields for BV/cost
+│           │   ├── ROIDashboard.tsx      # KPI cards, cost bars, 3-year projection
+│           │   ├── MessageContent.tsx    # Markdown (marked) + Mermaid rendering
+│           │   ├── MermaidDiagram.tsx    # Async mermaid SVG renderer
+│           │   └── ErrorBoundary.tsx     # React error boundary
 │           ├── api.ts           # API client with SSE streaming support
-│           └── types.ts         # TypeScript interfaces
-├── specs/                       # PRD, 7 FRDs, 186 Gherkin scenarios, OpenAPI spec
-├── docs/                        # ADRs, prototypes, review documents
+│           └── types.ts         # TypeScript interfaces + agent registry
+├── specs/                       # v2 specifications and FRDs
+├── docs/                        # ADRs and architecture docs
 ├── FUNCTIONAL_OVERVIEW.md       # This file
 └── README.md
 ```
