@@ -9,6 +9,12 @@ Phases
   done        → all steps completed
 
 FRD-01 §2 (modes), §3 (PM class), §4 (execution plan), §6 (iteration), §8 (errors).
+
+Implementation is split across four modules for maintainability:
+  orchestrator.py  — phase state machine + message routing (this file)
+  execution.py     — run_single_step, streaming/non-streaming paths, heartbeat
+  approval.py      — approval gate logic, proceed/skip/refine routing
+  input_handler.py — two-phase assumption helpers (JSON parsing, defaults)
 """
 import asyncio
 import json
@@ -25,6 +31,9 @@ from agents.roi_agent import ROIAgent
 from agents.llm import llm
 from models.schemas import ChatMessage
 
+from execution import ExecutionMixin
+from approval import ApprovalMixin
+
 # ── Agent registry (keyed by plan-step ID) ──────────────────────────────
 AGENTS: dict[str, object] = {
     "architect": ArchitectAgent(),
@@ -37,46 +46,10 @@ AGENTS: dict[str, object] = {
 pm = ProjectManager()
 
 
-# ── Output formatting now lives in ProjectManager ───────────────────────
-# The orchestrator delegates to pm.format_agent_output(step, state).
-
-
-def completion_summary(project_id: str, state: AgentState) -> ChatMessage:
-    """Build a summary ChatMessage when all plan steps are finished."""
-    parts = ["## ✅ Solution Complete\n"]
-    if state.architecture:
-        parts.append(
-            f"- 🏗️ Architecture: "
-            f"{len(state.architecture.get('components', []))} components"
-        )
-    if state.services:
-        parts.append(
-            f"- ☁️ Services: "
-            f"{len(state.services.get('selections', []))} mapped"
-        )
-    if state.costs:
-        est = state.costs.get("estimate", {})
-        parts.append(f"- 💰 Cost: ${est.get('totalMonthly', 0):,.2f}/month")
-    if state.roi and state.roi.get("roi_percent") is not None:
-        parts.append(f"- 📈 ROI: {state.roi['roi_percent']:.0f}%")
-    if state.presentation_path:
-        parts.append("- 📑 Presentation: ready for download")
-    parts.append(
-        "\nYou can ask me to adjust anything, or say **different approach** to start over."
-    )
-    return ChatMessage(
-        project_id=project_id,
-        role="agent",
-        agent_id="pm",
-        content="\n".join(parts),
-        metadata={"type": "pm_response"},
-    )
-
-
 # ── Orchestrator ────────────────────────────────────────────────────────
 
 
-class Orchestrator:
+class Orchestrator(ExecutionMixin, ApprovalMixin):
     """Phase-based state machine orchestrator with approval gates.
 
     Phases
@@ -86,10 +59,14 @@ class Orchestrator:
     executing   – agents running in sequence
     approval    – waiting for proceed / refine / skip after a step
     done        – all steps completed
+
+    Execution and approval logic are provided by :class:`execution.ExecutionMixin`
+    and :class:`approval.ApprovalMixin` respectively.  Two-phase assumption
+    helpers live in :mod:`input_handler`.  This class is the slim coordinator
+    that wires the phase state machine together and owns ``phases`` / ``states``.
     """
 
     # In fast-run mode, only pause at these major gates (FRD-01 §2.3)
-    # In fast-run mode, pause at these major gates:
     # 1. After brainstorm (Mode A → Mode B transition)
     # 2. After business_value (review value case before architecture)
     # 3. After architect (review design before committing to services + cost)
@@ -99,6 +76,9 @@ class Orchestrator:
     def __init__(self):
         self.states: dict[str, AgentState] = {}
         self.phases: dict[str, str] = {}
+        # Injected into ExecutionMixin methods via self
+        self.agents = AGENTS
+        self.pm = pm
 
     # ── Helpers ─────────────────────────────────────────────────────
 
@@ -268,7 +248,7 @@ class Orchestrator:
                 else:
                     state.clarifications = message
 
-                # Use LLM to briefly acknowledge the input so user knows it was captured
+                # Use LLM to briefly acknowledge the input
                 try:
                     ack = llm.invoke([
                         {"role": "system", "content": (
@@ -291,223 +271,10 @@ class Orchestrator:
 
         # ── Phase: approval ─────────────────────────────────────────
         elif phase == "approval":
-            current = state.current_step
-
-            # Check if the user submitted assumption values (JSON array)
-            try:
-                user_data = json.loads(message)
-                if isinstance(user_data, list) and all(
-                    isinstance(d, dict) and "id" in d and "value" in d
-                    for d in user_data
-                ):
-                    # Determine which agent needs re-run based on current step
-                    target_agent = current
-                    if current == "business_value" or state.business_value.get("phase") == "needs_input":
-                        state.business_value["user_assumptions"] = user_data
-                        target_agent = "business_value"
-                    elif current == "cost" or state.costs.get("phase") == "needs_input":
-                        state.costs["user_assumptions"] = user_data
-                        target_agent = "cost"
-                    else:
-                        # Default to BV for backward compat
-                        state.business_value["user_assumptions"] = user_data
-                        target_agent = "business_value"
-
-                    state.completed_steps = [
-                        s for s in state.completed_steps if s != target_agent
-                    ]
-                    self.phases[project_id] = "executing"
-                    agent_label = "business value" if target_agent == "business_value" else "cost estimate"
-                    yield self._msg(
-                        project_id,
-                        f"📊 Got your numbers — calculating {agent_label}...",
-                        {"type": "pm_response"},
-                    )
-                    async for msg in self.run_single_step(
-                        project_id, state, target_agent
-                    ):
-                        yield msg
-                    return
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-            # Check if user says "proceed" while in BV needs_input phase (use defaults)
-            if (
-                current == "business_value"
-                and state.business_value.get("phase") == "needs_input"
-                and intent == Intent.PROCEED
+            async for msg in self._route_approval_message(
+                project_id, message, state, intent
             ):
-                # Use default values from assumptions
-                assumptions = state.business_value.get("assumptions_needed", [])
-                default_values = [
-                    {
-                        "id": a["id"],
-                        "label": a["label"],
-                        "value": a["default"],
-                        "unit": a.get("unit", ""),
-                    }
-                    for a in assumptions
-                ]
-                state.business_value["user_assumptions"] = default_values
-                state.completed_steps = [
-                    s for s in state.completed_steps if s != "business_value"
-                ]
-                self.phases[project_id] = "executing"
-                yield self._msg(
-                    project_id,
-                    "📊 Using default values — calculating business value...",
-                    {"type": "pm_response"},
-                )
-                async for msg in self.run_single_step(
-                    project_id, state, "business_value"
-                ):
-                    yield msg
-                return
-
-            # Check if user says "proceed" while in cost needs_input phase (use defaults)
-            if (
-                current == "cost"
-                and state.costs.get("phase") == "needs_input"
-                and intent == Intent.PROCEED
-            ):
-                assumptions = state.costs.get("assumptions_needed", [])
-                default_values = [
-                    {
-                        "id": a["id"],
-                        "label": a["label"],
-                        "value": a["default"],
-                        "unit": a.get("unit", ""),
-                    }
-                    for a in assumptions
-                ]
-                state.costs["user_assumptions"] = default_values
-                state.completed_steps = [
-                    s for s in state.completed_steps if s != "cost"
-                ]
-                self.phases[project_id] = "executing"
-                yield self._msg(
-                    project_id,
-                    "💰 Using default values — calculating costs...",
-                    {"type": "pm_response"},
-                )
-                async for msg in self.run_single_step(
-                    project_id, state, "cost"
-                ):
-                    yield msg
-                return
-
-            if intent == Intent.PROCEED:
-                state.awaiting_approval = False
-                self.phases[project_id] = "executing"
-                async for msg in self.continue_execution(project_id, state):
-                    yield msg
-
-            elif intent == Intent.SKIP:
-                state.mark_step_skipped(current)
-                state.awaiting_approval = False
-                self.phases[project_id] = "executing"
-                async for msg in self.continue_execution(project_id, state):
-                    yield msg
-
-            elif intent == Intent.QUESTION:
-                # Answer the question about current step output — stay in approval
-                step_name = current or (
-                    state.completed_steps[-1] if state.completed_steps else ""
-                )
-                agent_output = pm.format_agent_output(step_name, state) if step_name else ""
-                answer = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: llm.invoke([
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You are the Project Manager. The user is asking about "
-                                f"the {step_name} step output. Answer based on the data "
-                                f"below. Be concise."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Output:\n{agent_output[:2000]}\n\n"
-                                f"User asks: {message}"
-                            ),
-                        },
-                    ]).content,
-                )
-                yield self._msg(
-                    project_id,
-                    f"{answer}\n\nSay **proceed** to continue, "
-                    "**refine** to adjust, or **skip** to move on.",
-                    {"type": "pm_response"},
-                )
-
-            elif intent == Intent.INPUT:
-                # User is providing additional context (e.g. answering an
-                # ROI question) — re-run the current agent with the new info
-                state.clarifications += f"\nAdditional input: {message}"
-                last_step = current or (
-                    state.completed_steps[-1] if state.completed_steps else ""
-                )
-                if last_step:
-                    state.completed_steps = [
-                        s for s in state.completed_steps if s != last_step
-                    ]
-                    info = AGENT_INFO.get(
-                        last_step, {"name": last_step, "emoji": "🔧"}
-                    )
-                    yield self._msg(
-                        project_id,
-                        f"Got it — re-running **{info['name']}** with your input...",
-                        {"type": "pm_response"},
-                    )
-                    state.awaiting_approval = False
-                    self.phases[project_id] = "executing"
-                    async for msg in self.run_single_step(
-                        project_id, state, last_step
-                    ):
-                        yield msg
-                else:
-                    yield self._msg(
-                        project_id,
-                        "Thanks for the input. Say **proceed** to continue.",
-                        {"type": "pm_response"},
-                    )
-
-            elif intent == Intent.REFINE:
-                # Explicit refine → re-run step with feedback
-                state.clarifications += f"\nFeedback: {message}"
-                state.completed_steps = [
-                    s for s in state.completed_steps if s != current
-                ]
-                state.awaiting_approval = False
-                self.phases[project_id] = "executing"
-                async for msg in self.run_single_step(
-                    project_id, state, current
-                ):
-                    yield msg
-
-            elif intent == Intent.FAST_RUN:
-                # Switch to fast-run and continue from here
-                state.execution_mode = "fast-run"
-                state.awaiting_approval = False
-                yield self._msg(
-                    project_id,
-                    "Switching to fast mode — running remaining agents without pauses.",
-                    {"type": "pm_response"},
-                )
-                self.phases[project_id] = "executing"
-                async for msg in self.continue_execution(project_id, state):
-                    yield msg
-
-            else:
-                # Default: treat as additional context, stay in approval
-                state.clarifications += f"\n{message}"
-                yield self._msg(
-                    project_id,
-                    "Got it. Say **proceed** to continue, **refine** to adjust, or just keep chatting.",
-                    {"type": "pm_response"},
-                )
+                yield msg
 
         # ── Phase: executing ────────────────────────────────────────
         elif phase == "executing":
@@ -570,381 +337,6 @@ class Orchestrator:
                 yield self._msg(
                     project_id, response, {"type": "pm_response"}
                 )
-
-    # ── Execution engine ────────────────────────────────────────────
-
-    async def execute_plan(
-        self, project_id: str, state: AgentState,
-    ) -> AsyncGenerator[ChatMessage, None]:
-        """Execute the full plan from the beginning."""
-        yield self._msg(
-            project_id,
-            f"Starting execution with {len(state.plan_steps)} agents...",
-            {"type": "pm_response"},
-        )
-        async for msg in self.continue_execution(project_id, state):
-            yield msg
-
-    async def continue_execution(
-        self, project_id: str, state: AgentState,
-    ) -> AsyncGenerator[ChatMessage, None]:
-        """Continue execution from the next pending step."""
-        next_step = state.next_pending_step()
-        if not next_step:
-            self.phases[project_id] = "done"
-            yield completion_summary(project_id, state)
-            return
-
-        async for msg in self.run_single_step(project_id, state, next_step):
-            yield msg
-
-    async def run_single_step(
-        self, project_id: str, state: AgentState, step: str,
-    ) -> AsyncGenerator[ChatMessage, None]:
-        """Run one agent step, then gate for approval."""
-        info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
-        agent = AGENTS.get(step)
-
-        # Skip unavailable agents gracefully (FRD-01 §8)
-        if not agent:
-            state.mark_step_skipped(step)
-            yield self._msg(
-                project_id,
-                f"⏭️ {info['name']} skipped (not available)",
-                {"type": "plan_update", "step": step, "status": "skipped"},
-            )
-            async for msg in self.continue_execution(project_id, state):
-                yield msg
-            return
-
-        # Emit plan_update: running
-        yield ChatMessage(
-            project_id=project_id,
-            role="agent",
-            agent_id="pm",
-            content="",
-            metadata={"type": "plan_update", "step": step, "status": "running"},
-        )
-
-        state.mark_step_running(step)
-        yield self._msg(
-            project_id,
-            f"{info['emoji']} **{info['name']}** is working...",
-            {"type": "agent_start", "agent": step},
-        )
-
-        # Run agent in thread pool with progress heartbeat
-        loop = asyncio.get_event_loop()
-        done_event = asyncio.Event()
-        result_holder = [None]
-        error_holder = [None]
-
-        if hasattr(agent, 'run_streaming'):
-            # ── Async streaming path ─────────────────────────────────
-            msg_id = str(uuid.uuid4())
-            token_queue: asyncio.Queue = asyncio.Queue()
-            stream_state_holder: list = [None]
-            stream_error_holder: list = [None]
-
-            async def _run_streaming():
-                try:
-                    def on_token(token: str):
-                        token_queue.put_nowait(token)
-                    stream_state_holder[0] = await agent.run_streaming(
-                        state, on_token
-                    )
-                except Exception as e:
-                    stream_error_holder[0] = e
-                finally:
-                    token_queue.put_nowait(None)  # sentinel
-
-            task = asyncio.create_task(_run_streaming())
-
-            while True:
-                token = await token_queue.get()
-                if token is None:
-                    break
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=step,
-                    content=token,
-                    metadata={
-                        "type": "agent_token",
-                        "agent": step,
-                        "msg_id": msg_id,
-                        "token": token,
-                    },
-                )
-
-            await task
-
-            try:
-                if stream_error_holder[0]:
-                    raise stream_error_holder[0]
-                state = stream_state_holder[0]
-                self.states[project_id] = state
-
-                # BV Phase 1: needs_input → emit assumptions form and pause
-                if step == "business_value" and state.business_value.get("phase") == "needs_input":
-                    assumptions = state.business_value["assumptions_needed"]
-                    formatted = pm.format_agent_output(step, state)
-                    yield ChatMessage(
-                        id=msg_id,
-                        project_id=project_id,
-                        role="agent",
-                        agent_id=step,
-                        content=formatted,
-                        metadata={
-                            "type": "assumptions_input",
-                            "assumptions": assumptions,
-                        },
-                    )
-                    state.awaiting_approval = True
-                    state.current_step = "business_value"
-                    self.phases[project_id] = "approval"
-                    return
-
-                # Cost Phase 1: needs_input → emit usage assumptions form and pause
-                if step == "cost" and state.costs.get("phase") == "needs_input":
-                    assumptions = state.costs["assumptions_needed"]
-                    yield ChatMessage(
-                        id=msg_id,
-                        project_id=project_id,
-                        role="agent",
-                        agent_id=step,
-                        content="To estimate costs accurately, I need a few details about your expected usage:",
-                        metadata={
-                            "type": "assumptions_input",
-                            "assumptions": assumptions,
-                        },
-                    )
-                    state.awaiting_approval = True
-                    state.current_step = "cost"
-                    self.phases[project_id] = "approval"
-                    return
-
-                state.mark_step_completed(step)
-
-                # Emit plan_update: completed
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content="",
-                    metadata={
-                        "type": "plan_update",
-                        "step": step,
-                        "status": "completed",
-                    },
-                )
-
-                # Emit full agent result, reusing msg_id so the frontend
-                # replaces the streaming message with the formatted output
-                formatted = pm.format_agent_output(step, state)
-                meta: dict = {"type": "agent_result", "agent": step}
-                if step == "roi" and state.roi.get("dashboard"):
-                    meta["type"] = "roi_dashboard"
-                    meta["dashboard"] = state.roi["dashboard"]
-                yield ChatMessage(
-                    id=msg_id,
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=step,
-                    content=formatted,
-                    metadata=meta,
-                )
-
-                # Approval gate check (FRD-01 §2.3)
-                if self.should_pause(state, step):
-                    summary = pm.approval_summary(step, state)
-                    state.awaiting_approval = True
-                    state.current_step = step
-                    self.phases[project_id] = "approval"
-                    yield self._msg(
-                        project_id,
-                        summary,
-                        {"type": "approval", "step": step},
-                    )
-                else:
-                    async for msg in self.continue_execution(project_id, state):
-                        yield msg
-
-            except Exception as e:
-                state.mark_step_failed(step)
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id="pm",
-                    content="",
-                    metadata={
-                        "type": "plan_update",
-                        "step": step,
-                        "status": "failed",
-                    },
-                )
-                yield self._msg(
-                    project_id,
-                    f"⚠️ {info['name']} failed: {str(e)}",
-                    {"type": "agent_error", "agent": step},
-                )
-                async for msg in self.continue_execution(project_id, state):
-                    yield msg
-
-            return
-
-        # ── Non-streaming path (thread pool + heartbeat) ─────────────
-
-        def _run():
-            try:
-                result_holder[0] = agent.run(state)
-            except Exception as e:
-                error_holder[0] = e
-            loop.call_soon_threadsafe(done_event.set)
-
-        loop.run_in_executor(None, _run)
-
-        # Heartbeat: emit progress every 5s while agent runs
-        _PROGRESS = [
-            "⏳ Analyzing requirements...",
-            "⏳ Generating insights...",
-            "⏳ Synthesizing output...",
-        ]
-        elapsed = 0
-        while not done_event.is_set():
-            try:
-                await asyncio.wait_for(done_event.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                elapsed += 5
-                idx = min(elapsed // 5 - 1, len(_PROGRESS) - 1)
-                yield self._msg(
-                    project_id,
-                    f"{_PROGRESS[idx]} ({elapsed}s)",
-                    {"type": "progress", "agent": step},
-                )
-
-        try:
-            if error_holder[0]:
-                raise error_holder[0]
-            state = result_holder[0]
-            self.states[project_id] = state  # update reference
-
-            # BV Phase 1: needs_input → emit assumptions form and pause
-            if step == "business_value" and state.business_value.get("phase") == "needs_input":
-                assumptions = state.business_value["assumptions_needed"]
-                formatted = pm.format_agent_output(step, state)
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=step,
-                    content=formatted,
-                    metadata={
-                        "type": "assumptions_input",
-                        "assumptions": assumptions,
-                    },
-                )
-                state.awaiting_approval = True
-                state.current_step = "business_value"
-                self.phases[project_id] = "approval"
-                return
-
-            # Cost Phase 1: needs_input → emit usage assumptions form and pause
-            if step == "cost" and state.costs.get("phase") == "needs_input":
-                assumptions = state.costs["assumptions_needed"]
-                yield ChatMessage(
-                    project_id=project_id,
-                    role="agent",
-                    agent_id=step,
-                    content="To estimate costs accurately, I need a few details about your expected usage:",
-                    metadata={
-                        "type": "assumptions_input",
-                        "assumptions": assumptions,
-                    },
-                )
-                state.awaiting_approval = True
-                state.current_step = "cost"
-                self.phases[project_id] = "approval"
-                return
-
-            state.mark_step_completed(step)
-
-            # Emit plan_update: completed
-            yield ChatMessage(
-                project_id=project_id,
-                role="agent",
-                agent_id="pm",
-                content="",
-                metadata={
-                    "type": "plan_update",
-                    "step": step,
-                    "status": "completed",
-                },
-            )
-
-            # Emit formatted agent result
-            formatted = pm.format_agent_output(step, state)
-            meta: dict = {"type": "agent_result", "agent": step}
-            if step == "roi" and state.roi.get("dashboard"):
-                meta["type"] = "roi_dashboard"
-                meta["dashboard"] = state.roi["dashboard"]
-            yield ChatMessage(
-                project_id=project_id,
-                role="agent",
-                agent_id=step,
-                content=formatted,
-                metadata=meta,
-            )
-
-            # Approval gate check (FRD-01 §2.3)
-            if self.should_pause(state, step):
-                summary = pm.approval_summary(step, state)
-                state.awaiting_approval = True
-                state.current_step = step  # remember for refine
-                self.phases[project_id] = "approval"
-                yield self._msg(
-                    project_id,
-                    summary,
-                    {"type": "approval", "step": step},
-                )
-            else:
-                # Fast-run or non-gate step — continue automatically
-                async for msg in self.continue_execution(
-                    project_id, state
-                ):
-                    yield msg
-
-        except Exception as e:
-            # Graceful degradation (FRD-01 §8)
-            state.mark_step_failed(step)
-            yield ChatMessage(
-                project_id=project_id,
-                role="agent",
-                agent_id="pm",
-                content="",
-                metadata={
-                    "type": "plan_update",
-                    "step": step,
-                    "status": "failed",
-                },
-            )
-            yield self._msg(
-                project_id,
-                f"⚠️ {info['name']} failed: {str(e)}",
-                {"type": "agent_error", "agent": step},
-            )
-            # Continue to next step — pipeline never stops (FRD-01 §8)
-            async for msg in self.continue_execution(project_id, state):
-                yield msg
-
-    # ── Approval gate ───────────────────────────────────────────────
-
-    def should_pause(self, state: AgentState, step: str) -> bool:
-        """Determine if we should pause for approval after this step."""
-        if state.execution_mode == "fast-run":
-            # Fast-run: only 3 major gates (FRD-01 §2.3)
-            return step in self.FAST_RUN_GATES
-        # Guided mode: pause after every step
-        return True
 
     # ── Iteration (FRD-01 §6) ──────────────────────────────────────
 
