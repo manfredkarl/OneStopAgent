@@ -373,7 +373,7 @@ RULES:
         if insight:
             parts.append(f"\U0001f4a1 {insight}")
         parts.append("")
-        parts.append("Say **proceed** to continue, **refine** to adjust, or **skip** to move on.")
+        parts.append("*To refine, just type your feedback below.*")
 
         return "\n".join(parts)
 

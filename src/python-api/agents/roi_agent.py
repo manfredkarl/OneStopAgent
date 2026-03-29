@@ -143,7 +143,7 @@ class ROIAgent:
             reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
         else:
             reduced_labor = round(current_total * 0.25)
-        ai_breakdown.append({"label": "Reduced labor", "amount": reduced_labor})
+        ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
 
         error_items = [item for item in current_breakdown if "error" in item["label"].lower() or "rework" in item["label"].lower()]
         if error_items:
@@ -151,7 +151,7 @@ class ROIAgent:
         else:
             reduced_errors = round(current_total * 0.02)
         if reduced_errors > 0:
-            ai_breakdown.append({"label": "Residual errors", "amount": reduced_errors})
+            ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
 
         ai_total = sum(item["amount"] for item in ai_breakdown)
 
@@ -172,6 +172,8 @@ class ROIAgent:
                 "name": d.get("name", ""),
                 "metric": d.get("metric", ""),
                 "description": d.get("description", ""),
+                "source_name": d.get("source_name", ""),
+                "source_url": d.get("source_url", ""),
             }
             for d in bv_drivers
         ]

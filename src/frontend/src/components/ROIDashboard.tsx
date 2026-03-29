@@ -7,6 +7,8 @@ interface Driver {
   name: string;
   metric: string;
   description: string;
+  source_name?: string;
+  source_url?: string;
 }
 
 interface Projection {
@@ -86,6 +88,8 @@ export default function ROIDashboard({ data }: Props) {
         )
       : 1;
 
+  const roiMultiple = roiPercent != null ? ((roiPercent / 100) + 1) : null;
+
   return (
     <div className="space-y-6">
       {/* ── KPI Cards ─────────────────────────────────────────── */}
@@ -104,15 +108,14 @@ export default function ROIDashboard({ data }: Props) {
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-            Annual Impact
+            Return on Investment
           </p>
           <p className="text-2xl font-bold text-[var(--accent)]">
-            ${fmt(annualImpact)}
+            {roiMultiple != null ? `${roiMultiple.toFixed(1)}x` : "—"}
           </p>
-          {roiPercent != null && (
+          {paybackMonths != null && (
             <p className="text-xs text-[var(--text-muted)]">
-              {roiPercent.toFixed(0)}% ROI
-              {paybackMonths != null && ` · ${paybackMonths.toFixed(1)}mo payback`}
+              {paybackMonths.toFixed(1)} month payback
             </p>
           )}
         </div>
@@ -142,14 +145,14 @@ export default function ROIDashboard({ data }: Props) {
       {hasCurrentCost && hasAiCost && (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
           <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-4">
-            Cost Composition Comparison
+            Monthly Cost Comparison
           </h3>
 
-          {/* Today bar — full width */}
+          {/* Today bar — full width, split by cost positions */}
           <div className="mb-4">
             <div className="flex justify-between mb-1">
               <span className="text-sm font-semibold text-[var(--text-primary)]">
-                Today
+                Current Operations
               </span>
               <span className="text-sm font-semibold text-[var(--text-primary)]">
                 ${fmt(currentCost.total)}/mo
@@ -173,11 +176,11 @@ export default function ROIDashboard({ data }: Props) {
             </div>
           </div>
 
-          {/* AI bar — proportionally shorter */}
+          {/* With Azure bar — proportionally shorter */}
           <div className="mb-4">
             <div className="flex justify-between mb-1">
               <span className="text-sm font-semibold text-[var(--accent)]">
-                With Azure AI
+                With Azure Solution
               </span>
               <span className="text-sm font-semibold text-[var(--accent)]">
                 ${fmt(aiCost.total)}/mo
@@ -238,7 +241,7 @@ export default function ROIDashboard({ data }: Props) {
             {drivers.slice(0, 6).map((d, i) => (
               <div
                 key={i}
-                className="border border-[var(--border)] rounded-lg p-4"
+                className="border border-[var(--border)] rounded-lg p-4 flex flex-col"
               >
                 <p className="text-lg font-bold text-[var(--accent)] mb-1">
                   {d.metric || "—"}
@@ -247,8 +250,19 @@ export default function ROIDashboard({ data }: Props) {
                   {d.name}
                 </p>
                 {d.description && (
-                  <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+                  <p className="text-xs text-[var(--text-muted)] leading-relaxed mb-2">
                     {d.description}
+                  </p>
+                )}
+                {d.source_name && (
+                  <p className="text-[10px] text-[var(--text-muted)] mt-auto pt-2 border-t border-[var(--border)]">
+                    {d.source_url ? (
+                      <a href={d.source_url} target="_blank" rel="noopener noreferrer" className="hover:text-[var(--accent)] underline">
+                        📎 {d.source_name}
+                      </a>
+                    ) : (
+                      <>📎 {d.source_name}</>
+                    )}
                   </p>
                 )}
               </div>
@@ -267,30 +281,26 @@ export default function ROIDashboard({ data }: Props) {
             {projection.years.map((year, i) => {
               const savings = projection.cumulativeSavings[i] ?? 0;
               const cost = projection.cumulativeCost[i] ?? 0;
-              const savingsPct = (savings / maxCumulativeValue) * 100;
-              const costPct = (cost / maxCumulativeValue) * 100;
+              const savingsH = Math.max((savings / maxCumulativeValue) * 112, 8);
+              const costH = Math.max((cost / maxCumulativeValue) * 112, 8);
               return (
                 <div key={year} className="text-center">
                   <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
                     Year {year}
                   </p>
-                  <div className="flex items-end justify-center gap-2 h-28 mb-2">
+                  <div className="flex items-end justify-center gap-2 mb-2" style={{ height: 112 }}>
                     {/* Savings bar */}
-                    <div className="flex flex-col items-center w-10">
-                      <div
-                        style={{ height: `${Math.max(savingsPct, 5)}%` }}
-                        className="w-full bg-green-500 rounded-t-md"
-                        title={`Cumulative savings: $${fmt(savings)}`}
-                      />
-                    </div>
+                    <div
+                      style={{ height: savingsH, width: 40 }}
+                      className="bg-green-500 rounded-t-md"
+                      title={`Cumulative savings: $${fmt(savings)}`}
+                    />
                     {/* Cost bar */}
-                    <div className="flex flex-col items-center w-10">
-                      <div
-                        style={{ height: `${Math.max(costPct, 5)}%` }}
-                        className="w-full bg-blue-500 rounded-t-md"
-                        title={`Cumulative Azure cost: $${fmt(cost)}`}
-                      />
-                    </div>
+                    <div
+                      style={{ height: costH, width: 40 }}
+                      className="bg-blue-500 rounded-t-md"
+                      title={`Cumulative Azure cost: $${fmt(cost)}`}
+                    />
                   </div>
                   <p className="text-sm font-bold text-green-500">${fmt(savings)}</p>
                   <p className="text-xs text-[var(--text-muted)]">savings</p>
