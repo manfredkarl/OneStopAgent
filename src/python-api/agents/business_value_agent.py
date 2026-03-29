@@ -40,8 +40,8 @@ Be specific to the industry and use case. Include things like:
 - Time spent on manual processes
 - Revenue or transaction volumes
 
-IMPORTANT: Use CONSERVATIVE default values. Start low — it's better for
-the user to increase them than to see inflated numbers.
+IMPORTANT: Use REALISTIC default values — optimistic but grounded.
+Not too high (inflated), not too low (underselling the opportunity).
 Keep it to 3-5 questions max. Be concise."""},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"}
             ])
@@ -56,12 +56,12 @@ Keep it to 3-5 questions max. Be concise."""},
         except Exception:
             pass
 
-        # Fallback generic assumptions — conservative defaults
+        # Fallback generic assumptions — moderately optimistic defaults
         return [
-            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 20, "hint": "How many people will use or benefit from this solution"},
-            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 10000, "hint": "Approximate monthly infrastructure/operations cost"},
-            {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 10, "hint": "Time that could be automated or reduced"},
-            {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 100000, "hint": "Revenue from the business area this solution touches"},
+            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 50, "hint": "How many people will use or benefit from this solution"},
+            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 25000, "hint": "Approximate monthly infrastructure/operations cost"},
+            {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 20, "hint": "Time that could be automated or reduced"},
+            {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 250000, "hint": "Revenue from the business area this solution touches"},
         ]
 
     def run(self, state: AgentState) -> AgentState:

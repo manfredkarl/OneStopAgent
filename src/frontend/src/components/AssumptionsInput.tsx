@@ -12,13 +12,18 @@ interface Assumption {
 interface Props {
   assumptions: Assumption[];
   onSubmit: (values: Array<{id: string; label: string; value: number; unit: string}>) => void;
+  agentId?: string;
 }
 
-export default function AssumptionsInput({ assumptions, onSubmit }: Props) {
+export default function AssumptionsInput({ assumptions, onSubmit, agentId }: Props) {
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(assumptions.map(a => [a.id, a.default]))
   );
   const [submitted, setSubmitted] = useState(false);
+
+  const isCost = agentId === 'cost';
+  const label = isCost ? 'cost estimate' : 'business value';
+  const emoji = isCost ? '💰' : '📊';
 
   const handleSubmit = () => {
     const result = assumptions.map(a => ({
@@ -34,7 +39,7 @@ export default function AssumptionsInput({ assumptions, onSubmit }: Props) {
   if (submitted) {
     return (
       <div className="mt-3 text-sm text-[var(--text-muted)] italic">
-        ✅ Values submitted — calculating business value...
+        ✅ Values submitted — calculating {label}...
       </div>
     );
   }
@@ -65,7 +70,7 @@ export default function AssumptionsInput({ assumptions, onSubmit }: Props) {
         onClick={handleSubmit}
         className="mt-2 px-5 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] cursor-pointer"
       >
-        📊 Calculate Business Value
+        {emoji} Calculate {isCost ? 'Cost Estimate' : 'Business Value'}
       </button>
     </div>
   );
