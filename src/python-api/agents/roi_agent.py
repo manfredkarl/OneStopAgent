@@ -4,6 +4,7 @@ Pure math — no LLM calls, no regex parsing, no made-up numbers.
 Uses annual_impact_range (low/high) from BusinessValueAgent.
 If no range is available, signals that user input is needed.
 """
+import re
 from agents.state import AgentState
 
 
@@ -73,6 +74,28 @@ class ROIAgent:
         }
         return state
 
+    _PERCENTAGE_RANGE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*[–\-−]\s*(\d+(?:\.\d+)?)\s*%')
+    _PERCENTAGE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*%')
+
+    def _extract_coverage_from_drivers(self, drivers: list[dict]) -> float | None:
+        """Extract an AI coverage percentage from BV driver metrics.
+
+        Looks for patterns like "12% time savings" or "10-20% reduction".
+        Returns the midpoint as a decimal (e.g. 0.15 for 15%).
+        Returns None if no percentage is found so callers can skip the adjustment.
+        """
+        for driver in drivers:
+            metric = driver.get("metric", "")
+            range_match = self._PERCENTAGE_RANGE_RE.search(metric)
+            if range_match:
+                low = float(range_match.group(1))
+                high = float(range_match.group(2))
+                return (low + high) / 2 / 100
+            single_match = self._PERCENTAGE_RE.search(metric)
+            if single_match:
+                return float(single_match.group(1)) / 100
+        return None
+
     def _build_dashboard(self, state: AgentState, annual_cost: float,
                          annual_value: float, roi_percent: float | None,
                          payback_months: float | None) -> dict:
@@ -80,12 +103,13 @@ class ROIAgent:
 
         Pulls REAL data from upstream agents — not hardcoded values.
         Merges assumptions from both Cost and Business Value agents.
-        Guarantees AI cost < current cost (that's the whole point of ROI).
+        Only shows cost comparison when real user inputs are available.
         """
         # ── Pull real Azure cost from Cost agent ─────────────────────
         cost_estimate = state.costs.get("estimate", {})
         azure_monthly = round(cost_estimate.get("totalMonthly", 0))
         cost_items = cost_estimate.get("items", [])
+        bv_drivers = state.business_value.get("drivers", [])
 
         # ── Merge assumptions from BOTH agents ───────────────────────
         cost_assumptions = state.costs.get("user_assumptions", [])
@@ -100,36 +124,28 @@ class ROIAgent:
                 assumptions_dict[a["id"]] = a["value"]
 
         # ── Build current operational cost (WITHOUT AI) ──────────────
+        # Only when real user inputs are available — never derive from annual_value.
         current_breakdown: list[dict] = []
+        cost_comparison_available = False
 
         employees = assumptions_dict.get("employees", assumptions_dict.get("headcount", 0))
         hourly_rate = assumptions_dict.get("hourly_rate", 0)
         manual_hours = assumptions_dict.get("manual_hours", assumptions_dict.get("hours_per_week", 0))
 
         if employees and hourly_rate and manual_hours:
+            cost_comparison_available = True
             monthly_labor = round(employees * hourly_rate * manual_hours * 4.33)
             current_breakdown.append({"label": "Staff labor", "amount": monthly_labor})
 
-            error_rate = assumptions_dict.get("error_rate", 10) / 100
-            error_cost = round(monthly_labor * error_rate)
-            if error_cost > 0:
-                current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
+            error_rate = assumptions_dict.get("error_rate", 0)
+            if error_rate:
+                error_cost = round(monthly_labor * (error_rate / 100))
+                if error_cost > 0:
+                    current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
 
             overhead = assumptions_dict.get("overhead", 0)
             if overhead:
                 current_breakdown.append({"label": "Overhead / tools", "amount": round(overhead)})
-        else:
-            # Derive from annual_value — treat it as the value being unlocked
-            monthly_value = round(annual_value / 12) if annual_value > 0 else 0
-            # Current cost must exceed Azure cost by enough to show savings
-            estimated_current = max(monthly_value, azure_monthly * 3) if monthly_value > 0 else max(azure_monthly * 3, 5000)
-            labor_share = round(estimated_current * 0.80)
-            error_share = round(estimated_current * 0.12)
-            other_share = estimated_current - labor_share - error_share
-            current_breakdown.append({"label": "Staff labor", "amount": labor_share})
-            current_breakdown.append({"label": "Errors & rework", "amount": error_share})
-            if other_share > 0:
-                current_breakdown.append({"label": "Process overhead", "amount": other_share})
 
         current_total = sum(item["amount"] for item in current_breakdown)
 
@@ -137,36 +153,34 @@ class ROIAgent:
         ai_breakdown: list[dict] = []
         ai_breakdown.append({"label": "Azure platform", "amount": azure_monthly})
 
-        ai_coverage = assumptions_dict.get("ai_coverage", 70) / 100
-        labor_items = [item for item in current_breakdown if "labor" in item["label"].lower()]
-        if labor_items:
-            reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
-        else:
-            reduced_labor = round(current_total * 0.25)
-        ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
+        if cost_comparison_available and current_breakdown:
+            # Pull AI coverage % from BV driver metrics — not a hardcoded default.
+            ai_coverage = self._extract_coverage_from_drivers(bv_drivers)
+            if ai_coverage is not None:
+                labor_items = [item for item in current_breakdown if "labor" in item["label"].lower()]
+                if labor_items:
+                    reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
+                    ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
 
-        error_items = [item for item in current_breakdown if "error" in item["label"].lower() or "rework" in item["label"].lower()]
-        if error_items:
-            reduced_errors = round(error_items[0]["amount"] * 0.20)
-        else:
-            reduced_errors = round(current_total * 0.02)
-        if reduced_errors > 0:
-            ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
+            error_items = [item for item in current_breakdown if "error" in item["label"].lower() or "rework" in item["label"].lower()]
+            if error_items:
+                error_reduction = assumptions_dict.get("error_reduction", 0)
+                if error_reduction:
+                    reduced_errors = round(error_items[0]["amount"] * (1 - error_reduction / 100))
+                    if reduced_errors > 0:
+                        ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
 
         ai_total = sum(item["amount"] for item in ai_breakdown)
 
-        # ── Guarantee AI cost < current cost ─────────────────────────
-        if ai_total >= current_total and current_total > 0:
-            # Scale current cost up so AI shows clear savings
-            scale = (ai_total / current_total) * 1.5
-            current_breakdown = [{"label": item["label"], "amount": round(item["amount"] * scale)} for item in current_breakdown]
-            current_total = sum(item["amount"] for item in current_breakdown)
-
-        savings = max(0, current_total - ai_total)
-        savings_pct = round((savings / current_total) * 100) if current_total > 0 else 0
+        # ── Honest cost comparison — no artificial scaling ───────────
+        if cost_comparison_available and current_total > 0:
+            savings = current_total - ai_total  # can be negative; show honestly
+            savings_pct = round((savings / current_total) * 100)
+        else:
+            savings = 0
+            savings_pct = 0
 
         # ── Value drivers from BV agent ──────────────────────────────
-        bv_drivers = state.business_value.get("drivers", [])
         drivers = [
             {
                 "name": d.get("name", ""),
@@ -178,36 +192,27 @@ class ROIAgent:
             for d in bv_drivers
         ]
 
-        # ── 3-year projection ───────────────────────────────────────
-        annual_savings = savings * 12
-        year1_cost = round(annual_cost * 1.20)  # 20% implementation uplift
-        year2_cost = round(annual_cost)
-        year3_cost = round(annual_cost)
-
-        year1_value = round(annual_value)
-        year2_value = round(annual_value * 1.05)  # slight growth as adoption matures
-        year3_value = round(annual_value * 1.10)
-
-        year1_savings = round(annual_savings * 0.80)  # ramp-up discount
-        year2_savings = round(annual_savings)
-        year3_savings = round(annual_savings * 1.05)
+        # ── 3-year projection — flat; no fabricated growth or uplift ─
+        # Implementation costs (one-time) are excluded — user should add those.
+        annual_azure_cost = azure_monthly * 12
+        annual_savings = savings * 12 if cost_comparison_available else 0
 
         projection = {
             "years": [1, 2, 3],
             "cumulativeSavings": [
-                year1_savings,
-                year1_savings + year2_savings,
-                year1_savings + year2_savings + year3_savings,
-            ],
+                round(annual_savings),
+                round(annual_savings * 2),
+                round(annual_savings * 3),
+            ] if cost_comparison_available else None,
             "cumulativeCost": [
-                year1_cost,
-                year1_cost + year2_cost,
-                year1_cost + year2_cost + year3_cost,
+                round(annual_azure_cost),
+                round(annual_azure_cost * 2),
+                round(annual_azure_cost * 3),
             ],
             "cumulativeValue": [
-                year1_value,
-                year1_value + year2_value,
-                year1_value + year2_value + year3_value,
+                round(annual_value),
+                round(annual_value * 2),
+                round(annual_value * 3),
             ],
         }
 
@@ -223,9 +228,13 @@ class ROIAgent:
 
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
-            f"Current operational costs derived from {assumption_note}. "
-            f"Year 1 includes 20% implementation overhead; years 2-3 at steady state. "
-            f"ROI = (Annual Value − Annual Cost) ÷ Annual Cost × 100."
+            + (
+                f"Current operational costs derived from {assumption_note}. "
+                if cost_comparison_available
+                else "Cost comparison not shown — provide headcount, hourly rate, and hours/week to enable it. "
+            )
+            + "Projection uses flat annual figures; one-time implementation costs are excluded. "
+            + "ROI = (Annual Value − Annual Cost) ÷ Annual Cost × 100."
         )
 
         return {
@@ -233,6 +242,7 @@ class ROIAgent:
             "annualImpact": round(annual_value),
             "azureMonthlyCost": azure_monthly,
             "savingsPercentage": savings_pct,
+            "costComparisonAvailable": cost_comparison_available,
             "currentCost": {
                 "total": current_total,
                 "breakdown": current_breakdown,
