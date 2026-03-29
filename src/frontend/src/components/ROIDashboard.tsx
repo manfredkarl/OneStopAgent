@@ -13,7 +13,7 @@ interface Driver {
 
 interface Projection {
   years: number[];
-  cumulativeSavings: number[];
+  cumulativeSavings: number[] | null;
   cumulativeCost: number[];
   cumulativeValue: number[];
 }
@@ -36,6 +36,7 @@ interface ROIDashboardData {
   roiPercent: number | null;
   paybackMonths: number | null;
 
+  costComparisonAvailable?: boolean;
   drivers: Driver[];
   projection: Projection;
   methodology: string;
@@ -58,6 +59,7 @@ export default function ROIDashboard({ data }: Props) {
     monthlySavings,
     azureMonthlyCost,
     savingsPercentage,
+    costComparisonAvailable,
     currentCost,
     aiCost,
     roiPercent,
@@ -67,8 +69,8 @@ export default function ROIDashboard({ data }: Props) {
     methodology,
   } = data;
 
-  const hasCurrentCost = currentCost && currentCost.total > 0;
-  const hasAiCost = aiCost && aiCost.total > 0;
+  const hasCurrentCost = costComparisonAvailable && currentCost && currentCost.total > 0;
+  const hasAiCost = costComparisonAvailable && aiCost && aiCost.total > 0;
   const hasDrivers = drivers && drivers.length > 0;
   const hasProjection = projection && projection.years?.length > 0;
 
@@ -80,7 +82,7 @@ export default function ROIDashboard({ data }: Props) {
   const maxCumulativeValue =
     hasProjection
       ? Math.max(
-          ...projection.cumulativeSavings,
+          ...(projection.cumulativeSavings ?? [0]),
           ...projection.cumulativeCost,
           ...projection.cumulativeValue,
           1,
@@ -93,17 +95,19 @@ export default function ROIDashboard({ data }: Props) {
     <div className="space-y-6">
       {/* ── KPI Cards ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
-          <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-            Monthly Savings
-          </p>
-          <p className="text-2xl font-bold text-green-500">
-            ${fmt(monthlySavings)}
-          </p>
-          <p className="text-xs text-green-400">
-            {savingsPercentage}% cost reduction
-          </p>
-        </div>
+        {costComparisonAvailable && (
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
+              Monthly Savings
+            </p>
+            <p className="text-2xl font-bold text-green-500">
+              ${fmt(monthlySavings)}
+            </p>
+            <p className="text-xs text-green-400">
+              {savingsPercentage}% cost reduction
+            </p>
+          </div>
+        )}
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
@@ -129,16 +133,26 @@ export default function ROIDashboard({ data }: Props) {
           </p>
         </div>
 
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
-          <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-            Current Spend
-          </p>
-          <p className="text-2xl font-bold text-orange-400">
-            ${fmt(currentCost.total)}
-            <span className="text-sm font-normal">/mo</span>
-          </p>
-        </div>
+        {costComparisonAvailable && (
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
+              Current Spend
+            </p>
+            <p className="text-2xl font-bold text-orange-400">
+              ${fmt(currentCost.total)}
+              <span className="text-sm font-normal">/mo</span>
+            </p>
+          </div>
+        )}
       </div>
+
+      {/* ── Cost comparison unavailable notice ───────────────── */}
+      {!costComparisonAvailable && (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-sm text-[var(--text-muted)]">
+          💡 <span className="font-medium text-[var(--text-primary)]">Cost comparison not available.</span>{" "}
+          Provide headcount, hourly rate, and hours/week to enable the monthly cost comparison panel.
+        </div>
+      )}
 
       {/* ── Cost Comparison Bars ──────────────────────────────── */}
       {hasCurrentCost && hasAiCost && (
@@ -278,22 +292,26 @@ export default function ROIDashboard({ data }: Props) {
           </h3>
           <div className="grid grid-cols-3 gap-4">
             {projection.years.map((year, i) => {
-              const savings = projection.cumulativeSavings[i] ?? 0;
+              const cumulativeSavings = projection.cumulativeSavings?.[i] ?? null;
               const cost = projection.cumulativeCost[i] ?? 0;
-              const savingsH = Math.max((savings / maxCumulativeValue) * 112, 8);
+              const savingsH = cumulativeSavings != null ? Math.max((cumulativeSavings / maxCumulativeValue) * 112, 8) : 0;
               const costH = Math.max((cost / maxCumulativeValue) * 112, 8);
+              const savingsColor = cumulativeSavings != null && cumulativeSavings < 0 ? "text-red-500" : "text-green-500";
+              const savingsBarColor = cumulativeSavings != null && cumulativeSavings < 0 ? "bg-red-500" : "bg-green-500";
               return (
                 <div key={year} className="text-center">
                   <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
                     Year {year}
                   </p>
                   <div className="flex items-end justify-center gap-2 mb-2" style={{ height: 112 }}>
-                    {/* Savings bar */}
-                    <div
-                      style={{ height: savingsH, width: 40 }}
-                      className="bg-green-500 rounded-t-md"
-                      title={`Cumulative savings: $${fmt(savings)}`}
-                    />
+                    {/* Savings bar — only when cost comparison is available */}
+                    {cumulativeSavings != null && (
+                      <div
+                        style={{ height: savingsH, width: 40 }}
+                        className={`${savingsBarColor} rounded-t-md`}
+                        title={`Cumulative savings: $${fmt(cumulativeSavings)}`}
+                      />
+                    )}
                     {/* Cost bar */}
                     <div
                       style={{ height: costH, width: 40 }}
@@ -301,17 +319,23 @@ export default function ROIDashboard({ data }: Props) {
                       title={`Cumulative Azure cost: $${fmt(cost)}`}
                     />
                   </div>
-                  <p className="text-sm font-bold text-green-500">${fmt(savings)}</p>
-                  <p className="text-xs text-[var(--text-muted)]">savings</p>
+                  {cumulativeSavings != null && (
+                    <p className={`text-sm font-bold ${savingsColor}`}>
+                      ${fmt(cumulativeSavings)}
+                    </p>
+                  )}
+                  {cumulativeSavings != null && <p className="text-xs text-[var(--text-muted)]">savings</p>}
                   <p className="text-xs text-blue-400 mt-1">${fmt(cost)} cost</p>
                 </div>
               );
             })}
           </div>
           <div className="flex justify-center gap-6 mt-4 text-xs text-[var(--text-muted)]">
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded-sm bg-green-500" /> Cumulative savings
-            </span>
+            {projection.cumulativeSavings && (
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-green-500" /> Cumulative savings
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 rounded-sm bg-blue-500" /> Cumulative Azure cost
             </span>
