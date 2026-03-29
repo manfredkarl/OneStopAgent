@@ -117,7 +117,7 @@ class Orchestrator(ExecutionMixin, ApprovalMixin):
         phase = self.phases.get(project_id, "new")
 
         # Classify intent (keyword match → LLM fallback)
-        intent, meta = pm.intent_interpreter.classify(message)
+        intent, meta = await pm.intent_interpreter.aclassify(message)
 
         # ── Phase: new ──────────────────────────────────────────────
         if phase == "new":
@@ -250,7 +250,7 @@ class Orchestrator(ExecutionMixin, ApprovalMixin):
 
                 # Use LLM to briefly acknowledge the input
                 try:
-                    ack = llm.invoke([
+                    ack_response = await llm.ainvoke([
                         {"role": "system", "content": (
                             "You are a project manager. The user just answered your questions about their Azure project. "
                             "Briefly acknowledge their input in 1-2 sentences — reference specifics they mentioned "
@@ -259,7 +259,7 @@ class Orchestrator(ExecutionMixin, ApprovalMixin):
                         )},
                         {"role": "user", "content": f"User's original request: {state.user_input}\n\nUser's additional input: {message}"},
                     ])
-                    ack_text = ack.content.strip()
+                    ack_text = ack_response.content.strip()
                 except Exception:
                     ack_text = "Got it. Anything else, or say **proceed** to start?"
 
@@ -313,29 +313,26 @@ class Orchestrator(ExecutionMixin, ApprovalMixin):
 
             else:
                 # Conversational follow-up (question, input, etc.)
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: llm.invoke([
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are an Azure solution project manager. "
-                                "The solution has been designed. Help the user "
-                                "with follow-up questions or modifications. "
-                                "Be brief."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Context: {state.to_context_string()}\n\n"
-                                f"User says: {message}"
-                            ),
-                        },
-                    ]).content,
-                )
+                follow_up = await llm.ainvoke([
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an Azure solution project manager. "
+                            "The solution has been designed. Help the user "
+                            "with follow-up questions or modifications. "
+                            "Be brief."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Context: {state.to_context_string()}\n\n"
+                            f"User says: {message}"
+                        ),
+                    },
+                ])
                 yield self._msg(
-                    project_id, response, {"type": "pm_response"}
+                    project_id, follow_up.content, {"type": "pm_response"}
                 )
 
     # ── Iteration (FRD-01 §6) ──────────────────────────────────────

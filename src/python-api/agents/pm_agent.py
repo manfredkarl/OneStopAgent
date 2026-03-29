@@ -66,6 +66,26 @@ class IntentInterpreter:
         "Return ONLY the intent word, nothing else."
     )
 
+    # Default agents to re-run when iteration intent has no keyword match
+    DEFAULT_RERUN_AGENTS: list[str] = [
+        "architect", "cost", "business_value", "roi", "presentation",
+    ]
+
+    def _build_meta(self, intent: Intent, message: str) -> dict:
+        """Build the metadata dict for a resolved intent."""
+        meta: dict = {}
+        if intent == Intent.ITERATION:
+            meta["feedback"] = message
+            msg_lower = message.lower()
+            for keyword, agents in ITERATION_MAPPING.items():
+                if keyword in msg_lower:
+                    meta["agents_to_rerun"] = agents
+                    return meta
+            meta["agents_to_rerun"] = list(self.DEFAULT_RERUN_AGENTS)
+        elif intent == Intent.REFINE:
+            meta["feedback"] = message
+        return meta
+
     def classify(self, message: str) -> tuple[Intent, dict]:
         """Classify a message into an intent using an LLM call. Returns (intent, metadata)."""
         try:
@@ -79,25 +99,22 @@ class IntentInterpreter:
             # LLM returned something unparseable or call failed — safe default
             intent = Intent.INPUT
 
-        # Build metadata based on resolved intent
-        meta: dict = {}
-        if intent == Intent.ITERATION:
-            meta["feedback"] = message
-            # Resolve which agents to re-run from the keyword mapping
-            msg_lower = message.lower()
-            for keyword, agents in ITERATION_MAPPING.items():
-                if keyword in msg_lower:
-                    meta["agents_to_rerun"] = agents
-                    return intent, meta
-            # LLM said iteration but no keyword match — re-run from architect onward
-            meta["agents_to_rerun"] = [
-                "architect", "cost",
-                "business_value", "roi", "presentation",
-            ]
-        elif intent == Intent.REFINE:
-            meta["feedback"] = message
+        return intent, self._build_meta(intent, message)
 
-        return intent, meta
+    async def aclassify(self, message: str) -> tuple[Intent, dict]:
+        """Async version of :meth:`classify` — uses ``ainvoke`` to avoid
+        blocking the event loop.  Drop-in replacement for async contexts."""
+        try:
+            response = await llm.ainvoke([
+                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ])
+            raw = response.content.strip().lower().replace("-", "_").replace(" ", "_")
+            intent = Intent(raw)
+        except (ValueError, Exception):
+            intent = Intent.INPUT
+
+        return intent, self._build_meta(intent, message)
 
 
 AGENT_INFO = {

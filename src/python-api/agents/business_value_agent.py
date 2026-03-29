@@ -226,8 +226,7 @@ Return ONLY valid JSON (no markdown fences):
         Phase 2: value drivers are computed synchronously, then a
         2-sentence plain-text summary is streamed token-by-token via on_token(str).
         """
-        loop = asyncio.get_event_loop()
-        state = await loop.run_in_executor(None, self.run, state)
+        state = await asyncio.to_thread(self.run, state)
 
         bv = state.business_value
 

@@ -55,8 +55,7 @@ class ArchitectAgent:
         then a 2-3 sentence plain-text summary is streamed token-by-token via
         on_token(str) so the user sees text appearing while the diagram loads.
         """
-        loop = asyncio.get_event_loop()
-        state = await loop.run_in_executor(None, self.run, state)
+        state = await asyncio.to_thread(self.run, state)
 
         narrative = state.architecture.get("narrative", "")
         based_on = state.architecture.get("basedOn", "")
@@ -264,6 +263,9 @@ class ArchitectAgent:
         if not isinstance(layers, list) or not layers:
             raise ValueError("No layers returned")
 
+        # Server-side node cap: rebuild diagram if LLM exceeded the limit
+        mermaid = ArchitectAgent._cap_mermaid_nodes(mermaid, layers)
+
         # Flatten components for downstream consumers (cost agent, etc.)
         all_components = []
         for layer in layers:
@@ -287,6 +289,97 @@ class ArchitectAgent:
             "basedOnUrl": result.get("adaptedFromUrl") or (pattern.get("url") if pattern else None),
             "adaptationNotes": result.get("adaptationNotes"),
         }
+
+    # ── Mermaid node cap ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _count_mermaid_nodes(mermaid_code: str) -> int:
+        """Count unique node IDs defined in a mermaid flowchart.
+
+        Matches identifiers followed by a bracket/paren/brace (node definition
+        syntax), excluding directive keywords like ``flowchart``, ``subgraph``,
+        ``end``, etc.
+        """
+        skip = frozenset([
+            "flowchart", "graph", "subgraph", "end", "classDef", "classdef",
+            "style", "click", "linkStyle", "linkstyle", "direction",
+        ])
+        node_def_re = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*)\s*[\[({]")
+        node_ids: set[str] = set()
+        for line in mermaid_code.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("%%"):
+                continue
+            first_word = stripped.split()[0].lower().rstrip(":")
+            if first_word in skip:
+                continue
+            for m in node_def_re.finditer(stripped):
+                nid = m.group(1)
+                if nid.lower() not in skip:
+                    node_ids.add(nid)
+        return len(node_ids)
+
+    @staticmethod
+    def _cap_mermaid_nodes(
+        mermaid_code: str,
+        layers: list[dict],
+        max_nodes: int = 20,
+    ) -> str:
+        """Return *mermaid_code* unchanged if it has ≤ *max_nodes* nodes.
+
+        If the LLM generated a diagram that exceeds the cap, rebuild a clean
+        subgraph diagram from the validated *layers* data, capping at
+        *max_nodes* total nodes.  This prevents the Mermaid frontend parser
+        from crashing on oversized diagrams.
+        """
+        if ArchitectAgent._count_mermaid_nodes(mermaid_code) <= max_nodes:
+            return mermaid_code
+
+        # Rebuild a bounded diagram from validated layers data
+        node_defs: list[str] = []
+        layer_entries: list[tuple[str, list[str]]] = []
+        total = 0
+
+        for li, layer in enumerate(layers):
+            components = layer.get("components", [])
+            if not components or total >= max_nodes:
+                break
+            layer_name = layer.get("name", f"Layer{li + 1}")
+            safe_name = re.sub(r'["\[\]{}]', "", layer_name)
+            layer_node_ids: list[str] = []
+            for comp in components:
+                if total >= max_nodes:
+                    break
+                nid = f"N{total}"
+                svc = comp.get("azureService") or comp.get("name") or "Service"
+                safe_label = re.sub(r'[<>\[\]{}"\'\\n]', "", svc)[:40]
+                node_defs.append(f"  {nid}[{safe_label}]")
+                layer_node_ids.append(nid)
+                total += 1
+            if layer_node_ids:
+                layer_entries.append((safe_name, layer_node_ids))
+
+        # Assemble subgraph blocks
+        body: list[str] = ["flowchart TD"]
+        # Build lookup: node_id -> "  NX[Label]" (consistently indented)
+        node_lookup: dict[str, str] = {}
+        for defn in node_defs:
+            nid = defn.strip().split("[")[0].strip()
+            node_lookup[nid] = "    " + defn.strip()  # 4-space indent inside subgraph
+
+        for name, nids in layer_entries:
+            body.append(f"  subgraph {name}")
+            for nid in nids:
+                body.append(node_lookup.get(nid, f"    {nid}[Service]"))
+            body.append("  end")
+
+        # Connect adjacent layers with a single inter-layer arrow
+        for i in range(len(layer_entries) - 1):
+            src = layer_entries[i][1][-1]
+            dst = layer_entries[i + 1][1][0]
+            body.append(f"  {src} --> {dst}")
+
+        return "\n".join(body)
 
     # ── Fallback ──────────────────────────────────────────────────────
 
