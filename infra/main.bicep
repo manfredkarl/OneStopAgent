@@ -139,7 +139,7 @@ module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
       }
       {
         name: 'AZURE_OPENAI_ENDPOINT'
-        value: 'https://demopresentations.services.ai.azure.com'
+        value: 'https://demopresentations.cognitiveservices.azure.com'
       }
     ]
     containerAppsEnvironmentName: containerApps.outputs.environmentName
