@@ -1,7 +1,11 @@
 """System Architect Agent — use-case-specific layered Azure architecture.
 
-Retrieves Microsoft reference architectures (via MCP or local fallback),
-then generates a layered architecture framed around the user's specific
+Retrieves Microsoft reference architectures via:
+1. MCP (Model Context Protocol) — Microsoft Learn server
+2. Web search — DuckDuckGo for Azure Architecture Center content
+3. Local knowledge base — 10 hardcoded reference patterns (last resort)
+
+Then generates a layered architecture framed around the user's specific
 scenario — not a generic bag of Azure services.
 """
 
@@ -13,6 +17,7 @@ import re
 from agents.llm import llm
 from agents.state import AgentState
 from services.mcp import mcp_client, MCPUnavailableError
+from services.web_search import search_azure_architectures
 from data.knowledge_base import search_local_patterns
 
 logger = logging.getLogger(__name__)
@@ -33,6 +38,7 @@ class ArchitectAgent:
             scenarios = state.brainstorming.get("scenarios", [])
             state.architecture = self._generate_architecture(
                 requirements, pattern, industry, scenarios,
+                all_patterns=state.retrieved_patterns,
             )
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
@@ -84,21 +90,47 @@ class ArchitectAgent:
 
     @staticmethod
     def _retrieve_patterns(state: AgentState) -> None:
-        """Query MCP for Azure patterns matching the use case, with local fallback."""
+        """Query MCP → web search → local KB for Azure patterns matching the use case."""
         query = f"{state.user_input} {state.clarifications}".strip()
 
         industry = state.brainstorming.get("industry", "")
         if industry and industry != "Cross-Industry":
             query += f" {industry}"
 
+        # 1. Try MCP (Microsoft Learn server)
         try:
             patterns = mcp_client.search(query=query, top_k=5)
             logger.info("MCP returned %d patterns for query: %s", len(patterns), query[:50])
             state.retrieved_patterns = patterns
             return
         except MCPUnavailableError as e:
-            logger.warning("MCP unavailable, falling back to local knowledge base: %s", e)
+            logger.warning("MCP unavailable: %s — trying web search", e)
 
+        # 2. Try web search for Azure Architecture Center content
+        try:
+            web_results = search_azure_architectures(query, max_results=5)
+            if web_results:
+                web_patterns = [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "summary": r.get("snippet", ""),
+                        "workload_type": "custom",
+                        "industry": industry or "Cross-Industry",
+                        "recommended_services": [],
+                        "components": [],
+                        "confidence_score": 0.7,
+                        "_source": "web_search",
+                    }
+                    for r in web_results
+                ]
+                state.retrieved_patterns = web_patterns
+                logger.info("Web search returned %d architecture references", len(web_patterns))
+                return
+        except Exception as e:
+            logger.warning("Web search for architectures failed: %s", e)
+
+        # 3. Last resort: local knowledge base
         local_patterns = search_local_patterns(query=query, top_k=5)
         for pattern in local_patterns:
             pattern["_source"] = "local"
@@ -108,12 +140,16 @@ class ArchitectAgent:
         if local_patterns:
             logger.info("Local KB returned %d patterns (ungrounded)", len(local_patterns))
         else:
-            logger.warning("No patterns found in local knowledge base either")
+            logger.warning("No patterns found in any source")
 
     @staticmethod
     def _select_pattern(patterns: list[dict]) -> dict | None:
         if not patterns:
             return None
+        # Prefer patterns from MCP or web search over local fallback
+        sourced = [p for p in patterns if p.get("_source") != "local"]
+        if sourced:
+            return max(sourced, key=lambda p: p.get("confidence_score", 0.0))
         return max(patterns, key=lambda p: p.get("confidence_score", 0.0))
 
     # ── Layered architecture generation ───────────────────────────────
@@ -124,6 +160,7 @@ class ArchitectAgent:
         pattern: dict | None,
         industry: str,
         scenarios: list[dict],
+        all_patterns: list[dict] | None = None,
     ) -> dict:
         """Generate a layered, use-case-framed architecture in one LLM call."""
         pattern_context = ""
@@ -131,13 +168,25 @@ class ArchitectAgent:
         if pattern:
             pattern_title = pattern.get("title", "")
             pattern_context = (
-                f"\nREFERENCE ARCHITECTURE: {pattern_title}\n"
+                f"\nPRIMARY REFERENCE ARCHITECTURE: {pattern_title}\n"
                 f"Summary: {pattern.get('summary', '')}\n"
                 f"Recommended services: {', '.join(pattern.get('recommended_services', []))}\n"
                 f"URL: {pattern.get('url', '')}\n\n"
                 "ADAPT this reference architecture to the user's specific scenario.\n"
                 "Mention by name which Microsoft pattern you adapted and why.\n"
             )
+
+        # Include additional reference architectures from search
+        additional_refs = ""
+        if all_patterns and len(all_patterns) > 1:
+            others = [p for p in all_patterns if p != pattern][:4]
+            if others:
+                additional_refs = "\nADDITIONAL REFERENCE ARCHITECTURES FOUND:\n"
+                for p in others:
+                    additional_refs += f"- {p.get('title', '')}: {p.get('summary', '')[:150]}\n"
+                    if p.get('url'):
+                        additional_refs += f"  URL: {p['url']}\n"
+                additional_refs += "\nConsider these for additional patterns or components to incorporate.\n"
 
         scenario_context = ""
         if scenarios:
@@ -155,6 +204,7 @@ class ArchitectAgent:
                     "that map to what the customer is actually trying to do.\n\n"
                     f"INDUSTRY: {industry}\n"
                     f"{pattern_context}"
+                    f"{additional_refs}"
                     f"{scenario_context}\n"
                     "Return ONLY valid JSON (no markdown fences) with this structure:\n"
                     "{\n"

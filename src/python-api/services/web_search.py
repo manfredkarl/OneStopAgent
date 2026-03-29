@@ -65,3 +65,23 @@ def search_industry_benchmarks(industry: str, use_case: str) -> list[dict[str, s
         all_results.extend(results)
 
     return all_results[:8]  # Cap at 8 results
+
+
+def search_azure_architectures(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    """Search for Azure Architecture Center reference architectures matching the use case."""
+    search_queries = [
+        f"site:learn.microsoft.com/azure/architecture {query}",
+        f"Azure reference architecture {query}",
+    ]
+
+    all_results = []
+    seen_urls: set[str] = set()
+    for q in search_queries:
+        results = search_web(q, num_results=max_results)
+        for r in results:
+            url = r.get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(r)
+
+    return all_results[:max_results]
