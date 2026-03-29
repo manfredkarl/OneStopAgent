@@ -44,19 +44,24 @@ const pptxgen = require("pptxgenjs");
 const DATA = __DATA_PLACEHOLDER__;
 
 const pres = new pptxgen();
-pres.layout = "LAYOUT_16x9";
+pres.layout = "LAYOUT_WIDE";  // 13.33" x 7.5" — matches CAIP template
 pres.author = "OneStopAgent";
 
-// ── Color palette ──
-const DARK   = "0F1B2D";
-const WHITE  = "FFFFFF";
-const ACCENT = "0078D4";
-const TEAL   = "00B7C3";
-const LIGHT  = "F5F5F5";
-const TEXT_C  = "1E293B";
-const MUTED  = "64748B";
-const BORDER = "E2E8F0";
-const FONT   = "Segoe UI";
+// ── CAIP Brand Color Palette ──
+const DARK    = "1B1B1B";  // near-black for dark slides
+const WHITE   = "FFFFFF";
+const ACCENT  = "0078D4";  // Microsoft blue (dk2 in CAIP theme)
+const PURPLE  = "8661C5";  // accent1
+const GREEN   = "35B884";  // accent3
+const ORANGE  = "FA930A";  // accent6
+const RED     = "F4364C";  // accent5
+const LIGHT   = "F2F2F2";  // light content bg
+const TEXT_C  = "080808";  // lt1 — near-black body text
+const MUTED   = "595959";  // secondary text
+const BORDER  = "D9D9D9";
+const LINK    = "50E6FF";  // hyperlink blue
+const HFONT   = "Segoe UI Semibold";  // headers
+const FONT    = "Segoe UI";           // body
 
 // ── Helpers ──
 function fmt$(v) {
@@ -74,38 +79,42 @@ function fmtPct(v) {
 function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallback || ""); }
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 1 — Title (dark)
+// SLIDE 1 — Title (dark, CAIP style)
 // ════════════════════════════════════════════════════════════════════════
 (function titleSlide() {
   const s = pres.addSlide();
   s.background = { color: DARK };
+  // Accent gradient bar at top
+  s.addShape(pres.shapes.RECTANGLE, {
+    x: 0, y: 0, w: 13.33, h: 0.06, fill: { color: ACCENT }
+  });
   // Customer name
   s.addText(safe(DATA.customer, "Customer"), {
-    x: 0.5, y: 1.0, w: 9.0, h: 0.7,
-    fontSize: 18, fontFace: FONT, color: TEAL, bold: true,
+    x: 0.8, y: 1.8, w: 11.0, h: 0.7,
+    fontSize: 20, fontFace: HFONT, color: LINK, bold: true,
     align: "left"
   });
   // Main title
   s.addText("Azure Solution Proposal", {
-    x: 0.5, y: 1.7, w: 9.0, h: 1.0,
-    fontSize: 36, fontFace: FONT, color: WHITE, bold: true,
+    x: 0.8, y: 2.6, w: 11.0, h: 1.2,
+    fontSize: 44, fontFace: HFONT, color: WHITE, bold: true,
     align: "left"
   });
   // Tagline
   if (DATA.tagline) {
     s.addText(DATA.tagline, {
-      x: 0.5, y: 2.9, w: 9.0, h: 0.6,
-      fontSize: 14, fontFace: FONT, color: MUTED, italic: true,
+      x: 0.8, y: 4.0, w: 10.0, h: 0.6,
+      fontSize: 16, fontFace: FONT, color: MUTED, italic: true,
       align: "left"
     });
   }
-  // Bottom accent bar
+  // Purple accent bar
   s.addShape(pres.shapes.RECTANGLE, {
-    x: 0.5, y: 4.8, w: 2.0, h: 0.06, fill: { color: ACCENT }
+    x: 0.8, y: 5.8, w: 2.5, h: 0.06, fill: { color: PURPLE }
   });
   s.addText("Powered by OneStopAgent", {
-    x: 0.5, y: 5.0, w: 4.0, h: 0.35,
-    fontSize: 9, fontFace: FONT, color: MUTED
+    x: 0.8, y: 6.1, w: 5.0, h: 0.35,
+    fontSize: 10, fontFace: FONT, color: MUTED
   });
 })();
 
@@ -117,13 +126,13 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Executive Summary", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   // Problem statement
   if (DATA.problemStatement) {
     s.addText(DATA.problemStatement, {
-      x: 0.5, y: 1.05, w: 9.0, h: 0.7,
+      x: 0.8, y: 1.2, w: 11.7, h: 0.7,
       fontSize: 13, fontFace: FONT, color: MUTED, italic: true,
       valign: "top"
     });
@@ -134,7 +143,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   });
   const bulletY = DATA.problemStatement ? 1.9 : 1.1;
   s.addText(bullets, {
-    x: 0.5, y: bulletY, w: 9.0, h: 3.5,
+    x: 0.5, y: bulletY, w: 11.7, h: 3.5,
     valign: "top"
   });
 })();
@@ -147,14 +156,14 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Solution Architecture", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   // Narrative
   const narr = DATA.solutionNarrative || DATA.architecture.narrative || "";
   if (narr) {
     s.addText(narr, {
-      x: 0.5, y: 1.05, w: 9.0, h: 0.9,
+      x: 0.8, y: 1.2, w: 11.7, h: 0.9,
       fontSize: 12, fontFace: FONT, color: MUTED, valign: "top"
     });
   }
@@ -177,7 +186,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
     });
     const tableY = narr ? 2.1 : 1.1;
     s.addTable(rows, {
-      x: 0.5, y: tableY, w: 9.0,
+      x: 0.5, y: tableY, w: 11.7,
       border: { pt: 0.5, color: BORDER },
       colW: [2.5, 2.5, 4.0],
       rowH: 0.35,
@@ -194,8 +203,8 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Azure Services", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   const headerRow = [
     { text: "Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
@@ -220,7 +229,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
     ]);
   });
   s.addTable(rows, {
-    x: 0.5, y: 1.05, w: 9.0,
+    x: 0.8, y: 1.2, w: 11.7,
     border: { pt: 0.5, color: BORDER },
     colW: [3.0, 2.0, 2.0, 2.0],
     rowH: 0.35,
@@ -236,8 +245,8 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Cost Summary", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   // Stat callout cards
   const stats = [
@@ -270,8 +279,8 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
       labels: top.map(function(ci) { return ci.service; }),
       values: top.map(function(ci) { return ci.monthly; })
     }], {
-      x: 0.5, y: 2.7, w: 9.0, h: 2.7, barDir: "col",
-      chartColors: [ACCENT, TEAL, "5B9BD5", "A5A5A5", "FFC000"],
+      x: 0.5, y: 2.7, w: 11.7, h: 2.7, barDir: "col",
+      chartColors: [ACCENT, GREEN, "5B9BD5", "A5A5A5", "FFC000"],
       chartArea: { fill: { color: WHITE }, roundedCorners: true },
       catAxisLabelColor: MUTED, catAxisLabelFontSize: 9, catAxisLabelFontFace: FONT,
       valAxisLabelColor: MUTED, valAxisLabelFontSize: 9,
@@ -290,8 +299,8 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Business Value", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   // Show up to 3 value-driver cards side by side
   const cards = DATA.drivers.slice(0, 3);
@@ -325,7 +334,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
     const extra = DATA.drivers.slice(3).map(function(d, i) {
       return { text: safe(d.name, "") + (d.impact ? " — " + d.impact : ""), options: { bullet: true, breakLine: i < DATA.drivers.length - 4, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 4 } };
     });
-    s.addText(extra, { x: 0.5, y: 4.1, w: 9.0, h: 1.2, valign: "top" });
+    s.addText(extra, { x: 0.5, y: 4.1, w: 11.7, h: 1.2, valign: "top" });
   }
 })();
 
@@ -337,8 +346,8 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Return on Investment", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   const roiStats = [
     { label: "ROI", value: fmtPct(DATA.roi.percent) },
@@ -368,10 +377,10 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
       return { text: String(b), options: { bullet: true, breakLine: i < Math.min(quals.length, 5) - 1, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 6 } };
     });
     s.addText("Additional Benefits", {
-      x: 0.5, y: 2.7, w: 9.0, h: 0.4,
+      x: 0.5, y: 2.7, w: 11.7, h: 0.4,
       fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true
     });
-    s.addText(qBullets, { x: 0.5, y: 3.1, w: 9.0, h: 2.2, valign: "top" });
+    s.addText(qBullets, { x: 0.5, y: 3.1, w: 11.7, h: 2.2, valign: "top" });
   }
 })();
 
@@ -383,14 +392,14 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const s = pres.addSlide();
   s.background = { color: WHITE };
   s.addText("Next Steps", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    x: 0.8, y: 0.4, w: 11.7, h: 0.6,
+    fontSize: 30, fontFace: HFONT, color: TEXT_C, bold: true
   });
   const steps = DATA.nextSteps.slice(0, 6).map(function(step, i) {
     return { text: step, options: { bullet: true, breakLine: i < Math.min(DATA.nextSteps.length, 6) - 1, fontSize: 14, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 12 } };
   });
   s.addText(steps, {
-    x: 0.5, y: 1.1, w: 9.0, h: 3.8,
+    x: 0.8, y: 1.2, w: 11.7, h: 3.8,
     valign: "top"
   });
 })();
@@ -401,19 +410,22 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
 (function closingSlide() {
   const s = pres.addSlide();
   s.background = { color: DARK };
+  s.addShape(pres.shapes.RECTANGLE, {
+    x: 0, y: 0, w: 13.33, h: 0.06, fill: { color: ACCENT }
+  });
   s.addText("Thank You", {
-    x: 0.5, y: 1.5, w: 9.0, h: 1.0,
-    fontSize: 40, fontFace: FONT, color: WHITE, bold: true, align: "center"
+    x: 0.8, y: 2.2, w: 11.7, h: 1.2,
+    fontSize: 48, fontFace: HFONT, color: WHITE, bold: true, align: "center"
   });
   s.addText(safe(DATA.customer, ""), {
-    x: 0.5, y: 2.6, w: 9.0, h: 0.6,
-    fontSize: 20, fontFace: FONT, color: TEAL, align: "center"
+    x: 0.8, y: 3.6, w: 11.7, h: 0.7,
+    fontSize: 24, fontFace: FONT, color: LINK, align: "center"
   });
   s.addShape(pres.shapes.RECTANGLE, {
-    x: 4.0, y: 3.5, w: 2.0, h: 0.06, fill: { color: ACCENT }
+    x: 5.5, y: 5.0, w: 2.5, h: 0.06, fill: { color: PURPLE }
   });
   s.addText("Powered by OneStopAgent", {
-    x: 0.5, y: 3.8, w: 9.0, h: 0.4,
+    x: 0.8, y: 5.4, w: 11.7, h: 0.4,
     fontSize: 10, fontFace: FONT, color: MUTED, align: "center"
   });
 })();
