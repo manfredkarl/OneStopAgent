@@ -138,8 +138,8 @@ module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
         value: applicationInsights.outputs.connectionString
       }
       {
-        name: 'JWT_SECRET'
-        value: uniqueString(resourceGroup().id, resourceToken, 'jwt-secret')
+        name: 'AZURE_OPENAI_ENDPOINT'
+        value: 'https://demopresentations.services.ai.azure.com'
       }
     ]
     containerAppsEnvironmentName: containerApps.outputs.environmentName
@@ -149,7 +149,7 @@ module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
     identityName: apiIdentity.name
     containerCpuCoreCount: '1.0'
     containerMemory: '2.0Gi'
-    targetPort: 8080
+    targetPort: 8000
     containerMinReplicas: 1
     ingressEnabled: true
     containerName: 'main'

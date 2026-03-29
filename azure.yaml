@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
-name: spec2cloud-app
+name: onestopagent
 
 infra:
   provider: bicep
@@ -10,26 +10,31 @@ services:
     project: ./src/python-api
     host: containerapp
     language: python
+    docker:
+      path: ./Dockerfile
   web:
     project: ./src/frontend
     host: containerapp
     language: ts
-resources:
-  api:
-    type: host.containerapp
-    port: 8080
-  web:
-    type: host.containerapp
-    uses:
-      - api
-    port: 3000
+    docker:
+      path: ./Dockerfile
+      context: .
+
 hooks:
-  predeploy:
-    posix:
-      shell: sh
-      run: ./infra/scripts/predeploy.sh
-      continueOnError: false
+  preprovision:
     windows:
       shell: pwsh
-      run: ./infra/scripts/predeploy.ps1
+      run: |
+        Write-Host "Provisioning OneStopAgent infrastructure..."
+      continueOnError: true
+  predeploy:
+    windows:
+      shell: pwsh
+      run: |
+        # Set the API URL for the frontend build
+        $apiUrl = azd env get-value API_BASE_URL 2>$null
+        if ($apiUrl) {
+          Write-Host "Setting VITE_API_URL=$apiUrl"
+          azd env set VITE_API_URL $apiUrl
+        }
       continueOnError: false
