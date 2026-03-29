@@ -1,6 +1,10 @@
 import type { ChatMessage, AgentStatus } from './types';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL || (
+  typeof window !== 'undefined' && window.location.hostname.includes('azurecontainerapps.io')
+    ? window.location.origin.replace('ca-web-', 'ca-api-')
+    : 'http://localhost:8000'
+);
 
 function normalizeMessage(msg: any): ChatMessage {
   return {
