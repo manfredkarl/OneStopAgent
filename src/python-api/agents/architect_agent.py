@@ -252,7 +252,22 @@ class ArchitectAgent:
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-        result = json.loads(text)
+        # Repair common JSON issues from LLM output
+        # 1. Remove trailing commas before } or ]
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+        # 2. Fix unescaped newlines inside string values
+        text = re.sub(r'(?<!\\)\n(?=(?:[^"]*"[^"]*")*[^"]*"[^"]*$)', r'\\n', text)
+
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            # Try extracting JSON object from the response
+            match = re.search(r'\{[\s\S]*\}', text)
+            if match:
+                cleaned = re.sub(r',\s*([}\]])', r'\1', match.group())
+                result = json.loads(cleaned)
+            else:
+                raise
 
         # Validate mermaid
         mermaid = result.get("mermaidCode", "")
@@ -387,7 +402,7 @@ class ArchitectAgent:
 
     @staticmethod
     def _build_fallback(state: AgentState) -> dict:
-        """Build a fallback architecture from brainstorming scenarios."""
+        """Build a fallback layered architecture from brainstorming scenarios."""
         scenarios = state.brainstorming.get("scenarios", [])
 
         services: list[str] = []
@@ -395,7 +410,11 @@ class ArchitectAgent:
             services.extend(s.get("azure_services", []))
 
         if not services:
-            services = ["Azure App Service", "Azure SQL Database", "Azure Cache for Redis"]
+            services = [
+                "Azure App Service", "Azure API Management",
+                "Azure Cosmos DB", "Azure Blob Storage",
+                "Azure AI Services", "Azure Key Vault",
+            ]
 
         seen: set[str] = set()
         unique: list[str] = []
@@ -403,29 +422,68 @@ class ArchitectAgent:
             if svc not in seen:
                 seen.add(svc)
                 unique.append(svc)
+        unique = unique[:10]
 
-        lines = ["flowchart TD", "  Client[Client Browser]"]
+        # Group into logical layers
+        compute = [s for s in unique if any(k in s.lower() for k in ["app service", "functions", "container", "kubernetes", "api management"])]
+        data = [s for s in unique if any(k in s.lower() for k in ["sql", "cosmos", "storage", "blob", "redis", "cache"])]
+        ai = [s for s in unique if any(k in s.lower() for k in ["ai", "openai", "cognitive", "search", "machine learning"])]
+        infra = [s for s in unique if s not in compute + data + ai]
+
+        layers = []
         components = []
-        prev_id = "Client"
-        for i, svc in enumerate(unique[:10]):
-            node_id = chr(65 + i)
-            lines.append(f"  {prev_id} --> {node_id}[{svc}]")
-            components.append({
-                "name": svc.replace("Azure ", ""),
-                "azureService": svc,
-                "description": f"Managed {svc.replace('Azure ', '').lower()} service",
-                "role": f"Managed {svc.replace('Azure ', '').lower()} service",
-            })
-            prev_id = node_id
+
+        def add_layer(name: str, purpose: str, svcs: list[str]):
+            if not svcs:
+                return
+            layer_comps = []
+            for svc in svcs:
+                comp = {
+                    "name": svc.replace("Azure ", ""),
+                    "azureService": svc,
+                    "description": f"Managed {svc.replace('Azure ', '').lower()} service",
+                    "role": f"Provides {svc.replace('Azure ', '').lower()} capabilities",
+                    "layer": name,
+                }
+                layer_comps.append(comp)
+                components.append(comp)
+            layers.append({"name": name, "purpose": purpose, "components": layer_comps})
+
+        add_layer("Application & API", "User-facing application and API gateway", compute or unique[:2])
+        add_layer("AI & Intelligence", "AI/ML processing and cognitive services", ai)
+        add_layer("Data & Storage", "Persistent storage and data management", data or unique[2:4])
+        add_layer("Platform & Security", "Infrastructure, identity, and security", infra)
+
+        # Build subgraph mermaid
+        lines = ["flowchart TD"]
+        node_ids_by_layer: list[list[str]] = []
+        node_idx = 0
+        for layer in layers:
+            safe_name = layer["name"]
+            lines.append(f"  subgraph {safe_name}")
+            layer_ids = []
+            for comp in layer["components"]:
+                nid = chr(65 + node_idx)
+                label = comp["azureService"].replace("Azure ", "")
+                lines.append(f"    {nid}[{label}]")
+                layer_ids.append(nid)
+                node_idx += 1
+            lines.append("  end")
+            node_ids_by_layer.append(layer_ids)
+
+        # Connect layers
+        for i in range(len(node_ids_by_layer) - 1):
+            if node_ids_by_layer[i] and node_ids_by_layer[i + 1]:
+                lines.append(f"  {node_ids_by_layer[i][-1]} --> {node_ids_by_layer[i + 1][0]}")
 
         return {
             "mermaidCode": "\n".join(lines),
-            "layers": [{"name": "Core Services", "purpose": "Primary Azure services", "components": components}],
+            "layers": layers,
             "components": components,
             "narrative": (
-                f"Architecture using {', '.join(unique[:4])} "
-                "to deliver a scalable Azure solution. "
+                f"Layered Azure architecture with {len(layers)} functional layers using "
+                f"{', '.join(unique[:4])}. "
                 "⚠️ Generated from fallback — review and refine."
             ),
-            "basedOn": "fallback (LLM unavailable)",
+            "basedOn": "fallback (LLM JSON parsing failed)",
         }
