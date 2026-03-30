@@ -174,9 +174,9 @@ class ROIAgent:
         has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
 
         if not has_any_input:
-            # No user input at all — derive from annual_value as a rough proxy
-            monthly_value = round(annual_value / 12) if annual_value > 0 else 0
-            estimated_current = max(monthly_value, azure_monthly * 2, 5000)
+            # No user input — estimate current cost from Azure spend only (NOT from annual_value).
+            # Industry rule-of-thumb: total operational cost ≈ 2× cloud platform cost.
+            estimated_current = max(azure_monthly * 2, 5000)
             current_breakdown.append({"label": "Operations (estimated)", "amount": round(estimated_current * 0.75)})
             current_breakdown.append({"label": "Overhead (estimated)", "amount": round(estimated_current * 0.25)})
         else:
@@ -313,15 +313,26 @@ class ROIAgent:
             else ""
         )
 
+        cost_estimated = not has_any_input
+
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
-            f"Current operational costs derived from {assumption_note}. "
-            + driver_note
+        )
+        if cost_estimated:
+            methodology += (
+                "Current operational cost estimated as 2\u00d7 Azure cost "
+                "(industry rule-of-thumb for cloud migration). "
+                "For accurate ROI, provide actual current costs. "
+            )
+        else:
+            methodology += f"Current operational costs derived from {assumption_note}. "
+        methodology += (
+            driver_note
             + "Projection uses flat annual figures; one-time implementation costs are excluded. "
-            + "ROI = (Annual Value − Annual Cost) ÷ Annual Cost × 100."
+            + "ROI = (Annual Value \u2212 Annual Cost) \u00f7 Annual Cost \u00d7 100."
         )
 
-        return {
+        dashboard: dict = {
             "monthlySavings": savings,
             "annualImpact": round(annual_value),
             "azureMonthlyCost": azure_monthly,
@@ -342,6 +353,12 @@ class ROIAgent:
             "projection": projection,
             "methodology": methodology,
         }
+
+        if cost_estimated:
+            dashboard["costEstimated"] = True
+            dashboard["warning"] = "Current cost estimated \u2014 provide actual figures for accurate ROI"
+
+        return dashboard
 
 
     def _needs_info(self, reason: str, questions: list[str], qualitative: list[str] | None = None) -> dict:

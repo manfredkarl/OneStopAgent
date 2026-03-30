@@ -39,13 +39,16 @@ logger = logging.getLogger(__name__)
 # Shared pipeline message types (flow between executors via ctx.send_message)
 # ---------------------------------------------------------------------------
 
+DEFAULT_ACTIVE_AGENTS = ["architect", "cost", "business_value", "roi", "presentation"]
+
+
 @dataclass
 class PipelineMessage:
     """Wraps AgentState + metadata flowing between executors."""
     state: AgentState
     project_id: str
     execution_mode: str = "guided"  # "guided" or "fast-run"
-    active_agents: list[str] = field(default_factory=list)
+    active_agents: list[str] = field(default_factory=lambda: list(DEFAULT_ACTIVE_AGENTS))
 
 
 # ---------------------------------------------------------------------------

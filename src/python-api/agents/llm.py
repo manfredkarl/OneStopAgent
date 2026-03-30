@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Sequence
 
@@ -35,9 +36,9 @@ def _build_credential():
         class _StaticTokenCredential:
             """Credential that returns a pre-fetched token (no refresh)."""
             def get_token(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                return AccessToken(token, 0)
+                return AccessToken(token, int(time.time()) + 3600)
             async def get_token_async(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                return AccessToken(token, 0)
+                return AccessToken(token, int(time.time()) + 3600)
 
         return _StaticTokenCredential()
 

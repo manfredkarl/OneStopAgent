@@ -416,8 +416,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
         unit_lower = unit.lower()
 
         if "hour" in unit_lower or service_name in HOURLY_SERVICES:
-            instances = max(1, users // 500) if users > 500 else 1
-            return unit_price * 730 * instances
+            return unit_price * 730
         elif "month" in unit_lower:
             return unit_price
         elif "day" in unit_lower:
