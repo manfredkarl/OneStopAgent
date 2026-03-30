@@ -16,6 +16,9 @@ from models.schemas import (
 )
 from services.project_store import store
 from maf_orchestrator import MAFOrchestrator
+from telemetry import setup_telemetry
+
+setup_telemetry()
 
 # ---------------------------------------------------------------------------
 # App
@@ -219,8 +222,50 @@ async def download_pptx(project_id: str, x_user_id: str = Header()):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 # ---------------------------------------------------------------------------
+# MAF DevUI — debug chat interface for local development
+# ---------------------------------------------------------------------------
+# The agent-framework-devui package provides a built-in browser UI that
+# discovers MAF agents/workflows from a directory and exposes an
+# OpenAI-compatible chat API.  It runs on a separate port (default 8080)
+# so it doesn't interfere with the production API on :8000.
+#
+# Quick-start (from this directory):
+#     python main.py              # starts API on :8000
+#     python main.py --devui      # starts API on :8000 + DevUI on :8081
+#
+# Or standalone:
+#     python -c "from agent_framework_devui import serve; serve(entities_dir='agents', port=8081, auto_open=True)"
+# ---------------------------------------------------------------------------
+
+_DEVUI_PORT = 8081
+
+
+def _start_devui_background(entities_dir: str = "agents", port: int = _DEVUI_PORT) -> None:
+    """Launch MAF DevUI on a background thread for local debugging."""
+    import threading
+
+    def _run() -> None:
+        try:
+            from agent_framework_devui import serve
+
+            serve(entities_dir=entities_dir, port=port, host="127.0.0.1", auto_open=True)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("DevUI failed to start: %s", exc)
+
+    t = threading.Thread(target=_run, daemon=True, name="devui")
+    t.start()
+
 
 if __name__ == "__main__":
+    import sys
+
     import uvicorn
+
+    if "--devui" in sys.argv:
+        sys.argv.remove("--devui")
+        print(f"🤖 Starting MAF DevUI on http://127.0.0.1:{_DEVUI_PORT}")
+        _start_devui_background()
 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

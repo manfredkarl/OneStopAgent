@@ -6,7 +6,11 @@ import subprocess
 import tempfile
 import uuid
 
+from opentelemetry import trace
+
 logger = logging.getLogger(__name__)
+
+_tracer = trace.get_tracer(__name__)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "output")
 # node_modules lives next to this service's parent package.json
@@ -37,25 +41,35 @@ def execute_pptxgenjs(script: str, customer_name: str = "Customer") -> str:
             f.write(script)
 
         env = {**os.environ, "NODE_PATH": NODE_MODULES}
-        result = subprocess.run(
-            ["node", script_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=OUTPUT_DIR,
-            env=env,
-        )
+        with _tracer.start_as_current_span("pptxgenjs.execute") as span:
+            span.set_attribute("pptx.customer_name", customer_name)
+            span.set_attribute("pptx.output_path", abs_output)
+            span.set_attribute("pptx.script_length", len(script))
 
-        if result.returncode != 0:
-            logger.error("PptxGenJS script failed (exit %d):\nstdout: %s\nstderr: %s",
-                         result.returncode, result.stdout[:500], result.stderr[:500])
-            raise RuntimeError(f"PptxGenJS script failed: {result.stderr[:300]}")
+            result = subprocess.run(
+                ["node", script_path],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=OUTPUT_DIR,
+                env=env,
+            )
 
-        if not os.path.isfile(output_path):
-            raise FileNotFoundError(f"PptxGenJS ran but output not found at {output_path}")
+            span.set_attribute("pptx.exit_code", result.returncode)
 
-        logger.info("Generated PPTX: %s", output_path)
-        return output_path
+            if result.returncode != 0:
+                span.set_attribute("pptx.error", result.stderr[:300])
+                logger.error("PptxGenJS script failed (exit %d):\nstdout: %s\nstderr: %s",
+                             result.returncode, result.stdout[:500], result.stderr[:500])
+                raise RuntimeError(f"PptxGenJS script failed: {result.stderr[:300]}")
+
+            if not os.path.isfile(output_path):
+                span.set_attribute("pptx.error", "output_not_found")
+                raise FileNotFoundError(f"PptxGenJS ran but output not found at {output_path}")
+
+            span.set_attribute("pptx.success", True)
+            logger.info("Generated PPTX: %s", output_path)
+            return output_path
 
     finally:
         # Clean up temp script

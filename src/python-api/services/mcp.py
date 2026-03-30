@@ -8,6 +8,10 @@ import httpx
 import logging
 from typing import Any
 
+from opentelemetry import trace
+
+_tracer = trace.get_tracer(__name__)
+
 logger = logging.getLogger(__name__)
 
 MCP_ENDPOINT = "https://learn.microsoft.com/api/mcp"
@@ -43,38 +47,48 @@ class MCPClient:
         
         Raises MCPUnavailableError if the server is unreachable.
         """
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    self.endpoint,
-                    json={
-                        "jsonrpc": "2.0",
-                        "method": "search",
-                        "params": {"query": query, "top": top_k},
-                        "id": 1,
-                    },
-                    headers={"Content-Type": "application/json"},
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    results = data.get("result", data.get("results", []))
-                    return [self._map_result(r, query) for r in results[:top_k]]
-                else:
-                    logger.warning(f"MCP server returned {response.status_code}: {response.text[:200]}")
-                    raise MCPUnavailableError(f"MCP server returned {response.status_code}")
-        
-        except httpx.ConnectError as e:
-            logger.warning(f"MCP server unreachable: {e}")
-            raise MCPUnavailableError(f"MCP server unreachable: {e}")
-        except httpx.TimeoutException as e:
-            logger.warning(f"MCP server timeout: {e}")
-            raise MCPUnavailableError(f"MCP server timeout: {e}")
-        except MCPUnavailableError:
-            raise
-        except Exception as e:
-            logger.warning(f"MCP client error: {e}")
-            raise MCPUnavailableError(f"MCP client error: {e}")
+        with _tracer.start_as_current_span("mcp.search") as span:
+            span.set_attribute("mcp.query", query)
+            span.set_attribute("mcp.top_k", top_k)
+            span.set_attribute("mcp.endpoint", self.endpoint)
+            try:
+                with httpx.Client(timeout=self.timeout) as client:
+                    response = client.post(
+                        self.endpoint,
+                        json={
+                            "jsonrpc": "2.0",
+                            "method": "search",
+                            "params": {"query": query, "top": top_k},
+                            "id": 1,
+                        },
+                        headers={"Content-Type": "application/json"},
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        results = data.get("result", data.get("results", []))
+                        mapped = [self._map_result(r, query) for r in results[:top_k]]
+                        span.set_attribute("mcp.result_count", len(mapped))
+                        return mapped
+                    else:
+                        logger.warning(f"MCP server returned {response.status_code}: {response.text[:200]}")
+                        span.set_attribute("mcp.error", f"HTTP {response.status_code}")
+                        raise MCPUnavailableError(f"MCP server returned {response.status_code}")
+            
+            except httpx.ConnectError as e:
+                logger.warning(f"MCP server unreachable: {e}")
+                span.set_attribute("mcp.error", "connect_error")
+                raise MCPUnavailableError(f"MCP server unreachable: {e}")
+            except httpx.TimeoutException as e:
+                logger.warning(f"MCP server timeout: {e}")
+                span.set_attribute("mcp.error", "timeout")
+                raise MCPUnavailableError(f"MCP server timeout: {e}")
+            except MCPUnavailableError:
+                raise
+            except Exception as e:
+                logger.warning(f"MCP client error: {e}")
+                span.set_attribute("mcp.error", str(e))
+                raise MCPUnavailableError(f"MCP client error: {e}")
 
     def _map_result(self, raw: dict, query: str) -> dict[str, Any]:
         """Map a raw MCP response to the standard pattern schema (ref FRD-02 §4.3)."""
