@@ -75,14 +75,11 @@ const AI_TEXT = ["text-white", "text-white", "text-white", "text-gray-800"];
 
 /** Maximum bar width (as % of one half) for the butterfly chart. */
 const WATERFALL_MAX_BAR_PCT = 90;
-/** Minimum bar width % below which the in-bar label is hidden. */
-const WATERFALL_MIN_LABEL_PCT = 22;
 
 export default function ROIDashboard({ data }: Props) {
   const {
     monthlySavings,
     annualImpact,
-    azureMonthlyCost,
     savingsPercentage,
     costComparisonAvailable,
     currentCost,
@@ -107,22 +104,6 @@ export default function ROIDashboard({ data }: Props) {
   const maxCostBar = hasCurrentCost && hasAiCost ? Math.max(currentCost.total, aiCost.total) : 1;
   const currentBarWidth = hasCurrentCost ? (currentCost.total / maxCostBar) * 100 : 100;
   const aiBarWidth = hasAiCost ? (aiCost.total / maxCostBar) * 100 : 0;
-
-  const maxCumulativeValue =
-    hasProjection && projection.cumulative
-      ? Math.max(
-          ...projection.cumulative.map(c => Math.max(c.azureCost, c.totalValue, Math.abs(c.netValue))),
-          1,
-        )
-      : hasProjection
-      ? Math.max(
-          ...(projection.cumulativeSavings ?? [0]),
-          ...(projection.cumulativeCost ?? [0]),
-          ...(projection.cumulativeValue ?? [0]),
-          ...(projection.cumulativeUplift ?? [0]),
-          1,
-        )
-      : 1;
 
   const roiMultiple = roiPercent != null ? ((roiPercent / 100) + 1) : null;
 
