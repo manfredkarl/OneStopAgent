@@ -216,11 +216,14 @@ class MAFOrchestrator:
         wf = create_pipeline_workflow()
         self.workflows[project_id] = wf
 
+        # Normalize agent IDs: frontend uses hyphens, backend uses underscores
+        normalized = [a.replace("-", "_") for a in active_agents]
+
         pipeline_msg = PipelineMessage(
             state=state,
             project_id=project_id,
             execution_mode=state.execution_mode,
-            active_agents=active_agents,
+            active_agents=normalized,
         )
 
         yield self._msg(
