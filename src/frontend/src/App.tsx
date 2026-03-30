@@ -46,12 +46,14 @@ function AppContent() {
       <div className="flex flex-1 overflow-hidden">
         {/* Persistent sidebar */}
         <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col overflow-hidden">
-          {/* Agents section — top */}
-          <AgentSidebar
-            projectId=""
-            agents={agents}
-            onAgentsChange={setAgents}
-          />
+          {/* Agents section — sticky at top */}
+          <div className="shrink-0">
+            <AgentSidebar
+              projectId=""
+              agents={agents}
+              onAgentsChange={setAgents}
+            />
+          </div>
 
           {/* Divider */}
           <div className="border-t border-[var(--border)] mx-4" />
