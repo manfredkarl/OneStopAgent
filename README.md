@@ -53,14 +53,14 @@ Open **http://localhost:4200** in your browser.
 |-------|-----------|
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Backend | Python + FastAPI + SSE streaming |
-| LLM | Azure OpenAI (GPT-5.4) via LangChain |
+| LLM | Azure OpenAI (GPT-5.4) via Microsoft Agent Framework |
 | Pricing | Azure Retail Prices REST API (public, no auth) |
 | Slides | PptxGenJS (primary) + python-pptx (fallback) |
 | Diagrams | Mermaid (rendered client-side as SVG) |
 
 ### Key Design Decisions
 
-- **Controlled orchestration** — deterministic pipeline, not autonomous ReAct agents. The Project Manager is a Python class, not a LangChain agent.
+- **MAF Workflow orchestration** — deterministic pipeline using Microsoft Agent Framework (MAF). The Project Manager is a Python class with MAF workflow execution.
 - **Shared state** — a single `AgentState` dataclass flows between agents. Each reads what it needs and writes its output.
 - **Two-phase inputs** — both Cost and Business Value agents ask usage/assumption questions first, then calculate with real numbers.
 - **Template-based slides** — a tested PptxGenJS script template handles all layout; the LLM only generates text content as JSON.
@@ -71,7 +71,8 @@ Open **http://localhost:4200** in your browser.
 src/
 ├── python-api/                     # FastAPI backend
 │   ├── main.py                     # Routes, SSE streaming, PPTX download
-│   ├── orchestrator.py             # Phase state machine, approval gates
+│   ├── maf_orchestrator.py         # MAF-based orchestrator (workflow execution)
+│   ├── workflow.py                 # MAF workflow definition, HITL, response handling
 │   ├── agents/
 │   │   ├── llm.py                  # Azure OpenAI connection
 │   │   ├── state.py                # Shared AgentState dataclass

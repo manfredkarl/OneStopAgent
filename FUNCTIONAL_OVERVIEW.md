@@ -36,12 +36,12 @@ Sellers can toggle agents on or off in the sidebar. If cost estimation isn't nee
 
 ## Technical Design Decisions
 
-### Controlled Multi-Agent Orchestration
+### MAF Workflow Orchestration
 
-The system uses a **deterministic orchestration pattern** — not autonomous agent reasoning:
+The system uses a **deterministic orchestration pattern** powered by the **Microsoft Agent Framework (MAF)**:
 
 ```
-User → Project Manager (planner) → Execution Plan → Agents run in sequence → Results stream
+User → Project Manager (planner) → MAF Workflow → Agents run in sequence → Results stream
 ```
 
 **Why not ReAct / autonomous agents?**
@@ -62,7 +62,7 @@ User → Project Manager (planner) → Execution Plan → Agents run in sequence
    ["architect", "azure_services", "cost", "business_value", "presentation"]
    ```
 
-3. **Orchestrator** runs agents in sequence:
+3. **MAFOrchestrator** runs agents via MAF workflow:
    ```python
    for step in plan:
        agent = get_agent(step)
@@ -90,9 +90,9 @@ User → Project Manager (planner) → Execution Plan → Agents run in sequence
    }
    ```
 
-### LangChain Used ONLY for LLM Calls
+### LLM Integration
 
-LangChain is used for **Azure OpenAI integration only** — not for agent orchestration:
+Azure OpenAI is accessed through the **Microsoft Agent Framework (MAF)** — not raw LangChain:
 
 ```python
 from langchain_openai import AzureChatOpenAI
@@ -166,7 +166,7 @@ The Presentation agent uses a **template-based PptxGenJS approach**:
 
 ### Backend
 - **Python + FastAPI** at `src/python-api/`
-- **Controlled orchestration** — ProjectManager is a Python class with LLM-based intent classification
+- **Controlled orchestration** — ProjectManager is a Python class with MAF workflow execution
 - 5 specialist agents as Python classes with `run(state) -> state` methods
 - **CORS enabled** for local development
 - In-memory project and conversation storage
@@ -184,7 +184,7 @@ The Presentation agent uses a **template-based PptxGenJS approach**:
 
 ## Key Features
 
-- **Controlled multi-agent orchestration** — deterministic pipeline with approval gates
+- **MAF workflow orchestration** — deterministic pipeline with approval gates using Microsoft Agent Framework
 - **Two-phase inputs** — Cost and BV agents ask for real assumptions before calculating
 - **Streaming responses** — SSE delivers agent output in real-time
 - **Real Azure pricing** — cost estimates use the live Azure Retail Prices API
@@ -227,10 +227,11 @@ Open `http://localhost:4200` in your browser.
 ```
 OneStopAgent/
 ├── src/
-│   ├── python-api/              # Python backend (FastAPI + controlled orchestration)
+│   ├── python-api/              # Python backend (FastAPI + MAF orchestration)
 │   │   ├── main.py              # FastAPI routes, SSE streaming, PPTX download
-│   │   ├── orchestrator.py      # Phase state machine, approval gates, agent execution
-│   │   ├── requirements.txt     # fastapi, langchain-openai, python-pptx, etc.
+│   │   ├── maf_orchestrator.py  # MAF-based orchestrator (workflow execution)
+│   │   ├── workflow.py          # MAF workflow definition, HITL, response handling
+│   │   ├── requirements.txt     # fastapi, agent-framework, python-pptx, etc.
 │   │   ├── agents/
 │   │   │   ├── llm.py                    # Azure OpenAI connection (AzureChatOpenAI)
 │   │   │   ├── state.py                  # Shared AgentState dataclass
@@ -278,7 +279,7 @@ OneStopAgent/
 |---------|---------|
 | `fastapi` | HTTP API framework |
 | `uvicorn` | ASGI server |
-| `langchain-openai` | Azure OpenAI LLM calls (AzureChatOpenAI) |
+| `agent-framework` | Microsoft Agent Framework for orchestration and LLM calls |
 | `azure-identity` | Azure credential management |
 | `python-pptx` | PowerPoint generation |
 | `httpx` | HTTP client for Azure Pricing API |
