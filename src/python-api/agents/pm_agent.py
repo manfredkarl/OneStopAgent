@@ -139,7 +139,7 @@ SOLUTIONING_PLAN = [
 PLAN_TO_ACTIVE = {
     "architect": "architect",
     "cost": "cost",
-    "business_value": "business-value",
+    "business_value": "business_value",
     "roi": "roi",
     "presentation": "presentation",
 }

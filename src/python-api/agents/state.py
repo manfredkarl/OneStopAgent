@@ -49,6 +49,17 @@ class AgentState:
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
 
+    def __getstate__(self) -> dict:
+        """Exclude non-picklable lock from serialization."""
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore lock after deserialization."""
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
     def to_context_string(self) -> str:
         """Build a context string for LLM prompts with everything known so far."""
         parts = [f"User request: {self.user_input}"]
