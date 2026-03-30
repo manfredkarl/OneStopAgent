@@ -24,9 +24,15 @@ interface Driver {
 
 interface Projection {
   years: number[];
-  cumulativeSavings: number[] | null;
-  cumulativeCost: number[];
-  cumulativeValue: number[];
+  annualAzureCost?: number;
+  annualCostReduction?: number;
+  annualRevenueUplift?: number;
+  annualNetValue?: number;
+  cumulative?: { year: number; azureCost: number; totalValue: number; netValue: number }[];
+  // Legacy fields (backward compat)
+  cumulativeSavings?: number[] | null;
+  cumulativeCost?: number[];
+  cumulativeValue?: number[];
   cumulativeUplift?: number[] | null;
 }
 
@@ -102,11 +108,16 @@ export default function ROIDashboard({ data }: Props) {
       : 0;
 
   const maxCumulativeValue =
-    hasProjection
+    hasProjection && projection.cumulative
+      ? Math.max(
+          ...projection.cumulative.map(c => Math.max(c.azureCost, c.totalValue, Math.abs(c.netValue))),
+          1,
+        )
+      : hasProjection
       ? Math.max(
           ...(projection.cumulativeSavings ?? [0]),
-          ...projection.cumulativeCost,
-          ...projection.cumulativeValue,
+          ...(projection.cumulativeCost ?? [0]),
+          ...(projection.cumulativeValue ?? [0]),
           ...(projection.cumulativeUplift ?? [0]),
           1,
         )
@@ -430,74 +441,75 @@ export default function ROIDashboard({ data }: Props) {
           <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-4">
             3-Year Projection
           </h3>
-          <div className="grid grid-cols-3 gap-4">
-            {projection.years.map((year, i) => {
-              const cumulativeSavings = projection.cumulativeSavings?.[i] ?? null;
-              const cumulativeUplift = projection.cumulativeUplift?.[i] ?? null;
-              const cost = projection.cumulativeCost[i] ?? 0;
-              const savingsH = cumulativeSavings != null ? Math.max((cumulativeSavings / maxCumulativeValue) * 112, 8) : 0;
-              const upliftH = cumulativeUplift != null ? Math.max((cumulativeUplift / maxCumulativeValue) * 112, 8) : 0;
-              const costH = Math.max((cost / maxCumulativeValue) * 112, 8);
-              const savingsColor = cumulativeSavings != null && cumulativeSavings < 0 ? "text-red-500" : "text-green-500";
-              const savingsBarColor = cumulativeSavings != null && cumulativeSavings < 0 ? "bg-red-500" : "bg-green-500";
-              return (
-                <div key={year} className="text-center">
-                  <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
-                    Year {year}
-                  </p>
-                  <div className="flex items-end justify-center gap-2 mb-2" style={{ height: 112 }}>
-                    {/* Savings bar — only when cost comparison is available */}
-                    {cumulativeSavings != null && (
-                      <div
-                        style={{ height: savingsH, width: 36 }}
-                        className={`${savingsBarColor} rounded-t-md`}
-                        title={`Cumulative savings: $${fmt(cumulativeSavings)}`}
-                      />
-                    )}
-                    {/* Cost bar */}
-                    <div
-                      style={{ height: costH, width: 36 }}
-                      className="bg-blue-500 rounded-t-md"
-                      title={`Cumulative Azure cost: $${fmt(cost)}`}
-                    />
-                    {/* Revenue uplift bar */}
-                    {cumulativeUplift != null && (
-                      <div
-                        style={{ height: upliftH, width: 36 }}
-                        className="bg-purple-500 rounded-t-md"
-                        title={`Cumulative revenue uplift: $${fmt(cumulativeUplift)}`}
-                      />
-                    )}
-                  </div>
-                  {cumulativeSavings != null && (
-                    <p className={`text-sm font-bold ${savingsColor}`}>
-                      ${fmt(cumulativeSavings)}
-                    </p>
-                  )}
-                  {cumulativeSavings != null && <p className="text-xs text-[var(--text-muted)]">savings</p>}
-                  <p className="text-xs text-blue-400 mt-1">${fmt(cost)} cost</p>
-                  {cumulativeUplift != null && (
-                    <p className="text-xs text-purple-400 mt-0.5">${fmt(cumulativeUplift)} uplift</p>
-                  )}
+          {projection.cumulative ? (
+            /* New format: clear cost vs value vs net */
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                {projection.cumulative.map((yr) => {
+                  const netPositive = yr.netValue >= 0;
+                  const maxVal = Math.max(
+                    ...projection.cumulative!.map(c => Math.max(c.azureCost, c.totalValue))
+                  ) || 1;
+                  const costH = Math.max((yr.azureCost / maxVal) * 112, 8);
+                  const valueH = Math.max((yr.totalValue / maxVal) * 112, 8);
+                  return (
+                    <div key={yr.year} className="text-center">
+                      <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
+                        Year {yr.year}
+                      </p>
+                      <div className="flex items-end justify-center gap-3 mb-2" style={{ height: 112 }}>
+                        <div className="text-center">
+                          <div
+                            style={{ height: costH, width: 40 }}
+                            className="bg-blue-500 rounded-t-md"
+                            title={`Azure cost: $${fmt(yr.azureCost)}`}
+                          />
+                          <p className="text-[10px] text-blue-400 mt-1">Cost</p>
+                        </div>
+                        <div className="text-center">
+                          <div
+                            style={{ height: valueH, width: 40 }}
+                            className="bg-green-500 rounded-t-md"
+                            title={`Total value: $${fmt(yr.totalValue)}`}
+                          />
+                          <p className="text-[10px] text-green-400 mt-1">Value</p>
+                        </div>
+                      </div>
+                      <p className={`text-sm font-bold ${netPositive ? 'text-green-500' : 'text-red-500'}`}>
+                        {netPositive ? '+' : ''}${fmt(yr.netValue)}
+                      </p>
+                      <p className="text-xs text-[var(--text-muted)]">net value</p>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 pt-3 border-t border-[var(--border)] grid grid-cols-2 gap-4 text-xs text-[var(--text-muted)]">
+                <div>
+                  <span className="inline-block w-3 h-3 rounded-sm bg-blue-500 mr-1.5 align-middle" />
+                  Azure cost: ${fmt(projection.annualAzureCost ?? 0)}/yr
                 </div>
-              );
-            })}
-          </div>
-          <div className="flex justify-center gap-6 mt-4 text-xs text-[var(--text-muted)]">
-            {projection.cumulativeSavings && (
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-sm bg-green-500" /> Cumulative savings
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-3 rounded-sm bg-blue-500" /> Cumulative Azure cost
-            </span>
-            {projection.cumulativeUplift && (
-              <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-sm bg-purple-500" /> Revenue uplift value
-              </span>
-            )}
-          </div>
+                <div>
+                  <span className="inline-block w-3 h-3 rounded-sm bg-green-500 mr-1.5 align-middle" />
+                  Total value: ${fmt((projection.annualCostReduction ?? 0) + (projection.annualRevenueUplift ?? 0))}/yr
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Legacy format fallback */
+            <div className="grid grid-cols-3 gap-4">
+              {projection.years.map((year, i) => {
+                const cost = projection.cumulativeCost?.[i] ?? 0;
+                const value = projection.cumulativeValue?.[i] ?? 0;
+                return (
+                  <div key={year} className="text-center">
+                    <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">Year {year}</p>
+                    <p className="text-sm font-bold text-[var(--text-primary)]">${fmt(value)}</p>
+                    <p className="text-xs text-blue-400">${fmt(cost)} cost</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

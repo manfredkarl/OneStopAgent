@@ -267,31 +267,37 @@ class ROIAgent:
         # ── Annual uplift (revenue_uplift drivers only) for projection ──
         annual_uplift = sum(item["amount"] for item in waterfall_revenue_uplift)
 
-        # ── 3-year projection — flat; no fabricated growth or uplift ─
+        # ── 3-year projection — cumulative net value ─────────────
         annual_azure_cost = azure_monthly * 12
-        annual_savings = savings * 12
+        annual_cost_reduction = sum(item["amount"] for item in waterfall_cost_reduction)
+        annual_total_value = annual_cost_reduction + annual_uplift
+        annual_net_value = annual_total_value - annual_azure_cost
 
         projection = {
             "years": [1, 2, 3],
-            "cumulativeSavings": [
-                round(annual_savings),
-                round(annual_savings * 2),
-                round(annual_savings * 3),
-            ],
-            "cumulativeCost": [
-                round(annual_azure_cost),
-                round(annual_azure_cost * 2),
-                round(annual_azure_cost * 3),
-            ],
-            "cumulativeValue": [
-                round(annual_value),
-                round(annual_value * 2),
-                round(annual_value * 3),
-            ],
-            "cumulativeUplift": [
-                round(annual_uplift),
-                round(annual_uplift * 2),
-                round(annual_uplift * 3),
+            "annualAzureCost": round(annual_azure_cost),
+            "annualCostReduction": round(annual_cost_reduction),
+            "annualRevenueUplift": round(annual_uplift),
+            "annualNetValue": round(annual_net_value),
+            "cumulative": [
+                {
+                    "year": 1,
+                    "azureCost": round(annual_azure_cost),
+                    "totalValue": round(annual_total_value),
+                    "netValue": round(annual_net_value),
+                },
+                {
+                    "year": 2,
+                    "azureCost": round(annual_azure_cost * 2),
+                    "totalValue": round(annual_total_value * 2),
+                    "netValue": round(annual_net_value * 2),
+                },
+                {
+                    "year": 3,
+                    "azureCost": round(annual_azure_cost * 3),
+                    "totalValue": round(annual_total_value * 3),
+                    "netValue": round(annual_net_value * 3),
+                },
             ],
         }
 
