@@ -635,22 +635,22 @@ class PresentationExecutor(PipelineExecutor):
 def create_pipeline_workflow() -> Workflow:
     """Build the agent pipeline workflow.
 
-    Graph: architect → cost → bv → roi → presentation
+    Graph: BV → architect → cost → ROI → presentation
     Each step has HITL approval gates and optional two-phase assumption input.
     """
+    bv = BusinessValueExecutor()
     architect = ArchitectExecutor()
     cost = CostExecutor()
-    bv = BusinessValueExecutor()
     roi = ROIExecutor()
     presentation = PresentationExecutor()
 
     workflow = (
         WorkflowBuilder(
             name="onestop_pipeline",
-            description="OneStopAgent pipeline: architect → cost → BV → ROI → presentation",
-            start_executor=architect,
+            description="OneStopAgent pipeline: BV → architect → cost → ROI → presentation",
+            start_executor=bv,
         )
-        .add_chain([architect, cost, bv, roi, presentation])
+        .add_chain([bv, architect, cost, roi, presentation])
         .build()
     )
     return workflow

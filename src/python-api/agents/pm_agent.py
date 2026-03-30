@@ -128,9 +128,9 @@ AGENT_INFO = {
 
 # Solutioning plan (Mode B only — brainstorming is Mode A, handled separately)
 SOLUTIONING_PLAN = [
+    "business_value",
     "architect",
     "cost",
-    "business_value",
     "roi",
     "presentation",
 ]
