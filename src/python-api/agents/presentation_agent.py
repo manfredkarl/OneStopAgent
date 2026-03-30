@@ -36,7 +36,7 @@ DESIGN_GUIDANCE = """
 
 
 # ── PptxGenJS slide template ─────────────────────────────────────────────
-# The template reads a DATA JSON object and builds 9 slide types.
+# The template reads a DATA JSON object and builds 11 slide types.
 # Each slide is conditional — it only renders when the relevant data exists.
 
 SLIDE_TEMPLATE = r"""
@@ -140,92 +140,75 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
 })();
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 3 — Solution Architecture
+// SLIDE 3 — Use Cases
 // ════════════════════════════════════════════════════════════════════════
-(function archSlide() {
-  if (!DATA.architecture || (!DATA.solutionNarrative && (!DATA.architecture.components || DATA.architecture.components.length === 0))) return;
+(function useCasesSlide() {
+  if (!DATA.scenarios || DATA.scenarios.length === 0) return;
   const s = pres.addSlide();
   s.background = { color: WHITE };
-  s.addText("Solution Architecture", {
+  s.addText("Exemplary Use Cases", {
     x: 0.5, y: 0.3, w: 9.0, h: 0.6,
     fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
   });
-  // Narrative
-  const narr = DATA.solutionNarrative || DATA.architecture.narrative || "";
-  if (narr) {
-    s.addText(narr, {
-      x: 0.5, y: 1.05, w: 9.0, h: 0.9,
-      fontSize: 12, fontFace: FONT, color: MUTED, valign: "top"
-    });
-  }
-  // Component table
-  const comps = (DATA.architecture.components || []).slice(0, 10);
-  if (comps.length > 0) {
-    const headerRow = [
-      { text: "Component", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
-      { text: "Azure Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
-      { text: "Description", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
+  const cases = DATA.scenarios.slice(0, 3);
+  cases.forEach(function(sc, i) {
+    const bullets = [
+      { text: safe(sc.title, "Use Case"), options: { fontSize: 16, fontFace: FONT, color: TEXT_C, bold: true, paraSpaceAfter: 4 } },
+      { text: safe(sc.description, ""), options: { fontSize: 12, fontFace: FONT, color: MUTED, paraSpaceAfter: 8 } }
     ];
-    const rows = [headerRow];
-    comps.forEach(function(c, idx) {
-      const bg = idx % 2 === 0 ? WHITE : LIGHT;
-      rows.push([
-        { text: safe(c.name || c.component, ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
-        { text: safe(c.service || c.azureService || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
-        { text: safe(c.description || c.purpose || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: MUTED } }
-      ]);
-    });
-    const tableY = narr ? 2.1 : 1.1;
-    s.addTable(rows, {
-      x: 0.5, y: tableY, w: 9.0,
-      border: { pt: 0.5, color: BORDER },
-      colW: [2.5, 2.5, 4.0],
-      rowH: 0.35,
-      autoPage: false
-    });
-  }
+    if (sc.azure_services && sc.azure_services.length > 0) {
+      bullets.push({ text: "Services: " + sc.azure_services.join(", "), options: { fontSize: 10, fontFace: FONT, color: ACCENT, italic: true } });
+    }
+    const yPos = 1.1 + i * 1.5;
+    s.addText(bullets, { x: 0.5, y: yPos, w: 9.0, h: 1.3, valign: "top" });
+  });
 })();
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 4 — Azure Services & SKUs
+// SLIDE 4 — Business Value
 // ════════════════════════════════════════════════════════════════════════
-(function servicesSlide() {
-  if (!DATA.services || DATA.services.length === 0) return;
+(function bvSlide() {
+  if (!DATA.drivers || DATA.drivers.length === 0) return;
   const s = pres.addSlide();
   s.background = { color: WHITE };
-  s.addText("Azure Services", {
+  s.addText("Business Value", {
     x: 0.5, y: 0.3, w: 9.0, h: 0.6,
     fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
   });
-  const headerRow = [
-    { text: "Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
-    { text: "SKU / Tier", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
-    { text: "Region", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
-    { text: "Monthly Cost", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
-  ];
-  const rows = [headerRow];
-  // Merge cost items if available
-  const costMap = {};
-  if (DATA.costs && DATA.costs.items) {
-    DATA.costs.items.forEach(function(ci) { costMap[ci.service] = ci.monthly; });
+  // Show up to 3 value-driver cards side by side
+  const cards = DATA.drivers.slice(0, 3);
+  const cardW = cards.length === 1 ? 9.0 : (9.0 - 0.3 * (cards.length - 1)) / cards.length;
+  cards.forEach(function(d, i) {
+    const cx = 0.5 + i * (cardW + 0.3);
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+      x: cx, y: 1.1, w: cardW, h: 2.8,
+      fill: { color: LIGHT }, rectRadius: 0.1
+    });
+    // Impact metric big
+    s.addText(safe(d.metric || d.impact, "—"), {
+      x: cx + 0.2, y: 1.3, w: cardW - 0.4, h: 0.8,
+      fontSize: 28, fontFace: FONT, color: ACCENT, bold: true, align: "center", shrinkText: true
+    });
+    // Driver name
+    s.addText(safe(d.name, "Value Driver"), {
+      x: cx + 0.2, y: 2.15, w: cardW - 0.4, h: 0.4,
+      fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true, align: "center"
+    });
+    // Description
+    if (d.description) {
+      s.addText(d.description, {
+        x: cx + 0.2, y: 2.6, w: cardW - 0.4, h: 1.1,
+        fontSize: 10, fontFace: FONT, color: MUTED, align: "center", valign: "top"
+      });
+    }
+  });
+  // If more than 3 drivers, add remaining as bullets below
+  if (DATA.drivers.length > 3) {
+    const extra = DATA.drivers.slice(3).map(function(d, i) {
+      return { text: safe(d.name, "") + (d.impact ? " — " + d.impact : ""), options: { bullet: true, breakLine: i < DATA.drivers.length - 4, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 4 } };
+    });
+    s.addText(extra, { x: 0.5, y: 4.1, w: 9.0, h: 1.2, valign: "top" });
   }
-  DATA.services.slice(0, 12).forEach(function(svc, idx) {
-    const bg = idx % 2 === 0 ? WHITE : LIGHT;
-    const cost = costMap[svc.name] != null ? fmt$(costMap[svc.name]) : "—";
-    rows.push([
-      { text: safe(svc.name), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
-      { text: safe(svc.sku, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
-      { text: safe(svc.region, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
-      { text: cost, options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, align: "right" } }
-    ]);
-  });
-  s.addTable(rows, {
-    x: 0.5, y: 1.05, w: 9.0,
-    border: { pt: 0.5, color: BORDER },
-    colW: [3.0, 2.0, 2.0, 2.0],
-    rowH: 0.35,
-    autoPage: false
-  });
 })();
 
 // ════════════════════════════════════════════════════════════════════════
@@ -283,49 +266,29 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
 })();
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 6 — Business Value
+// SLIDE 6 — Architecture (narrative only)
 // ════════════════════════════════════════════════════════════════════════
-(function bvSlide() {
-  if (!DATA.drivers || DATA.drivers.length === 0) return;
+(function archSlide() {
+  if (!DATA.architecture) return;
   const s = pres.addSlide();
   s.background = { color: WHITE };
-  s.addText("Business Value", {
+  s.addText("Architecture", {
     x: 0.5, y: 0.3, w: 9.0, h: 0.6,
     fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
   });
-  // Show up to 3 value-driver cards side by side
-  const cards = DATA.drivers.slice(0, 3);
-  const cardW = cards.length === 1 ? 9.0 : (9.0 - 0.3 * (cards.length - 1)) / cards.length;
-  cards.forEach(function(d, i) {
-    const cx = 0.5 + i * (cardW + 0.3);
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: cx, y: 1.1, w: cardW, h: 2.8,
-      fill: { color: LIGHT }, rectRadius: 0.1
+  const narr = DATA.solutionNarrative || DATA.architecture.narrative || "";
+  if (narr) {
+    s.addText(narr, {
+      x: 0.5, y: 1.1, w: 9.0, h: 3.0,
+      fontSize: 14, fontFace: FONT, color: TEXT_C, valign: "top"
     });
-    // Impact metric big
-    s.addText(safe(d.metric || d.impact, "—"), {
-      x: cx + 0.2, y: 1.3, w: cardW - 0.4, h: 0.8,
-      fontSize: 28, fontFace: FONT, color: ACCENT, bold: true, align: "center", shrinkText: true
+  }
+  const basedOn = DATA.architecture.basedOn;
+  if (basedOn) {
+    s.addText("Based on: " + basedOn, {
+      x: 0.5, y: 4.3, w: 9.0, h: 0.4,
+      fontSize: 11, fontFace: FONT, color: ACCENT, italic: true
     });
-    // Driver name
-    s.addText(safe(d.name, "Value Driver"), {
-      x: cx + 0.2, y: 2.15, w: cardW - 0.4, h: 0.4,
-      fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true, align: "center"
-    });
-    // Description
-    if (d.description) {
-      s.addText(d.description, {
-        x: cx + 0.2, y: 2.6, w: cardW - 0.4, h: 1.1,
-        fontSize: 10, fontFace: FONT, color: MUTED, align: "center", valign: "top"
-      });
-    }
-  });
-  // If more than 3 drivers, add remaining as bullets below
-  if (DATA.drivers.length > 3) {
-    const extra = DATA.drivers.slice(3).map(function(d, i) {
-      return { text: safe(d.name, "") + (d.impact ? " — " + d.impact : ""), options: { bullet: true, breakLine: i < DATA.drivers.length - 4, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 4 } };
-    });
-    s.addText(extra, { x: 0.5, y: 4.1, w: 9.0, h: 1.2, valign: "top" });
   }
 })();
 
@@ -376,18 +339,18 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
 })();
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 8 — Next Steps
+// SLIDE 8 — Next Steps (dark)
 // ════════════════════════════════════════════════════════════════════════
 (function nextStepsSlide() {
   if (!DATA.nextSteps || DATA.nextSteps.length === 0) return;
   const s = pres.addSlide();
-  s.background = { color: WHITE };
+  s.background = { color: DARK };
   s.addText("Next Steps", {
     x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+    fontSize: 28, fontFace: FONT, color: WHITE, bold: true
   });
   const steps = DATA.nextSteps.slice(0, 6).map(function(step, i) {
-    return { text: step, options: { bullet: true, breakLine: i < Math.min(DATA.nextSteps.length, 6) - 1, fontSize: 14, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 12 } };
+    return { text: step, options: { bullet: true, breakLine: i < Math.min(DATA.nextSteps.length, 6) - 1, fontSize: 14, fontFace: FONT, color: WHITE, paraSpaceAfter: 12 } };
   });
   s.addText(steps, {
     x: 0.5, y: 1.1, w: 9.0, h: 3.8,
@@ -415,6 +378,92 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   s.addText("Powered by OneStopAgent", {
     x: 0.5, y: 3.8, w: 9.0, h: 0.4,
     fontSize: 10, fontFace: FONT, color: MUTED, align: "center"
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 10 — Appendix: Solution Architecture (component table)
+// ════════════════════════════════════════════════════════════════════════
+(function appendixArchSlide() {
+  if (!DATA.architecture || !DATA.architecture.components || DATA.architecture.components.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Solution Architecture", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  // Narrative summary
+  const narr = DATA.solutionNarrative || DATA.architecture.narrative || "";
+  if (narr) {
+    s.addText(narr, {
+      x: 0.5, y: 0.95, w: 9.0, h: 0.7,
+      fontSize: 12, fontFace: FONT, color: MUTED, valign: "top"
+    });
+  }
+  // Component table
+  const comps = DATA.architecture.components.slice(0, 12);
+  const headerRow = [
+    { text: "Component", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Azure Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Description", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
+  ];
+  const rows = [headerRow];
+  comps.forEach(function(c, idx) {
+    const bg = idx % 2 === 0 ? WHITE : LIGHT;
+    rows.push([
+      { text: safe(c.name || c.component, ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
+      { text: safe(c.service || c.azureService || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+      { text: safe(c.description || c.purpose || "", ""), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: MUTED } }
+    ]);
+  });
+  s.addTable(rows, {
+    x: 0.5, y: 1.75, w: 9.0,
+    border: { pt: 0.5, color: BORDER },
+    colW: [2.5, 2.5, 4.0],
+    rowH: 0.3,
+    autoPage: false
+  });
+})();
+
+// ════════════════════════════════════════════════════════════════════════
+// SLIDE 11 — Appendix: Azure Services & SKUs
+// ════════════════════════════════════════════════════════════════════════
+(function servicesSlide() {
+  if (!DATA.services || DATA.services.length === 0) return;
+  const s = pres.addSlide();
+  s.background = { color: WHITE };
+  s.addText("Azure Services", {
+    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
+  });
+  const headerRow = [
+    { text: "Service", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "SKU / Tier", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Region", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } },
+    { text: "Monthly Cost", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 11, fontFace: FONT } }
+  ];
+  const rows = [headerRow];
+  // Merge cost items if available
+  const costMap = {};
+  if (DATA.costs && DATA.costs.items) {
+    DATA.costs.items.forEach(function(ci) { costMap[ci.service] = ci.monthly; });
+  }
+  DATA.services.slice(0, 12).forEach(function(svc, idx) {
+    const bg = idx % 2 === 0 ? WHITE : LIGHT;
+    const cost = costMap[svc.name] != null ? fmt$(costMap[svc.name]) : "—";
+    rows.push([
+      { text: safe(svc.name), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
+      { text: safe(svc.sku, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+      { text: safe(svc.region, "—"), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+      { text: cost, options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, align: "right" } }
+    ]);
+  });
+  s.addTable(rows, {
+    x: 0.5, y: 1.05, w: 9.0,
+    border: { pt: 0.5, color: BORDER },
+    colW: [3.0, 2.0, 2.0, 2.0],
+    rowH: 0.35,
+    autoPage: false
   });
 })();
 
@@ -506,6 +555,9 @@ class PresentationAgent:
                 "qualitativeBenefits": roi.get("qualitative_benefits", []),
             }
 
+        if state.brainstorming.get("scenarios"):
+            data["scenarios"] = state.brainstorming["scenarios"][:3]
+
         return data
 
     # ── LLM generates text content only ──────────────────────────────────
@@ -592,6 +644,10 @@ class PresentationAgent:
         # Services (from pipeline)
         if slide_data.get("services"):
             merged["services"] = slide_data["services"]
+
+        # Scenarios / use cases (from pipeline)
+        if slide_data.get("scenarios"):
+            merged["scenarios"] = slide_data["scenarios"]
 
         # Costs (from pipeline)
         if slide_data.get("costs"):
