@@ -3,7 +3,7 @@ set -e
 
 # Write Vite backend URL for production builds so the SPA calls the real backend.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WEB_DIR="$ROOT_DIR/src/web"
+WEB_DIR="$ROOT_DIR/src/frontend"
 ENV_FILE="$WEB_DIR/.env.production"
 
 # Load azd environment values
@@ -17,5 +17,5 @@ if [ -z "$RESOLVED_API_URL" ]; then
   exit 1
 fi
 
-echo "NEXT_PUBLIC_API_URL=$RESOLVED_API_URL" > "$ENV_FILE"
+echo "VITE_API_URL=$RESOLVED_API_URL" > "$ENV_FILE"
 echo "Wrote API URL to $ENV_FILE"

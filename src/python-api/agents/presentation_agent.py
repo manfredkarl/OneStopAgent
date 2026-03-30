@@ -3,13 +3,13 @@
 Template-based approach: a hardcoded, tested PptxGenJS script template handles
 all layout / design.  The LLM is only asked to produce polished *text content*
 (tagline, bullets, narrative) as structured JSON, which is injected into the
-template.  Falls back to python-pptx if Node.js execution fails.
+template.  If Node.js execution fails, the error is raised to the caller.
 """
 import json
 import logging
 import re
 from agents.state import AgentState
-from services.presentation import execute_pptxgenjs, create_pptx_python
+from services.presentation import execute_pptxgenjs
 
 logger = logging.getLogger(__name__)
 
@@ -433,20 +433,16 @@ class PresentationAgent:
         1. Extract structured data from pipeline state
         2. Ask LLM to polish/generate text content only (JSON)
         3. Merge data + LLM content → inject into JS template
-        4. Execute via Node.js; fall back to python-pptx on failure
+        4. Execute via Node.js
         """
         slide_data = self._build_slide_data(state)
         customer = state.customer_name or "Customer"
 
-        try:
-            from agents.llm import llm
-            content = self._generate_slide_content(slide_data, llm)
-            merged = self._merge_data(slide_data, content)
-            script = SLIDE_TEMPLATE.replace("__DATA_PLACEHOLDER__", json.dumps(merged, default=str))
-            path = execute_pptxgenjs(script, customer)
-        except Exception as exc:
-            logger.warning("PptxGenJS path failed (%s), falling back to python-pptx", exc)
-            path = create_pptx_python(slide_data, customer)
+        from agents.llm import llm
+        content = self._generate_slide_content(slide_data, llm)
+        merged = self._merge_data(slide_data, content)
+        script = SLIDE_TEMPLATE.replace("__DATA_PLACEHOLDER__", json.dumps(merged, default=str))
+        path = execute_pptxgenjs(script, customer)
 
         state.presentation_path = path
         return state

@@ -3,7 +3,6 @@
 Phase 1: Generate assumption questions with defaults for user input.
 Phase 2: Calculate value drivers using user-provided assumptions.
 """
-import asyncio
 import json
 import logging
 from agents.llm import llm
@@ -229,59 +228,5 @@ CATEGORY RULES:
                 "user_assumptions": user_assumptions,
                 "error": "Could not generate value drivers. Please retry or refine the use case description.",
             }
-
-        return state
-
-    async def run_streaming(
-        self, state: AgentState, on_token
-    ) -> AgentState:
-        """Run BV agent with streaming executive summary.
-
-        Phase 1 (assumptions): Returns immediately, no streaming.
-        Phase 2 (drivers): Runs full calculation synchronously, then streams
-        a 2-sentence executive summary. The driver calculation itself requires
-        structured JSON output and cannot be meaningfully streamed.
-        """
-        state = await asyncio.to_thread(self.run, state)
-
-        bv = state.business_value
-
-        # Phase 1: no streaming needed — orchestrator handles the input prompt
-        if bv.get("phase") == "needs_input":
-            return state
-
-        # Phase 2: stream executive summary
-        drivers = bv.get("drivers", [])
-        impact_range = bv.get("annual_impact_range")
-
-        driver_text = "; ".join(
-            f"{d.get('name', '')}: {d.get('metric', '')}" for d in drivers[:3]
-        )
-        impact_text = ""
-        if impact_range:
-            low = impact_range.get("low", 0)
-            high = impact_range.get("high", 0)
-            impact_text = f"${low:,.0f}–${high:,.0f} annual impact"
-
-        async for chunk in llm.astream([
-            {
-                "role": "system",
-                "content": (
-                    "You are a value engineer. "
-                    "Summarize the business value analysis in 2 sentences. "
-                    "Be specific with numbers. Plain text only."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Value drivers: {driver_text}\n"
-                    + (f"Annual impact: {impact_text}\n" if impact_text else "")
-                    + "\nSummarize in 2 sentences."
-                ),
-            },
-        ]):
-            if chunk.content:
-                on_token(chunk.content)
 
         return state

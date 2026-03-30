@@ -5,7 +5,6 @@ then generates a layered architecture framed around the user's specific
 scenario — not a generic bag of Azure services.
 """
 
-import asyncio
 import json
 import logging
 import re
@@ -37,45 +36,6 @@ class ArchitectAgent:
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
             state.architecture = self._build_fallback(state)
-
-        return state
-
-    async def run_streaming(
-        self, state: AgentState, on_token
-    ) -> AgentState:
-        """Stream architecture narrative tokens.
-
-        NOTE: Currently not called by MAF workflow executors (they use sync run()).
-        Retained for future streaming integration or direct API use.
-        """
-        loop = asyncio.get_event_loop()
-        state = await loop.run_in_executor(None, self.run, state)
-
-        narrative = state.architecture.get("narrative", "")
-        based_on = state.architecture.get("basedOn", "")
-        layer_count = len(state.architecture.get("layers", []))
-
-        async for chunk in llm.astream([
-            {
-                "role": "system",
-                "content": (
-                    "You are an Azure solutions architect. "
-                    "Summarize the following architecture in 2-3 sentences. "
-                    "Be concise and specific to the use case. Plain text only."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Layers: {layer_count}\n"
-                    f"Narrative: {narrative}\n"
-                    f"Based on: {based_on}\n\n"
-                    "Summarize in 2-3 sentences."
-                ),
-            },
-        ]):
-            if chunk.content:
-                on_token(chunk.content)
 
         return state
 
