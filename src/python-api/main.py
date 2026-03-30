@@ -45,6 +45,70 @@ async def health():
     return {"status": "healthy"}
 
 
+@app.get("/api/workflow")
+async def workflow_viz():
+    """Interactive MAF workflow visualization."""
+    from fastapi.responses import HTMLResponse
+    from workflow import create_pipeline_workflow
+
+    wf = create_pipeline_workflow()
+    d = wf.to_dict()
+    names = {
+        "architect_executor": "🏗️ Architect",
+        "cost_executor": "💰 Cost & Services",
+        "bv_executor": "📊 Business Value",
+        "roi_executor": "📈 ROI Calculator",
+        "presentation_executor": "📑 Presentation",
+    }
+    mermaid_lines = ["graph LR"]
+    for eg in d["edge_groups"]:
+        if eg["type"] == "SingleEdgeGroup":
+            for e in eg["edges"]:
+                src, tgt = e["source_id"], e["target_id"]
+                mermaid_lines.append(f'    {src}["{names.get(src, src)}"] --> {tgt}["{names.get(tgt, tgt)}"]')
+    mermaid_code = "\n".join(mermaid_lines)
+
+    html = f"""<!DOCTYPE html>
+<html><head><title>OneStopAgent — MAF Workflow</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body {{ font-family: Segoe UI, sans-serif; background: #0f0f0f; color: #e0e0e0; margin: 0; padding: 40px; }}
+  h1 {{ color: #60a5fa; font-size: 1.5rem; }}
+  .info {{ background: #1a1a2e; border-radius: 12px; padding: 24px; margin: 20px 0; }}
+  .info h2 {{ color: #818cf8; font-size: 1.1rem; margin-top: 0; }}
+  .info ul {{ padding-left: 20px; }}
+  .info li {{ margin: 6px 0; }}
+  .tag {{ background: #334155; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem; }}
+  .mermaid {{ background: #1e293b; border-radius: 12px; padding: 30px; text-align: center; }}
+</style></head><body>
+<h1>Microsoft Agent Framework — Workflow Pipeline</h1>
+<div class="mermaid">{mermaid_code}</div>
+<div class="info">
+  <h2>Pipeline Details</h2>
+  <ul>
+    <li><b>Framework:</b> <span class="tag">agent-framework 1.0.0rc5</span></li>
+    <li><b>Orchestration:</b> MAF Workflow with HITL approval gates</li>
+    <li><b>Executors:</b> {len(wf.get_executors_list())} sequential steps</li>
+    <li><b>Start:</b> {wf.get_start_executor().id}</li>
+    <li><b>HITL:</b> Approval gates after each step + two-phase assumption input (Cost, BV)</li>
+  </ul>
+</div>
+<div class="info">
+  <h2>Agents</h2>
+  <ul>
+    <li>🤖 <b>Project Manager</b> — Brainstorms scenarios, classifies intent, orchestrates flow</li>
+    <li>🏗️ <b>System Architect</b> — Layered Azure architecture with Mermaid diagrams (MCP + local patterns)</li>
+    <li>💰 <b>Cost & Services</b> — SKU mapping + Azure Retail Prices API (two-phase)</li>
+    <li>📊 <b>Business Value</b> — Value drivers with industry benchmarks (two-phase)</li>
+    <li>📈 <b>ROI Calculator</b> — Pure-math ROI, payback, cost comparison, 3-year projection</li>
+    <li>📑 <b>Presentation</b> — Executive PowerPoint via PptxGenJS</li>
+  </ul>
+</div>
+<script>mermaid.initialize({{theme:'dark',startOnLoad:true}});</script>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
 @app.get("/api/info")
 async def info():
     return {"version": "1.0.0", "framework": "python-fastapi-agent-framework"}
@@ -241,7 +305,7 @@ _DEVUI_PORT = 8081
 
 
 def _start_devui_background(port: int = _DEVUI_PORT) -> None:
-    """Launch MAF DevUI on a background thread with the pipeline workflow registered."""
+    """Launch MAF DevUI on a background thread with all agents + workflow registered."""
     import threading
 
     def _run() -> None:
@@ -251,16 +315,52 @@ def _start_devui_background(port: int = _DEVUI_PORT) -> None:
             from workflow import create_pipeline_workflow
 
             wf = create_pipeline_workflow()
-            entity = EntityInfo(
-                id="onestop-pipeline",
-                type="workflow",
-                name="OneStopAgent Pipeline",
-                description="Architect → Cost → BV → ROI → Presentation with HITL approval gates",
-                framework="agent-framework",
-                executors=[e.id for e in wf.get_executors_list()],
-                start_executor_id=wf.get_start_executor().id,
-            )
-            serve(entities=[entity], port=port, host="127.0.0.1", auto_open=True)
+            wf_dump = wf.to_dict()
+
+            entities = [
+                EntityInfo(
+                    id="onestop-pipeline",
+                    type="workflow",
+                    name="OneStopAgent Pipeline",
+                    description="Full agent pipeline: Architect → Cost → BV → ROI → Presentation with HITL approval gates",
+                    framework="agent-framework",
+                    executors=[e.id for e in wf.get_executors_list()],
+                    start_executor_id=wf.get_start_executor().id,
+                    workflow_dump=wf_dump,
+                ),
+                EntityInfo(
+                    id="pm-agent", type="agent", name="Project Manager",
+                    description="Brainstorms Azure scenarios, classifies intent, builds execution plans, and formats agent output",
+                    framework="agent-framework",
+                ),
+                EntityInfo(
+                    id="architect-agent", type="agent", name="System Architect",
+                    description="Designs layered Azure architectures with Mermaid diagrams using MCP/local patterns",
+                    framework="agent-framework",
+                ),
+                EntityInfo(
+                    id="cost-agent", type="agent", name="Cost & Services",
+                    description="Maps architecture to Azure SKUs and estimates costs via Azure Retail Prices API (two-phase: assumptions → pricing)",
+                    framework="agent-framework",
+                ),
+                EntityInfo(
+                    id="bv-agent", type="agent", name="Business Value",
+                    description="Generates value drivers with industry benchmarks and annual impact ranges (two-phase: assumptions → drivers)",
+                    framework="agent-framework",
+                ),
+                EntityInfo(
+                    id="roi-agent", type="agent", name="ROI Calculator",
+                    description="Pure-math ROI computation: cost comparison, value waterfall, 3-year projection, payback period",
+                    framework="agent-framework",
+                ),
+                EntityInfo(
+                    id="presentation-agent", type="agent", name="Presentation",
+                    description="Generates executive PowerPoint deck via PptxGenJS with LLM-written slide content",
+                    framework="agent-framework",
+                ),
+            ]
+
+            serve(entities=entities, port=port, host="127.0.0.1", auto_open=True)
         except Exception as exc:
             import logging
 
