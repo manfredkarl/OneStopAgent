@@ -1,5 +1,6 @@
 """Shared state object passed between agents."""
 from __future__ import annotations
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +46,9 @@ class AgentState:
 
     # ── Helpers ───────────────────────────────────────────────────────
 
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+
     def to_context_string(self) -> str:
         """Build a context string for LLM prompts with everything known so far."""
         parts = [f"User request: {self.user_input}"]
@@ -74,28 +78,33 @@ class AgentState:
         return "\n".join(parts)
 
     def mark_step_running(self, step: str) -> None:
-        self.current_step = step
-        self.awaiting_approval = False
+        with self._lock:
+            self.current_step = step
+            self.awaiting_approval = False
 
     def mark_step_completed(self, step: str) -> None:
-        if step not in self.completed_steps:
-            self.completed_steps.append(step)
-        self.current_step = ""
+        with self._lock:
+            if step not in self.completed_steps:
+                self.completed_steps.append(step)
+            self.current_step = ""
 
     def mark_step_skipped(self, step: str) -> None:
-        if step not in self.skipped_steps:
-            self.skipped_steps.append(step)
-        self.current_step = ""
+        with self._lock:
+            if step not in self.skipped_steps:
+                self.skipped_steps.append(step)
+            self.current_step = ""
 
     def mark_step_failed(self, step: str) -> None:
-        if step not in self.failed_steps:
-            self.failed_steps.append(step)
-        self.current_step = ""
+        with self._lock:
+            if step not in self.failed_steps:
+                self.failed_steps.append(step)
+            self.current_step = ""
 
     def next_pending_step(self) -> str | None:
         """Return the next step that hasn't been completed, skipped, or failed."""
-        done = set(self.completed_steps + self.skipped_steps + self.failed_steps)
-        for step in self.plan_steps:
-            if step not in done:
-                return step
-        return None
+        with self._lock:
+            done = set(self.completed_steps + self.skipped_steps + self.failed_steps)
+            for step in self.plan_steps:
+                if step not in done:
+                    return step
+            return None

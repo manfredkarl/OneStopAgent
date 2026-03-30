@@ -566,7 +566,14 @@ class PresentationAgent:
                 except json.JSONDecodeError:
                     pass
             logger.warning("LLM returned invalid JSON for slide content — using defaults")
-            return {}
+            return {
+                "tagline": "Azure Solution Proposal",
+                "problemStatement": "Business challenge requiring cloud-native solution",
+                "executiveSummary": ["Scalable Azure architecture", "Cost-optimized design", "Enterprise-grade security"],
+                "solutionNarrative": "Leveraging Azure services for scalability and reliability.",
+                "drivers": [],
+                "nextSteps": ["Schedule technical deep-dive", "Define proof of concept scope", "Align on timeline and resources"],
+            }
 
     # ── Merge structured data + LLM text ─────────────────────────────────
 

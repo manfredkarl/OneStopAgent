@@ -180,7 +180,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         full_text = f"{state.user_input} {state.clarifications}"
 
         # Build usage context from user-provided values
-        usage_dict = {a["id"]: a["value"] for a in user_assumptions}
+        usage_dict = {a.get("id", ""): a.get("value", 0) for a in user_assumptions if a.get("id")}
         users = usage_dict.get("concurrent_users", _extract_users(full_text))
         regions = _extract_regions(full_text)
         primary_region = regions[0]
@@ -211,7 +211,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
 
         # Add user-provided usage context to assumptions
         for ua in user_assumptions:
-            assumptions.append(f"{ua['label']}: {ua['value']} {ua.get('unit', '')}")
+            assumptions.append(f"{ua.get('label', 'Unknown')}: {ua.get('value', 0)} {ua.get('unit', '')}")
 
         total_monthly = round(sum(i["monthlyCost"] for i in items), 2)
         total_annual = round(total_monthly * 12, 2)

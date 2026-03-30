@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Sequence
@@ -120,6 +121,8 @@ class LLMClient:
             credential=_build_credential(),
         )
         self._main_loop: asyncio.AbstractEventLoop | None = None
+        self._loop_lock = threading.Lock()
+        self._sync_client: AzureOpenAIChatClient | None = None
 
     def _new_client(self) -> AzureOpenAIChatClient:
         """Create a fresh client (safe for use on any event loop)."""
@@ -129,6 +132,12 @@ class LLMClient:
             api_version=_api_version,
             credential=_build_credential(),
         )
+
+    def _get_sync_client(self) -> AzureOpenAIChatClient:
+        """Return a cached sync client, creating one lazily if needed."""
+        if self._sync_client is None:
+            self._sync_client = self._new_client()
+        return self._sync_client
 
     # -- synchronous (called from agent run() methods) ----------------------
 
@@ -141,15 +150,17 @@ class LLMClient:
         """
         # Fast path: if we have a reference to the main loop and it's running,
         # schedule there to reuse connections.
-        if self._main_loop and self._main_loop.is_running():
+        with self._loop_lock:
+            loop = self._main_loop
+        if loop and loop.is_running():
             future = asyncio.run_coroutine_threadsafe(
-                self._ainvoke(messages), self._main_loop,
+                self._ainvoke(messages), loop,
             )
             return future.result(timeout=120)
 
-        # Slow path: create a throwaway client on a fresh event loop.
+        # Slow path: reuse a cached sync client on a fresh event loop.
         # This avoids cross-loop issues with aiohttp/httpx connection pools.
-        client = self._new_client()
+        client = self._get_sync_client()
 
         async def _call() -> LLMResponse:
             maf_msgs = _to_maf_messages(messages)
@@ -189,11 +200,12 @@ class LLMClient:
 
     def _capture_loop(self) -> None:
         """Capture the running event loop for cross-thread invoke() calls."""
-        if self._main_loop is None:
-            try:
-                self._main_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                pass
+        with self._loop_lock:
+            if self._main_loop is None:
+                try:
+                    self._main_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    pass
 
 
 # ---------------------------------------------------------------------------

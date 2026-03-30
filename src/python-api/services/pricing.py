@@ -8,8 +8,12 @@ Implements the 5-tier pricing source behavior from FRD-04 §2.4:
   5. live (retry)  — re-query with eastus when region has no results
 """
 
+import logging
+
 import httpx
 from opentelemetry import trace
+
+logger = logging.getLogger(__name__)
 
 _tracer = trace.get_tracer(__name__)
 
@@ -66,38 +70,42 @@ MOCK_PRICES: dict[str, dict[str, float]] = {
 }
 
 
-def _get_mock_price(service_name: str, sku: str) -> float:
+def _get_mock_price(service_name: str, sku: str) -> dict:
     """Look up mock price from reference data.
 
     Priority (per FRD-04 §2.8):
       1. Exact service + SKU match
       2. Fuzzy SKU match within the service
-      3. Cheapest SKU for that service
+      3. Median SKU price for that service
       4. $0.00 if service not in MOCK_PRICES
     """
     service_prices = MOCK_PRICES.get(service_name, {})
 
     # 1. Exact key
     if sku in service_prices:
-        return service_prices[sku]
+        return {"price": service_prices[sku], "source": "approximate", "note": "Reference pricing"}
 
-    # 2. Fuzzy match
+    # 2. Fuzzy match — find SKU containing same tier keywords
     sku_lower = sku.lower()
-    for mock_sku, price in service_prices.items():
-        if sku_lower in mock_sku.lower() or mock_sku.lower() in sku_lower:
-            return price
+    for tier_key, price in service_prices.items():
+        if tier_key.lower() in sku_lower or sku_lower in tier_key.lower():
+            return {"price": price, "source": "approximate", "note": f"Matched to {tier_key} (reference)"}
 
-    # 3. Cheapest available
+    # 3. Median price (not minimum) to avoid underestimation
     if service_prices:
-        return min(service_prices.values())
+        prices = sorted(service_prices.values())
+        median_price = prices[len(prices) // 2]
+        return {"price": median_price, "source": "approximate", "note": "Median tier pricing (reference)"}
 
     # 4. Try partial service-name match across all keys
     sn_lower = service_name.lower()
-    for svc, prices in MOCK_PRICES.items():
+    for svc, svc_prices in MOCK_PRICES.items():
         if sn_lower in svc.lower() or svc.lower() in sn_lower:
-            return min(prices.values())
+            prices = sorted(svc_prices.values())
+            median_price = prices[len(prices) // 2]
+            return {"price": median_price, "source": "approximate", "note": "Median tier pricing (reference)"}
 
-    return 0.0
+    return {"price": 0.0, "source": "approximate", "note": f"Pricing unavailable for {service_name}"}
 
 
 def query_azure_pricing_sync(service_name: str, sku: str, region: str = "eastus") -> dict:
@@ -158,21 +166,17 @@ def query_azure_pricing_sync(service_name: str, sku: str, region: str = "eastus"
                         span.set_attribute("pricing.source", result["source"])
                         return result
 
-        except Exception:
+        except Exception as e:
+            logger.warning("Azure Pricing API query failed for %s/%s: %s", service_name, sku, e)
             span.set_attribute("pricing.error", "api_exception")
-            pass  # Fall through to mock (Scenario 4)
+            # Fall through to mock pricing
 
         # Scenario 3/4: API failed or no results → use mock
-        mock_price = _get_mock_price(service_name, sku)
-        note: str | None
-        if mock_price > 0:
-            note = "Using reference pricing — verify with Azure Pricing Calculator"
-        else:
-            note = f"Pricing unavailable for {service_name}"
+        mock_result = _get_mock_price(service_name, sku)
         span.set_attribute("pricing.source", "approximate")
         return {
-            "price": mock_price,
+            "price": mock_result["price"],
             "source": "approximate",
-            "note": note,
+            "note": mock_result["note"],
             "unit": "1 Hour" if service_name in HOURLY_SERVICES else "1/Month",
         }

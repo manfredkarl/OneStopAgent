@@ -112,6 +112,12 @@ class ArchitectExecutor(PipelineExecutor):
     ) -> None:
         state = msg.state
         ctx.set_state("pipeline", msg)
+
+        if "architect" not in msg.active_agents:
+            state.mark_step_skipped("architect")
+            await ctx.send_message(msg)
+            return
+
         state.mark_step_running("architect")
 
         await ctx.yield_output({
@@ -158,6 +164,11 @@ class ArchitectExecutor(PipelineExecutor):
         self, request: ApprovalRequest, response: str, ctx: WorkflowContext
     ) -> None:
         msg: PipelineMessage = ctx.get_state("pipeline")
+        resp_lower = response.strip().lower()
+
+        if resp_lower in ("skip", "skip this", "next"):
+            msg.state.mark_step_skipped(self.step_name)
+        # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
         await ctx.send_message(msg)
 
 
@@ -265,11 +276,25 @@ class CostExecutor(PipelineExecutor):
             state.mark_step_completed("cost")
 
             output_text = self.pm.format_agent_output("cost", state)
+            summary = self.pm.approval_summary("cost", state)
             await ctx.yield_output({
                 "type": "agent_result", "step": "cost",
                 "content": output_text,
             })
 
+            if _should_pause(msg.execution_mode, "cost"):
+                await ctx.request_info(
+                    request_data=ApprovalRequest(step="cost", summary=summary),
+                    response_type=str,
+                )
+            else:
+                await ctx.send_message(msg)
+            return
+
+        # ApprovalRequest path — check for skip intent
+        resp_lower = response.strip().lower()
+        if resp_lower in ("skip", "skip this", "next"):
+            state.mark_step_skipped("cost")
         await ctx.send_message(msg)
 
 
@@ -377,11 +402,27 @@ class BusinessValueExecutor(PipelineExecutor):
             state.mark_step_completed("business_value")
 
             output_text = self.pm.format_agent_output("business_value", state)
+            summary = self.pm.approval_summary("business_value", state)
             await ctx.yield_output({
                 "type": "agent_result", "step": "business_value",
                 "content": output_text,
             })
 
+            if _should_pause(msg.execution_mode, "business_value"):
+                await ctx.request_info(
+                    request_data=ApprovalRequest(
+                        step="business_value", summary=summary,
+                    ),
+                    response_type=str,
+                )
+            else:
+                await ctx.send_message(msg)
+            return
+
+        # ApprovalRequest path — check for skip intent
+        resp_lower = response.strip().lower()
+        if resp_lower in ("skip", "skip this", "next"):
+            state.mark_step_skipped("business_value")
         await ctx.send_message(msg)
 
 
@@ -448,6 +489,11 @@ class ROIExecutor(PipelineExecutor):
         self, request: ApprovalRequest, response: str, ctx: WorkflowContext
     ) -> None:
         msg: PipelineMessage = ctx.get_state("pipeline")
+        resp_lower = response.strip().lower()
+
+        if resp_lower in ("skip", "skip this", "next"):
+            msg.state.mark_step_skipped(self.step_name)
+        # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
         await ctx.send_message(msg)
 
 
@@ -524,6 +570,10 @@ class PresentationExecutor(PipelineExecutor):
         self, request: ApprovalRequest, response: str,
         ctx: WorkflowContext,
     ) -> None:
+        resp_lower = response.strip().lower()
+        if resp_lower in ("skip", "skip this", "next"):
+            msg: PipelineMessage = ctx.get_state("pipeline")
+            msg.state.mark_step_skipped("presentation")
         await ctx.yield_output({
             "type": "pipeline_done",
             "content": "Pipeline complete.",

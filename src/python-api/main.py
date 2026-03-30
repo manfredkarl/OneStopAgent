@@ -165,13 +165,23 @@ async def send_message(
     accept = request.headers.get("accept", "")
     if "text/event-stream" in accept:
         async def stream() -> AsyncGenerator[dict, None]:
-            async for msg in orchestrator.handle_message(
-                project_id, req.message, project.active_agents, project.description
-            ):
-                # Don't persist individual streaming tokens — only final messages
-                if msg.metadata is None or msg.metadata.get("type") != "agent_token":
-                    store.add_message(project_id, msg)
-                yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
+            try:
+                async for msg in orchestrator.handle_message(
+                    project_id, req.message, project.active_agents, project.description
+                ):
+                    # Don't persist individual streaming tokens — only final messages
+                    if msg.metadata is None or msg.metadata.get("type") != "agent_token":
+                        store.add_message(project_id, msg)
+                    yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).exception("SSE stream error")
+                error_msg = ChatMessage(
+                    project_id=project_id, role="agent", agent_id="pm",
+                    content=f"An error occurred: {str(e)}",
+                    metadata={"type": "error"},
+                )
+                yield {"event": "message", "data": json.dumps(error_msg.model_dump(), default=str)}
             yield {"event": "done", "data": "[DONE]"}
         return EventSourceResponse(stream())
 
@@ -181,7 +191,8 @@ async def send_message(
         async for msg in orchestrator.handle_message(
             project_id, req.message, project.active_agents, project.description
         ):
-            store.add_message(project_id, msg)
+            if not (msg.metadata and msg.metadata.get("type") == "agent_token"):
+                store.add_message(project_id, msg)
             messages.append(msg.model_dump())
     except Exception as e:
         import traceback

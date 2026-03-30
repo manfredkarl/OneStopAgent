@@ -312,15 +312,15 @@ RULES:
         for step in state.plan_steps:
             info = AGENT_INFO.get(step, {"name": step, "emoji": "\U0001f527"})
             if step in state.completed_steps:
-                lines.append(f"- [x] {info['emoji']} **{info['name']}**")
+                lines.append(f"- [x] {info.get('emoji', '🔧')} **{info.get('name', step)}**")
             elif step in state.skipped_steps:
-                lines.append(f"- [-] {info['emoji']} ~~{info['name']}~~ *(skipped)*")
+                lines.append(f"- [-] {info.get('emoji', '🔧')} ~~{info.get('name', step)}~~ *(skipped)*")
             elif step in state.failed_steps:
-                lines.append(f"- [!] {info['emoji']} **{info['name']}** *(failed)*")
+                lines.append(f"- [!] {info.get('emoji', '🔧')} **{info.get('name', step)}** *(failed)*")
             elif step == state.current_step:
-                lines.append(f"- [ ] {info['emoji']} **{info['name']}** ⏳")
+                lines.append(f"- [ ] {info.get('emoji', '🔧')} **{info.get('name', step)}** ⏳")
             else:
-                lines.append(f"- [ ] {info['emoji']} {info['name']}")
+                lines.append(f"- [ ] {info.get('emoji', '🔧')} {info.get('name', step)}")
         return "\n".join(lines)
 
     def approval_summary(self, step: str, state: AgentState) -> str:
@@ -354,7 +354,7 @@ RULES:
                 impact = bv.get("annual_impact_range")
                 summary = f"Identified {len(drivers)} benchmark-backed value drivers."
                 if impact:
-                    summary += f" Estimated annual impact: **${impact['low']:,.0f}–${impact['high']:,.0f}**."
+                    summary += f" Estimated annual impact: **${impact.get('low', 0):,.0f}–${impact.get('high', 0):,.0f}**."
                 insight = ""
 
         elif step == "roi":
@@ -364,7 +364,8 @@ RULES:
             needs_info = state.roi.get("needs_info")
             if roi_pct is not None:
                 range_text = roi_range or f"{roi_pct:.0f}%"
-                summary = f"ROI calculated: **{range_text}** with {payback:.1f} month payback."
+                payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
+                summary = f"ROI calculated: **{range_text}** with {payback_str} payback."
                 if needs_info:
                     summary += "\n\nSome drivers couldn't be monetized yet. To refine the ROI, I'd need:"
                     for q in needs_info:
@@ -383,7 +384,7 @@ RULES:
             insight = ""
 
         parts = [
-            f"{info['emoji']} **{info['name']}** completed.",
+            f"{info.get('emoji', '🔧')} **{info.get('name', step)}** completed.",
             "",
             summary,
         ]
@@ -553,9 +554,9 @@ RULES:
                     unit = a.get("unit", "")
                     unit_prefix = "$" if unit == "$" else ""
                     unit_suffix = f" {unit}" if unit not in ("$", "") else ""
-                    parts.append(f"- **{a['label']}**: {unit_prefix}{a['default']}{unit_suffix} *(default)*")
+                    parts.append(f"- **{a.get('label', 'Unknown')}**: {unit_prefix}{a.get('default', '')}{unit_suffix} *(default)*")
                     if a.get("hint"):
-                        parts.append(f"  *{a['hint']}*")
+                        parts.append(f"  *{a.get('hint')}*")
                 parts.append("\n*Adjust the values and click Calculate, or say **proceed** to use defaults.*")
                 return "\n".join(parts)
 
@@ -578,7 +579,7 @@ RULES:
 
             if impact:
                 parts.append(f"### Estimated Annual Impact\n\n"
-                             f"**${impact['low']:,.0f} – ${impact['high']:,.0f}** ({confidence} estimate)\n")
+                             f"**${impact.get('low', 0):,.0f} – ${impact.get('high', 0):,.0f}** ({confidence} estimate)\n")
             else:
                 parts.append(f"*Dollar range not computed — need more inputs (see assumptions).*\n")
 
@@ -594,23 +595,26 @@ RULES:
             needs_info = roi.get("needs_info")
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
-                roi_range = roi.get("roi_range", f"{roi['roi_percent']:.0f}%")
-                parts.append(f"**ROI: {roi_range}** (midpoint {roi['roi_percent']:.0f}%) | Payback: **{roi.get('payback_months', 'N/A'):.1f} months**\n")
-                parts.append(f"- Annual Azure cost: ${roi['annual_cost']:,.0f}")
+                roi_pct = roi.get("roi_percent", 0) or 0
+                roi_range = roi.get("roi_range", f"{roi_pct:.0f}%")
+                payback = roi.get('payback_months')
+                payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
+                parts.append(f"**ROI: {roi_range}** (midpoint {roi_pct:.0f}%) | Payback: **{payback_str}**\n")
+                parts.append(f"- Annual Azure cost: ${roi.get('annual_cost', 0) or 0:,.0f}")
                 val_low = roi.get("annual_value_low")
                 val_high = roi.get("annual_value_high")
                 if val_low and val_high:
                     parts.append(f"- Annual value range: ${val_low:,.0f} – ${val_high:,.0f}\n")
                 else:
-                    parts.append(f"- Annual value generated: ${roi['annual_value']:,.0f}\n")
+                    parts.append(f"- Annual value generated: ${roi.get('annual_value', 0) or 0:,.0f}\n")
                 if roi.get("monetized_drivers"):
                     parts.append("### Value Drivers Contributing\n")
-                    for d in roi["monetized_drivers"]:
+                    for d in roi.get("monetized_drivers", []):
                         metric = d.get("metric", "")
-                        parts.append(f"- **{d['name']}**: {metric}" if metric else f"- **{d['name']}**")
+                        parts.append(f"- **{d.get('name', 'Unknown')}**: {metric}" if metric else f"- **{d.get('name', 'Unknown')}**")
                 if roi.get("assumptions"):
                     parts.append("\n### Assumptions\n")
-                    for a in roi["assumptions"]:
+                    for a in roi.get("assumptions", []):
                         parts.append(f"- {a}")
             elif needs_info:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
@@ -620,7 +624,7 @@ RULES:
                 parts.append("\nShare what you can and say **refine** to re-run.")
                 if roi.get("qualitative_benefits"):
                     parts.append("\n### Qualitative Benefits (in the meantime)\n")
-                    for b in roi["qualitative_benefits"]:
+                    for b in roi.get("qualitative_benefits", []):
                         parts.append(f"- {b}")
             else:
                 parts = ["## \U0001f4c8 ROI Analysis\n", "ROI could not be calculated quantitatively.\n"]

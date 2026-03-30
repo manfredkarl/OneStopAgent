@@ -40,6 +40,12 @@ class MAFOrchestrator:
         self.phases: dict[str, str] = {}
         self.workflows: dict[str, object] = {}  # MAF Workflow per project
         self.pending_requests: dict[str, dict] = {}  # project_id → {request_id: ...}
+        self._locks: dict[str, asyncio.Lock] = {}  # per-project concurrency guard (for future use)
+
+    def _get_lock(self, project_id: str) -> asyncio.Lock:
+        if project_id not in self._locks:
+            self._locks[project_id] = asyncio.Lock()
+        return self._locks[project_id]
 
     def get_state(self, project_id: str) -> AgentState:
         if project_id not in self.states:
@@ -104,7 +110,8 @@ class MAFOrchestrator:
                 except json.JSONDecodeError:
                     pass
 
-            plan = pm.build_plan(active_agents)
+            normalized_agents = [a.replace("-", "_") for a in active_agents]
+            plan = pm.build_plan(normalized_agents)
             state.plan_steps = plan
 
             if state.azure_fit and state.azure_fit != "strong":
@@ -184,6 +191,29 @@ class MAFOrchestrator:
                 state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
                 state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                 state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+
+                # H4: Clear agent-specific phase markers to avoid stale "needs_input"
+                for agent_name in agents_to_rerun:
+                    if agent_name == "cost" and "phase" in state.costs:
+                        del state.costs["phase"]
+                    if agent_name == "business_value" and "phase" in state.business_value:
+                        del state.business_value["phase"]
+
+                # H5: Reset agent output dicts so old results don't mix with new
+                AGENT_STATE_FIELDS = {
+                    "architect": "architecture",
+                    "cost": "costs",
+                    "business_value": "business_value",
+                    "roi": "roi",
+                    "presentation": "presentation_path",
+                }
+                for agent_name in agents_to_rerun:
+                    field = AGENT_STATE_FIELDS.get(agent_name)
+                    if field:
+                        if field == "presentation_path":
+                            state.presentation_path = ""
+                        else:
+                            setattr(state, field, {})
 
                 names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
                 yield self._msg(project_id, f"Re-running {len(agents_to_rerun)} agents ({', '.join(names)}) with your feedback...")

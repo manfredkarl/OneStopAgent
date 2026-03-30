@@ -201,7 +201,11 @@ class ArchitectAgent:
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
-        result = json.loads(text)
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.error("LLM returned invalid architecture JSON: %s", text[:200])
+            raise ValueError(f"Invalid architecture JSON from LLM") from e
 
         # Validate mermaid
         mermaid = result.get("mermaidCode", "")
