@@ -13,7 +13,7 @@ class Project(BaseModel):
         default_factory=lambda: [
             "architect",
             "cost",
-            "business-value",
+            "business_value",
             "roi",
             "presentation",
         ]

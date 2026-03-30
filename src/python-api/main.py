@@ -119,7 +119,7 @@ async def create_project(req: CreateProjectRequest, x_user_id: str = Header()):
     project = store.create_project(x_user_id, req.description, req.customer_name)
     # Override default active_agents if provided by frontend
     if req.active_agents is not None:
-        project.active_agents = req.active_agents
+        project.active_agents = [a.replace("-", "_") for a in req.active_agents]
     return {"projectId": project.id}
 
 
@@ -225,13 +225,15 @@ async def get_agents(project_id: str, x_user_id: str = Header()):
     project = store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Normalize for comparison (frontend sends hyphens, backend uses underscores)
+    normalized = {a.replace("-", "_") for a in project.active_agents}
     all_agents = [
         {"agentId": "pm", "displayName": "Project Manager", "status": "idle", "active": True},
         {"agentId": "architect", "displayName": "System Architect", "status": "idle", "active": True},
-        {"agentId": "cost", "displayName": "Cost & Services", "status": "idle", "active": "cost" in project.active_agents},
-        {"agentId": "business-value", "displayName": "Business Value", "status": "idle", "active": "business-value" in project.active_agents},
-        {"agentId": "roi", "displayName": "ROI Calculator", "status": "idle", "active": "roi" in project.active_agents},
-        {"agentId": "presentation", "displayName": "Presentation", "status": "idle", "active": "presentation" in project.active_agents},
+        {"agentId": "cost", "displayName": "Cost & Services", "status": "idle", "active": "cost" in normalized},
+        {"agentId": "business-value", "displayName": "Business Value", "status": "idle", "active": "business_value" in normalized},
+        {"agentId": "roi", "displayName": "ROI Calculator", "status": "idle", "active": "roi" in normalized},
+        {"agentId": "presentation", "displayName": "Presentation", "status": "idle", "active": "presentation" in normalized},
     ]
     return {"agents": all_agents}
 
@@ -249,6 +251,9 @@ async def toggle_agent(
 
     body = await request.json()
     active = body.get("active", True)
+
+    # Normalize: frontend sends hyphens, backend stores underscores
+    agent_id = agent_id.replace("-", "_")
 
     if agent_id in ("pm", "architect") and not active:
         raise HTTPException(status_code=400, detail=f"Cannot deactivate required agent: {agent_id}")
