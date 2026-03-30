@@ -155,13 +155,29 @@ export default function ROIDashboard({ data }: Props) {
         {costComparisonAvailable && (
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
             <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-              Monthly Savings
+              Cost Savings
             </p>
-            <p className="text-2xl font-bold text-green-500">
-              ${fmt(monthlySavings)}
+            <p className={`text-2xl font-bold ${monthlySavings >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+              ${fmt(Math.abs(monthlySavings))}
+              <span className="text-sm font-normal">/mo</span>
             </p>
-            <p className="text-xs text-green-400">
-              {savingsPercentage}% cost reduction
+            <p className={`text-xs ${monthlySavings >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {monthlySavings >= 0 ? '' : '-'}{Math.abs(savingsPercentage)}% {monthlySavings >= 0 ? 'reduction' : 'increase'}
+            </p>
+          </div>
+        )}
+
+        {projection?.annualRevenueUplift != null && projection.annualRevenueUplift > 0 && (
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
+            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
+              Revenue Uplift
+            </p>
+            <p className="text-2xl font-bold text-purple-400">
+              ${fmt(projection.annualRevenueUplift)}
+              <span className="text-sm font-normal">/yr</span>
+            </p>
+            <p className="text-xs text-purple-300">
+              from faster delivery
             </p>
           </div>
         )}
@@ -182,25 +198,15 @@ export default function ROIDashboard({ data }: Props) {
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-            Azure Platform
+            Total Annual Value
           </p>
-          <p className="text-2xl font-bold text-[var(--text-primary)]">
-            ${fmt(azureMonthlyCost)}
-            <span className="text-sm font-normal">/mo</span>
+          <p className="text-2xl font-bold text-green-400">
+            ${fmt(annualImpact)}
+          </p>
+          <p className="text-xs text-[var(--text-muted)]">
+            savings + uplift
           </p>
         </div>
-
-        {costComparisonAvailable && (
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
-            <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-              Current Spend
-            </p>
-            <p className="text-2xl font-bold text-orange-400">
-              ${fmt(currentCost.total)}
-              <span className="text-sm font-normal">/mo</span>
-            </p>
-          </div>
-        )}
       </div>
 
       {/* ── Cost comparison unavailable notice ───────────────── */}
