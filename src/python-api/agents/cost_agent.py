@@ -280,13 +280,15 @@ CONTEXT:
 
 RULES:
 - For each component, select the most appropriate Azure service and a specific SKU/tier
-- Scale the SKU appropriately for {users} concurrent users
+- RIGHT-SIZE the SKU: use the SMALLEST tier that handles the workload
+  - < 500 users: use Basic/Standard tiers (B1, S1)
+  - 500-5000 users: use Standard tiers (S2, S3)
+  - > 5000 users: consider Premium only if needed (P1v3, P2v3)
 - Use real Azure SKU names (e.g., "B1", "S1", "P2v3" for App Service; "Standard S0" for Azure OpenAI)
 - Include 3-5 key capabilities for each service
 - For each service, write a short 'reason' explaining WHY this service fits THIS use case (1 sentence)
-- If a component already has an azureService specified, validate and refine the SKU choice
-- Always include Azure Monitor / Application Insights for observability
-- Consider the industry ({industry}) for compliance needs (e.g., Premium SKUs for healthcare/finance)
+- Do NOT add Azure Monitor / Application Insights unless the user asked for observability
+- Avoid Premium SKUs unless compliance or scale requires them
 
 Return ONLY valid JSON (no markdown fences) as an array:
 [
@@ -304,7 +306,8 @@ Return ONLY valid JSON (no markdown fences) as an array:
             response = llm.invoke([
                 {"role": "system", "content": (
                     "You are an Azure infrastructure specialist. "
-                    "Map architecture components to specific Azure services with real, production-appropriate SKUs. "
+                    "Map architecture components to specific Azure services with COST-EFFICIENT, right-sized SKUs. "
+                    "Prefer Standard/Basic tiers over Premium unless the use case demands it. "
                     "Use official Azure service names and SKU identifiers. Return ONLY valid JSON."
                 )},
                 {"role": "user", "content": prompt},

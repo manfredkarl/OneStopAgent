@@ -358,20 +358,20 @@ export default function ROIDashboard({ data }: Props) {
 
           {/* Butterfly rows */}
           {waterfallRows.map((row, i) => {
-            const costPct = row.cost ? (row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT : 0;
-            const upliftPct = row.uplift ? (row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT : 0;
+            const costPct = row.cost ? Math.min((row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT) : 0;
+            const upliftPct = row.uplift ? Math.min((row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT) : 0;
             return (
               <div key={i} className="flex items-center mb-3 gap-1">
                 {/* Left: cost reduction (right-aligned) */}
-                <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                <div className="flex-1 flex items-center justify-end gap-2 min-w-0 overflow-hidden">
                   {row.cost ? (
                     <>
-                      <span className="text-xs text-[var(--text-muted)] text-right truncate max-w-[110px] shrink-0">
+                      <span className="text-xs text-[var(--text-muted)] text-right truncate shrink min-w-0">
                         {row.cost.label}
                       </span>
                       <div
-                        style={{ width: `${costPct}%` }}
-                        className="bg-blue-500 h-7 min-w-[4px] rounded-l-md flex items-center justify-end px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
+                        style={{ width: `${costPct}%`, minWidth: 4, maxWidth: '70%' }}
+                        className="bg-blue-500 h-7 rounded-l-md flex items-center justify-end px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
                         title={`$${fmt(row.cost.amount)}/yr cost reduction`}
                       >
                         {costPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.cost.amount)}` : ""}
@@ -386,17 +386,17 @@ export default function ROIDashboard({ data }: Props) {
                 <div className="h-8 w-px bg-[var(--border)] shrink-0" />
 
                 {/* Right: revenue uplift (left-aligned) */}
-                <div className="flex-1 flex items-center justify-start gap-2 min-w-0">
+                <div className="flex-1 flex items-center justify-start gap-2 min-w-0 overflow-hidden">
                   {row.uplift ? (
                     <>
                       <div
-                        style={{ width: `${upliftPct}%` }}
-                        className="bg-purple-500 h-7 min-w-[4px] rounded-r-md flex items-center justify-start px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
+                        style={{ width: `${upliftPct}%`, minWidth: 4, maxWidth: '70%' }}
+                        className="bg-purple-500 h-7 rounded-r-md flex items-center justify-start px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
                         title={`$${fmt(row.uplift.amount)}/yr revenue uplift`}
                       >
                         {upliftPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.uplift.amount)}` : ""}
                       </div>
-                      <span className="text-xs text-[var(--text-muted)] truncate max-w-[110px] shrink-0">
+                      <span className="text-xs text-[var(--text-muted)] truncate shrink min-w-0">
                         {row.uplift.label}
                       </span>
                     </>
