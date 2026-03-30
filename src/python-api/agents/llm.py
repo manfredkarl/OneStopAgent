@@ -104,10 +104,25 @@ class LLMClient:
     """Drop-in replacement exposing invoke / ainvoke / astream.
 
     Backed by Microsoft Agent Framework's ``AzureOpenAIChatClient``.
+
+    Uses two client instances:
+    - ``_async_client`` for ainvoke / astream (runs on the main event loop)
+    - ``_sync_client_factory`` creates a fresh client per invoke() call to
+      avoid cross-event-loop issues when called from thread pools.
     """
 
     def __init__(self) -> None:
-        self._client = AzureOpenAIChatClient(
+        self._async_client = AzureOpenAIChatClient(
+            endpoint=_endpoint,
+            deployment_name=_deployment,
+            api_version=_api_version,
+            credential=_build_credential(),
+        )
+        self._main_loop: asyncio.AbstractEventLoop | None = None
+
+    def _new_client(self) -> AzureOpenAIChatClient:
+        """Create a fresh client (safe for use on any event loop)."""
+        return AzureOpenAIChatClient(
             endpoint=_endpoint,
             deployment_name=_deployment,
             api_version=_api_version,
@@ -117,32 +132,42 @@ class LLMClient:
     # -- synchronous (called from agent run() methods) ----------------------
 
     def invoke(self, messages: Sequence[dict[str, str]]) -> LLMResponse:
-        """Synchronous LLM call — runs the async path in a thread."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        """Synchronous LLM call.
 
-        if loop and loop.is_running():
-            # We're inside an existing event loop (common in FastAPI).
-            # Run in a fresh thread to avoid "cannot call run_until_complete
-            # while another loop is running".
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self._ainvoke(messages))
-                return future.result()
-        else:
-            return asyncio.run(self._ainvoke(messages))
+        When called from a thread (e.g. via ``run_in_executor``), schedules
+        the call on the main event loop if available.  Otherwise creates a
+        fresh event loop with a dedicated client instance.
+        """
+        # Fast path: if we have a reference to the main loop and it's running,
+        # schedule there to reuse connections.
+        if self._main_loop and self._main_loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                self._ainvoke(messages), self._main_loop,
+            )
+            return future.result(timeout=120)
+
+        # Slow path: create a throwaway client on a fresh event loop.
+        # This avoids cross-loop issues with aiohttp/httpx connection pools.
+        client = self._new_client()
+
+        async def _call() -> LLMResponse:
+            maf_msgs = _to_maf_messages(messages)
+            response = await client.get_response(maf_msgs)
+            text = response.messages[-1].text if response.messages else str(response)
+            return LLMResponse(content=text)
+
+        return asyncio.run(_call())
 
     # -- asynchronous -------------------------------------------------------
 
     async def ainvoke(self, messages: Sequence[dict[str, str]]) -> LLMResponse:
         """Async LLM call — direct await."""
+        self._capture_loop()
         return await self._ainvoke(messages)
 
     async def _ainvoke(self, messages: Sequence[dict[str, str]]) -> LLMResponse:
         maf_msgs = _to_maf_messages(messages)
-        response = await self._client.get_response(maf_msgs)
+        response = await self._async_client.get_response(maf_msgs)
         text = response.messages[-1].text if response.messages else str(response)
         return LLMResponse(content=text)
 
@@ -152,11 +177,22 @@ class LLMClient:
         self, messages: Sequence[dict[str, str]]
     ) -> AsyncIterator[StreamChunk]:
         """Async streaming — yields ``StreamChunk`` objects with ``.content``."""
+        self._capture_loop()
         maf_msgs = _to_maf_messages(messages)
-        stream = self._client.get_response(maf_msgs, stream=True)
+        stream = self._async_client.get_response(maf_msgs, stream=True)
         async for update in stream:
             if update.text:
                 yield StreamChunk(content=update.text)
+
+    # -- helpers ------------------------------------------------------------
+
+    def _capture_loop(self) -> None:
+        """Capture the running event loop for cross-thread invoke() calls."""
+        if self._main_loop is None:
+            try:
+                self._main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from models.schemas import (
     SendMessageRequest,
 )
 from services.project_store import store
-from orchestrator import Orchestrator
+from maf_orchestrator import MAFOrchestrator
 
 # ---------------------------------------------------------------------------
 # App
@@ -31,7 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-orchestrator = Orchestrator()
+orchestrator = MAFOrchestrator()
 
 # ---------------------------------------------------------------------------
 # Routes
