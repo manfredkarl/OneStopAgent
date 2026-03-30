@@ -158,6 +158,7 @@ Return ONLY valid JSON (no markdown fences):
       "name": "Short driver name",
       "metric": "10–20% time savings" or similar specific range,
       "description": "One sentence explaining the mechanism",
+      "category": "cost_reduction" or "revenue_uplift",
       "source_name": "Gartner 2024" or "McKinsey Digital" or similar,
       "source_url": "https://..."
     }}
@@ -168,7 +169,14 @@ Return ONLY valid JSON (no markdown fences):
     "15% reduction in search time = 120 hrs/engineer/year"
   ],
   "confidence": "conservative" | "moderate" | "optimistic"
-}}"""
+}}
+
+CATEGORY RULES:
+- "cost_reduction": driver primarily reduces existing spend (labour, infra, errors, rework, licensing)
+- "revenue_uplift": driver generates NEW value (new product features, faster time-to-market,
+  improved customer retention, higher conversion, new revenue channels)
+- Assign each driver to the category that best describes its primary mechanism.
+- Aim for at least one driver in each category when the use case supports both."""
 
         try:
             response = llm.invoke([
@@ -188,6 +196,7 @@ Return ONLY valid JSON (no markdown fences):
                 d.setdefault("name", "")
                 d.setdefault("metric", "")
                 d.setdefault("description", "")
+                d.setdefault("category", "cost_reduction")
                 d.setdefault("source_name", "")
                 d.setdefault("source_url", "")
 

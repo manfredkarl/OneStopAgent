@@ -96,6 +96,44 @@ class ROIAgent:
                 return float(single_match.group(1)) / 100
         return None
 
+    def _compute_per_driver_amounts(self, drivers: list[dict], annual_value: float) -> list[float]:
+        """Compute approximate annual impact per driver, proportional to metric percentages.
+
+        Extracts the midpoint percentage from each driver's metric string and
+        distributes annual_value proportionally.  Drivers with no parseable
+        percentage receive the mean of the parseable values so they are never
+        silently zeroed out.  Falls back to equal distribution when no
+        percentages can be parsed at all.
+        """
+        if not drivers:
+            return []
+
+        percentages: list[float] = []
+        for d in drivers:
+            metric = d.get("metric", "")
+            range_match = self._PERCENTAGE_RANGE_RE.search(metric)
+            if range_match:
+                low = float(range_match.group(1))
+                high = float(range_match.group(2))
+                percentages.append((low + high) / 2)
+            else:
+                single = self._PERCENTAGE_RE.search(metric)
+                percentages.append(float(single.group(1)) if single else 0.0)
+
+        # Replace zeros (unparseable metrics) with the mean of parseable values
+        # so every driver receives a non-zero share when at least one is parseable.
+        non_zero = [p for p in percentages if p > 0]
+        if non_zero:
+            fallback = sum(non_zero) / len(non_zero)
+            percentages = [p if p > 0 else fallback for p in percentages]
+
+        total_pct = sum(percentages)
+        if total_pct > 0:
+            return [round(annual_value * (p / total_pct)) for p in percentages]
+        # All metrics are unparseable — equal distribution
+        equal = round(annual_value / len(drivers))
+        return [equal] * len(drivers)
+
     def _build_dashboard(self, state: AgentState, annual_cost: float,
                          annual_value: float, roi_percent: float | None,
                          payback_months: float | None) -> dict:
@@ -186,11 +224,32 @@ class ROIAgent:
                 "name": d.get("name", ""),
                 "metric": d.get("metric", ""),
                 "description": d.get("description", ""),
+                "category": d.get("category", "cost_reduction"),
                 "source_name": d.get("source_name", ""),
                 "source_url": d.get("source_url", ""),
             }
             for d in bv_drivers
         ]
+
+        # ── Value waterfall — split drivers into cost reduction vs revenue uplift ─
+        driver_amounts = self._compute_per_driver_amounts(bv_drivers, annual_value)
+        waterfall_cost_reduction: list[dict] = []
+        waterfall_revenue_uplift: list[dict] = []
+        for idx, d in enumerate(bv_drivers):
+            category = d.get("category", "cost_reduction")
+            item = {"label": d.get("name", ""), "amount": driver_amounts[idx]}
+            if category == "revenue_uplift":
+                waterfall_revenue_uplift.append(item)
+            else:
+                waterfall_cost_reduction.append(item)
+
+        value_waterfall = {
+            "costReduction": waterfall_cost_reduction,
+            "revenueUplift": waterfall_revenue_uplift,
+        }
+
+        # ── Annual uplift (revenue_uplift drivers only) for projection ──
+        annual_uplift = sum(item["amount"] for item in waterfall_revenue_uplift)
 
         # ── 3-year projection — flat; no fabricated growth or uplift ─
         # Implementation costs (one-time) are excluded — user should add those.
@@ -214,6 +273,11 @@ class ROIAgent:
                 round(annual_value * 2),
                 round(annual_value * 3),
             ],
+            "cumulativeUplift": [
+                round(annual_uplift),
+                round(annual_uplift * 2),
+                round(annual_uplift * 3),
+            ] if annual_uplift > 0 else None,
         }
 
         # ── Methodology ─────────────────────────────────────────────
@@ -226,6 +290,14 @@ class ROIAgent:
             assumption_sources.append("business metrics")
         assumption_note = " and ".join(assumption_sources) if assumption_sources else "solution analysis estimates"
 
+        uplift_count = len(waterfall_revenue_uplift)
+        cost_red_count = len(waterfall_cost_reduction)
+        driver_note = (
+            f"{cost_red_count} cost-reduction and {uplift_count} revenue-uplift driver(s) identified. "
+            if (cost_red_count + uplift_count) > 0
+            else ""
+        )
+
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
             + (
@@ -233,6 +305,7 @@ class ROIAgent:
                 if cost_comparison_available
                 else "Cost comparison not shown — provide headcount, hourly rate, and hours/week to enable it. "
             )
+            + driver_note
             + "Projection uses flat annual figures; one-time implementation costs are excluded. "
             + "ROI = (Annual Value − Annual Cost) ÷ Annual Cost × 100."
         )
@@ -254,9 +327,11 @@ class ROIAgent:
             "roiPercent": roi_percent,
             "paybackMonths": payback_months,
             "drivers": drivers,
+            "valueWaterfall": value_waterfall,
             "projection": projection,
             "methodology": methodology,
         }
+
 
     def _needs_info(self, reason: str, questions: list[str], qualitative: list[str] | None = None) -> dict:
         """Return an ROI result that signals we need user input to calculate."""

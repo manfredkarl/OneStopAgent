@@ -3,12 +3,23 @@ interface BreakdownItem {
   amount: number;
 }
 
+interface WaterfallItem {
+  label: string;
+  amount: number;
+}
+
+interface ValueWaterfall {
+  costReduction: WaterfallItem[];
+  revenueUplift: WaterfallItem[];
+}
+
 interface Driver {
   name: string;
   metric: string;
   description: string;
   source_name?: string;
   source_url?: string;
+  category?: 'cost_reduction' | 'revenue_uplift';
 }
 
 interface Projection {
@@ -16,6 +27,7 @@ interface Projection {
   cumulativeSavings: number[] | null;
   cumulativeCost: number[];
   cumulativeValue: number[];
+  cumulativeUplift?: number[] | null;
 }
 
 interface ROIDashboardData {
@@ -38,6 +50,7 @@ interface ROIDashboardData {
 
   costComparisonAvailable?: boolean;
   drivers: Driver[];
+  valueWaterfall?: ValueWaterfall;
   projection: Projection;
   methodology: string;
 }
@@ -54,6 +67,11 @@ const CURRENT_COLORS = ["bg-orange-400", "bg-red-400", "bg-amber-400", "bg-yello
 const AI_COLORS = ["bg-green-500", "bg-blue-500", "bg-teal-500", "bg-emerald-400"];
 const AI_TEXT = ["text-white", "text-white", "text-white", "text-gray-800"];
 
+/** Maximum bar width (as % of one half) for the butterfly chart. */
+const WATERFALL_MAX_BAR_PCT = 90;
+/** Minimum bar width % below which the in-bar label is hidden. */
+const WATERFALL_MIN_LABEL_PCT = 22;
+
 export default function ROIDashboard({ data }: Props) {
   const {
     monthlySavings,
@@ -65,6 +83,7 @@ export default function ROIDashboard({ data }: Props) {
     roiPercent,
     paybackMonths,
     drivers,
+    valueWaterfall,
     projection,
     methodology,
   } = data;
@@ -73,6 +92,9 @@ export default function ROIDashboard({ data }: Props) {
   const hasAiCost = costComparisonAvailable && aiCost && aiCost.total > 0;
   const hasDrivers = drivers && drivers.length > 0;
   const hasProjection = projection && projection.years?.length > 0;
+  const hasWaterfall =
+    valueWaterfall &&
+    (valueWaterfall.costReduction.length > 0 || valueWaterfall.revenueUplift.length > 0);
 
   const aiBarWidth =
     hasCurrentCost && hasAiCost
@@ -85,11 +107,35 @@ export default function ROIDashboard({ data }: Props) {
           ...(projection.cumulativeSavings ?? [0]),
           ...projection.cumulativeCost,
           ...projection.cumulativeValue,
+          ...(projection.cumulativeUplift ?? [0]),
           1,
         )
       : 1;
 
   const roiMultiple = roiPercent != null ? ((roiPercent / 100) + 1) : null;
+
+  // Butterfly chart helpers
+  const maxWaterfallAmount = hasWaterfall
+    ? Math.max(
+        ...valueWaterfall!.costReduction.map((i) => i.amount),
+        ...valueWaterfall!.revenueUplift.map((i) => i.amount),
+        1,
+      )
+    : 1;
+  const waterfallRows = hasWaterfall
+    ? Array.from(
+        {
+          length: Math.max(
+            valueWaterfall!.costReduction.length,
+            valueWaterfall!.revenueUplift.length,
+          ),
+        },
+        (_, i) => ({
+          cost: valueWaterfall!.costReduction[i] ?? null,
+          uplift: valueWaterfall!.revenueUplift[i] ?? null,
+        }),
+      )
+    : [];
 
   return (
     <div className="space-y-6">
@@ -256,6 +302,17 @@ export default function ROIDashboard({ data }: Props) {
                 key={i}
                 className="border border-[var(--border)] rounded-lg p-4 flex flex-col"
               >
+                {d.category && (
+                  <span
+                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full mb-2 self-start ${
+                      d.category === 'revenue_uplift'
+                        ? 'bg-purple-500/20 text-purple-400'
+                        : 'bg-blue-500/20 text-blue-400'
+                    }`}
+                  >
+                    {d.category === 'revenue_uplift' ? '📈 Revenue Uplift' : '💰 Cost Reduction'}
+                  </span>
+                )}
                 <p className="text-lg font-bold text-[var(--accent)] mb-1">
                   {d.metric || "—"}
                 </p>
@@ -284,6 +341,89 @@ export default function ROIDashboard({ data }: Props) {
         </div>
       )}
 
+      {/* ── Value Waterfall / Butterfly Chart ─────────────────── */}
+      {hasWaterfall && (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-1">
+            Value Breakdown
+          </h3>
+          <p className="text-xs text-[var(--text-muted)] mb-4">Annual impact by driver category</p>
+
+          {/* Column headers */}
+          <div className="flex text-xs font-semibold mb-3">
+            <div className="flex-1 text-center text-blue-400">← Cost Reduction</div>
+            <div className="w-px shrink-0" />
+            <div className="flex-1 text-center text-purple-400">Revenue Uplift →</div>
+          </div>
+
+          {/* Butterfly rows */}
+          {waterfallRows.map((row, i) => {
+            const costPct = row.cost ? (row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT : 0;
+            const upliftPct = row.uplift ? (row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT : 0;
+            return (
+              <div key={i} className="flex items-center mb-3 gap-1">
+                {/* Left: cost reduction (right-aligned) */}
+                <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                  {row.cost ? (
+                    <>
+                      <span className="text-xs text-[var(--text-muted)] text-right truncate max-w-[110px] shrink-0">
+                        {row.cost.label}
+                      </span>
+                      <div
+                        style={{ width: `${costPct}%` }}
+                        className="bg-blue-500 h-7 min-w-[4px] rounded-l-md flex items-center justify-end px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
+                        title={`$${fmt(row.cost.amount)}/yr cost reduction`}
+                      >
+                        {costPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.cost.amount)}` : ""}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1" />
+                  )}
+                </div>
+
+                {/* Center zero line */}
+                <div className="h-8 w-px bg-[var(--border)] shrink-0" />
+
+                {/* Right: revenue uplift (left-aligned) */}
+                <div className="flex-1 flex items-center justify-start gap-2 min-w-0">
+                  {row.uplift ? (
+                    <>
+                      <div
+                        style={{ width: `${upliftPct}%` }}
+                        className="bg-purple-500 h-7 min-w-[4px] rounded-r-md flex items-center justify-start px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
+                        title={`$${fmt(row.uplift.amount)}/yr revenue uplift`}
+                      >
+                        {upliftPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.uplift.amount)}` : ""}
+                      </div>
+                      <span className="text-xs text-[var(--text-muted)] truncate max-w-[110px] shrink-0">
+                        {row.uplift.label}
+                      </span>
+                    </>
+                  ) : (
+                    <div className="flex-1" />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Legend */}
+          <div className="flex justify-center gap-6 mt-3 text-xs text-[var(--text-muted)]">
+            {valueWaterfall!.costReduction.length > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-blue-500" /> Cost reduction (annual)
+              </span>
+            )}
+            {valueWaterfall!.revenueUplift.length > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-purple-500" /> Revenue uplift (annual)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── 3-Year Projection ─────────────────────────────────── */}
       {hasProjection && (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
@@ -293,8 +433,10 @@ export default function ROIDashboard({ data }: Props) {
           <div className="grid grid-cols-3 gap-4">
             {projection.years.map((year, i) => {
               const cumulativeSavings = projection.cumulativeSavings?.[i] ?? null;
+              const cumulativeUplift = projection.cumulativeUplift?.[i] ?? null;
               const cost = projection.cumulativeCost[i] ?? 0;
               const savingsH = cumulativeSavings != null ? Math.max((cumulativeSavings / maxCumulativeValue) * 112, 8) : 0;
+              const upliftH = cumulativeUplift != null ? Math.max((cumulativeUplift / maxCumulativeValue) * 112, 8) : 0;
               const costH = Math.max((cost / maxCumulativeValue) * 112, 8);
               const savingsColor = cumulativeSavings != null && cumulativeSavings < 0 ? "text-red-500" : "text-green-500";
               const savingsBarColor = cumulativeSavings != null && cumulativeSavings < 0 ? "bg-red-500" : "bg-green-500";
@@ -307,17 +449,25 @@ export default function ROIDashboard({ data }: Props) {
                     {/* Savings bar — only when cost comparison is available */}
                     {cumulativeSavings != null && (
                       <div
-                        style={{ height: savingsH, width: 40 }}
+                        style={{ height: savingsH, width: 36 }}
                         className={`${savingsBarColor} rounded-t-md`}
                         title={`Cumulative savings: $${fmt(cumulativeSavings)}`}
                       />
                     )}
                     {/* Cost bar */}
                     <div
-                      style={{ height: costH, width: 40 }}
+                      style={{ height: costH, width: 36 }}
                       className="bg-blue-500 rounded-t-md"
                       title={`Cumulative Azure cost: $${fmt(cost)}`}
                     />
+                    {/* Revenue uplift bar */}
+                    {cumulativeUplift != null && (
+                      <div
+                        style={{ height: upliftH, width: 36 }}
+                        className="bg-purple-500 rounded-t-md"
+                        title={`Cumulative revenue uplift: $${fmt(cumulativeUplift)}`}
+                      />
+                    )}
                   </div>
                   {cumulativeSavings != null && (
                     <p className={`text-sm font-bold ${savingsColor}`}>
@@ -326,6 +476,9 @@ export default function ROIDashboard({ data }: Props) {
                   )}
                   {cumulativeSavings != null && <p className="text-xs text-[var(--text-muted)]">savings</p>}
                   <p className="text-xs text-blue-400 mt-1">${fmt(cost)} cost</p>
+                  {cumulativeUplift != null && (
+                    <p className="text-xs text-purple-400 mt-0.5">${fmt(cumulativeUplift)} uplift</p>
+                  )}
                 </div>
               );
             })}
@@ -339,6 +492,11 @@ export default function ROIDashboard({ data }: Props) {
             <span className="flex items-center gap-1">
               <span className="w-3 h-3 rounded-sm bg-blue-500" /> Cumulative Azure cost
             </span>
+            {projection.cumulativeUplift && (
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-purple-500" /> Revenue uplift value
+              </span>
+            )}
           </div>
         </div>
       )}
