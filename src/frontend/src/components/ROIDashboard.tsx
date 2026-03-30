@@ -103,10 +103,10 @@ export default function ROIDashboard({ data }: Props) {
     valueWaterfall &&
     (valueWaterfall.costReduction.length > 0 || valueWaterfall.revenueUplift.length > 0);
 
-  const aiBarWidth =
-    hasCurrentCost && hasAiCost
-      ? Math.min((aiCost.total / currentCost.total) * 100, 100)
-      : 0;
+  // Scale bars relative to the larger value
+  const maxCostBar = hasCurrentCost && hasAiCost ? Math.max(currentCost.total, aiCost.total) : 1;
+  const currentBarWidth = hasCurrentCost ? (currentCost.total / maxCostBar) * 100 : 100;
+  const aiBarWidth = hasAiCost ? (aiCost.total / maxCostBar) * 100 : 0;
 
   const maxCumulativeValue =
     hasProjection && projection.cumulative
@@ -156,14 +156,14 @@ export default function ROIDashboard({ data }: Props) {
         {costComparisonAvailable && (
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-center">
             <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
-              Cost Savings
+              {monthlySavings >= 0 ? 'Cost Savings' : 'Cost Delta'}
             </p>
-            <p className={`text-2xl font-bold ${monthlySavings >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-              ${fmt(Math.abs(monthlySavings))}
+            <p className={`text-2xl font-bold ${monthlySavings >= 0 ? 'text-green-500' : 'text-orange-400'}`}>
+              {monthlySavings >= 0 ? '' : '+'}${fmt(Math.abs(monthlySavings))}
               <span className="text-sm font-normal">/mo</span>
             </p>
-            <p className={`text-xs ${monthlySavings >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {monthlySavings >= 0 ? '' : '-'}{Math.abs(savingsPercentage)}% {monthlySavings >= 0 ? 'reduction' : 'increase'}
+            <p className={`text-xs ${monthlySavings >= 0 ? 'text-green-400' : 'text-orange-300'}`}>
+              {monthlySavings >= 0 ? `${savingsPercentage}% cost reduction` : `${Math.abs(savingsPercentage)}% higher than current ops`}
             </p>
           </div>
         )}
@@ -235,7 +235,7 @@ export default function ROIDashboard({ data }: Props) {
                 ${fmt(currentCost.total)}/mo
               </span>
             </div>
-            <div className="flex rounded-lg overflow-hidden h-9">
+            <div style={{ width: `${currentBarWidth}%` }} className="flex rounded-lg overflow-hidden h-9">
               {currentCost.breakdown.map((seg, i) => {
                 const pct = (seg.amount / currentCost.total) * 100;
                 const color = CURRENT_COLORS[i % CURRENT_COLORS.length];
@@ -286,8 +286,11 @@ export default function ROIDashboard({ data }: Props) {
           </div>
 
           {/* Savings callout */}
-          <p className="text-sm text-green-500 font-semibold">
-            📉 ${fmt(monthlySavings)}/mo savings ({savingsPercentage}% reduction)
+          <p className={`text-sm font-semibold ${monthlySavings >= 0 ? 'text-green-500' : 'text-orange-400'}`}>
+            {monthlySavings >= 0
+              ? `📉 $${fmt(monthlySavings)}/mo savings (${savingsPercentage}% reduction)`
+              : `📊 $${fmt(Math.abs(monthlySavings))}/mo additional cost (${Math.abs(savingsPercentage)}% above current) — offset by revenue uplift`
+            }
           </p>
 
           {/* Legend */}
