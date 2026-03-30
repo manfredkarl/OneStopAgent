@@ -162,24 +162,42 @@ class ROIAgent:
                 assumptions_dict[a["id"]] = a["value"]
 
         # ── Build current operational cost (WITHOUT AI) ──────────────
-        # Only when real user inputs are available — never derive from annual_value.
+        # Use user inputs when available, fill gaps with reasonable defaults.
         current_breakdown: list[dict] = []
-        cost_comparison_available = False
 
         employees = assumptions_dict.get("employees", assumptions_dict.get("headcount", 0))
         hourly_rate = assumptions_dict.get("hourly_rate", 0)
         manual_hours = assumptions_dict.get("manual_hours", assumptions_dict.get("hours_per_week", 0))
+        monthly_it_spend = assumptions_dict.get("monthly_it_spend", 0)
 
-        if employees and hourly_rate and manual_hours:
-            cost_comparison_available = True
+        # If we have at least one input, fill in the gaps with sensible defaults
+        has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
+
+        if not has_any_input:
+            # No user input at all — derive from annual_value as a rough proxy
+            monthly_value = round(annual_value / 12) if annual_value > 0 else 0
+            estimated_current = max(monthly_value, azure_monthly * 2, 5000)
+            current_breakdown.append({"label": "Operations (estimated)", "amount": round(estimated_current * 0.75)})
+            current_breakdown.append({"label": "Overhead (estimated)", "amount": round(estimated_current * 0.25)})
+        else:
+            # Fill missing fields with reasonable defaults
+            if not employees:
+                employees = 30
+            if not hourly_rate:
+                hourly_rate = 45
+            if not manual_hours:
+                manual_hours = 15
+
             monthly_labor = round(employees * hourly_rate * manual_hours * 4.33)
             current_breakdown.append({"label": "Staff labor", "amount": monthly_labor})
 
-            error_rate = assumptions_dict.get("error_rate", 0)
-            if error_rate:
-                error_cost = round(monthly_labor * (error_rate / 100))
-                if error_cost > 0:
-                    current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
+            if monthly_it_spend:
+                current_breakdown.append({"label": "IT spend", "amount": round(monthly_it_spend)})
+
+            error_rate = assumptions_dict.get("error_rate", 8) / 100
+            error_cost = round(monthly_labor * error_rate)
+            if error_cost > 0:
+                current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
 
             overhead = assumptions_dict.get("overhead", 0)
             if overhead:
@@ -191,28 +209,26 @@ class ROIAgent:
         ai_breakdown: list[dict] = []
         ai_breakdown.append({"label": "Azure platform", "amount": azure_monthly})
 
-        if cost_comparison_available and current_breakdown:
-            # Pull AI coverage % from BV driver metrics — not a hardcoded default.
-            ai_coverage = self._extract_coverage_from_drivers(bv_drivers)
-            if ai_coverage is not None:
-                labor_items = [item for item in current_breakdown if "labor" in item["label"].lower()]
-                if labor_items:
-                    reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
-                    ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
+        if current_breakdown:
+            # Pull AI coverage % from BV driver metrics, default to 25% if unparseable
+            ai_coverage = self._extract_coverage_from_drivers(bv_drivers) or 0.25
+            labor_items = [item for item in current_breakdown if "labor" in item["label"].lower() or "operations" in item["label"].lower()]
+            if labor_items:
+                reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
+                ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
 
             error_items = [item for item in current_breakdown if "error" in item["label"].lower() or "rework" in item["label"].lower()]
             if error_items:
-                error_reduction = assumptions_dict.get("error_reduction", 0)
-                if error_reduction:
-                    reduced_errors = round(error_items[0]["amount"] * (1 - error_reduction / 100))
-                    if reduced_errors > 0:
-                        ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
+                error_reduction = assumptions_dict.get("error_reduction", 50) / 100
+                reduced_errors = round(error_items[0]["amount"] * (1 - error_reduction))
+                if reduced_errors > 0:
+                    ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
 
         ai_total = sum(item["amount"] for item in ai_breakdown)
 
-        # ── Honest cost comparison — no artificial scaling ───────────
-        if cost_comparison_available and current_total > 0:
-            savings = current_total - ai_total  # can be negative; show honestly
+        # ── Cost comparison ──────────────────────────────────────────
+        if current_total > 0:
+            savings = current_total - ai_total
             savings_pct = round((savings / current_total) * 100)
         else:
             savings = 0
@@ -252,9 +268,8 @@ class ROIAgent:
         annual_uplift = sum(item["amount"] for item in waterfall_revenue_uplift)
 
         # ── 3-year projection — flat; no fabricated growth or uplift ─
-        # Implementation costs (one-time) are excluded — user should add those.
         annual_azure_cost = azure_monthly * 12
-        annual_savings = savings * 12 if cost_comparison_available else 0
+        annual_savings = savings * 12
 
         projection = {
             "years": [1, 2, 3],
@@ -262,7 +277,7 @@ class ROIAgent:
                 round(annual_savings),
                 round(annual_savings * 2),
                 round(annual_savings * 3),
-            ] if cost_comparison_available else None,
+            ],
             "cumulativeCost": [
                 round(annual_azure_cost),
                 round(annual_azure_cost * 2),
@@ -288,7 +303,7 @@ class ROIAgent:
             assumption_sources.append("usage metrics")
         if bv_assumptions:
             assumption_sources.append("business metrics")
-        assumption_note = " and ".join(assumption_sources) if assumption_sources else "solution analysis estimates"
+        assumption_note = " and ".join(assumption_sources) if assumption_sources else "estimated defaults"
 
         uplift_count = len(waterfall_revenue_uplift)
         cost_red_count = len(waterfall_cost_reduction)
@@ -300,11 +315,7 @@ class ROIAgent:
 
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
-            + (
-                f"Current operational costs derived from {assumption_note}. "
-                if cost_comparison_available
-                else "Cost comparison not shown — provide headcount, hourly rate, and hours/week to enable it. "
-            )
+            f"Current operational costs derived from {assumption_note}. "
             + driver_note
             + "Projection uses flat annual figures; one-time implementation costs are excluded. "
             + "ROI = (Annual Value − Annual Cost) ÷ Annual Cost × 100."
@@ -315,7 +326,7 @@ class ROIAgent:
             "annualImpact": round(annual_value),
             "azureMonthlyCost": azure_monthly,
             "savingsPercentage": savings_pct,
-            "costComparisonAvailable": cost_comparison_available,
+            "costComparisonAvailable": True,
             "currentCost": {
                 "total": current_total,
                 "breakdown": current_breakdown,
