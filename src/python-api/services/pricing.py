@@ -64,7 +64,7 @@ MOCK_PRICES: dict[str, dict[str, float]] = {
     "Virtual Network": {"Basic": 0.00},
     "Azure AD B2C": {"Free Tier": 0.00, "Premium P1": 0.00325},
     "Load Balancer": {"Basic": 0.00, "Standard": 18.25},
-    "Azure OpenAI": {"Standard S0": 0.00},
+    "Azure OpenAI": {"Standard S0": 500.00},  # ~$500/mo reference for moderate usage (pay-per-token)
     "Azure AI Search": {"Basic": 75.78, "Standard S1": 250.39},
     "Microsoft Fabric": {"F2": 262.80},
 }

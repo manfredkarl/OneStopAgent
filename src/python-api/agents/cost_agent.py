@@ -196,8 +196,10 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         selections = _handle_multi_region(selections, regions)
 
         if len(regions) > 1:
-            compute_total = sum(i["monthlyCost"] for i in items)
-            overhead = round(compute_total * 0.4, 2)
+            # Multi-region overhead: 40% accounts for data replication, cross-region networking,
+            # and secondary region compute. Adjust via user assumptions for specific scenarios.
+            overhead = sum(item.get("monthlyCost", 0) for item in items) * 0.4
+            overhead = round(overhead, 2)
             items.append({
                 "serviceName": "Multi-region replication overhead",
                 "sku": "Estimated",
@@ -206,7 +208,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
                 "pricingNote": "Estimated 30-50% uplift for multi-region deployment",
             })
             assumptions.append(
-                "Multi-region overhead estimated at 40% of compute + storage costs"
+                "Multi-region overhead estimated at 40% (replication + networking + secondary compute)"
             )
 
         # Add user-provided usage context to assumptions
@@ -354,6 +356,9 @@ Return ONLY valid JSON (no markdown fences) as an array:
         worst_source = "live"
         source_priority = {"live": 0, "live-fallback": 1, "approximate": 2}
 
+        # TODO: Parallelize pricing lookups with concurrent.futures.ThreadPoolExecutor
+        # Current: sequential calls, ~10s timeout each → 100s worst case for 10 services
+        # Improvement: concurrent calls → ~10s worst case for 10 services
         for sel in selections:
             service_name = sel.get("serviceName", "")
             sku = sel.get("sku", "")

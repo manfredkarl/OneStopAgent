@@ -19,6 +19,12 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 
 def setup_telemetry() -> None:
     """Initialise the global TracerProvider. Call once at app startup."""
+    # Don't override if MAF or another library already set a provider
+    current = trace.get_tracer_provider()
+    provider_name = type(current).__name__
+    if provider_name != "ProxyTracerProvider":
+        return  # Already initialized by agent-framework or another library
+
     provider = TracerProvider()
 
     # Always export to console for local dev visibility

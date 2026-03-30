@@ -12,7 +12,8 @@ def _extract_response_field_partial(partial_json: str) -> str:
     Handles both incomplete (streaming) and complete JSON.
     Returns the extracted text, or "" if the key hasn't appeared yet.
     """
-    match = re.search(r'"response"\s*:\s*"((?:[^"\\]|\\.)*)', partial_json)
+    # re.DOTALL so the pattern matches across newlines in the response value
+    match = re.search(r'"response"\s*:\s*"((?:[^"\\]|\\.)*)', partial_json, re.DOTALL)
     return match.group(1) if match else ""
 
 

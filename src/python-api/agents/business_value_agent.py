@@ -126,6 +126,12 @@ Keep it to 3-5 questions max. Be concise."""},
             extra.append(f"MONTHLY AZURE COST: ${monthly_cost:,.0f}")
         extra_context = "\n".join(extra)
 
+        # Build source citation instruction based on search availability
+        if search_results:
+            source_instruction = "Cite real, published sources with URLs for each driver."
+        else:
+            source_instruction = "Mark source_name as 'Industry estimate' and source_url as '' since no published sources were found."
+
         prompt = f"""You are a value engineer. Produce EXACTLY 3 benchmark-backed value drivers for this Azure solution.
 
 CUSTOMER: {customer}
@@ -142,7 +148,7 @@ USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
 RULES — follow precisely:
 1. Return EXACTLY 3 value drivers. No more, no fewer.
 2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
-3. Each driver must cite a real, published source — a research firm, analyst report, or case study.
+3. {source_instruction}
    Include the source name AND a URL. If you don't have a real URL, use the best matching web search result above.
 4. Do NOT write long prose. Each description is 1 sentence max.
 5. Provide an aggregated annual_impact_range (low–high dollars) across all 3 drivers.
@@ -229,11 +235,12 @@ CATEGORY RULES:
     async def run_streaming(
         self, state: AgentState, on_token
     ) -> AgentState:
-        """Async streaming — runs full agent, then streams an executive summary.
+        """Run BV agent with streaming executive summary.
 
-        Phase 1 (needs_input): returns immediately without streaming.
-        Phase 2: value drivers are computed synchronously, then a
-        2-sentence plain-text summary is streamed token-by-token via on_token(str).
+        Phase 1 (assumptions): Returns immediately, no streaming.
+        Phase 2 (drivers): Runs full calculation synchronously, then streams
+        a 2-sentence executive summary. The driver calculation itself requires
+        structured JSON output and cannot be meaningfully streamed.
         """
         state = await asyncio.to_thread(self.run, state)
 

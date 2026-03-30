@@ -350,6 +350,14 @@ def create_pptx_python(slide_data: dict, customer_name: str = "Customer") -> str
 
         items = costs.get("items", [])
         if items:
+            # Coerce numeric values before formatting
+            for item in items:
+                for key in ("monthly", "monthlyCost", "annual"):
+                    if key in item:
+                        try:
+                            item[key] = float(item[key])
+                        except (ValueError, TypeError):
+                            item[key] = 0.0
             tbl_data = [["Service", "SKU", "Monthly Cost"]]
             for item in items:
                 tbl_data.append([

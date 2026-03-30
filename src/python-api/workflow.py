@@ -75,6 +75,7 @@ class AssumptionsRequest:
 # ---------------------------------------------------------------------------
 
 FAST_RUN_GATES = {"business_value", "architect", "presentation"}
+REQUIRED_STEPS = {"architect"}  # Pipeline cannot continue without these
 
 
 def _should_pause(mode: str, step: str) -> bool:
@@ -128,7 +129,10 @@ class ArchitectExecutor(PipelineExecutor):
         # Run agent (sync agent in thread pool)
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.agent.run, state)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
             state.mark_step_completed("architect")
 
             summary = self.pm.approval_summary("architect", state)
@@ -157,6 +161,9 @@ class ArchitectExecutor(PipelineExecutor):
                 "type": "agent_error", "step": "architect",
                 "error": str(e),
             })
+            if self.step_name in REQUIRED_STEPS:
+                await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
+                return
             await ctx.send_message(msg)
 
     @response_handler
@@ -202,7 +209,10 @@ class CostExecutor(PipelineExecutor):
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.agent.run, state)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
 
             # Check for two-phase input needed
             if state.costs.get("phase") == "needs_input":
@@ -242,6 +252,9 @@ class CostExecutor(PipelineExecutor):
             await ctx.yield_output({
                 "type": "agent_error", "step": "cost", "error": str(e),
             })
+            if self.step_name in REQUIRED_STEPS:
+                await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
+                return
             await ctx.send_message(msg)
 
     @response_handler
@@ -272,8 +285,18 @@ class CostExecutor(PipelineExecutor):
             ]
 
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self.agent.run, state)
-            state.mark_step_completed("cost")
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self.agent.run, state),
+                    timeout=300,
+                )
+                state.mark_step_completed("cost")
+            except Exception as e:
+                logger.exception("Phase 2 re-run failed for %s", self.step_name)
+                state.mark_step_failed("cost")
+                await ctx.yield_output({"type": "agent_error", "step": "cost", "error": str(e)})
+                await ctx.send_message(msg)
+                return
 
             output_text = self.pm.format_agent_output("cost", state)
             summary = self.pm.approval_summary("cost", state)
@@ -327,7 +350,10 @@ class BusinessValueExecutor(PipelineExecutor):
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.agent.run, state)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
 
             if state.business_value.get("phase") == "needs_input":
                 assumptions = state.business_value.get("assumptions_needed", [])
@@ -369,6 +395,9 @@ class BusinessValueExecutor(PipelineExecutor):
                 "type": "agent_error", "step": "business_value",
                 "error": str(e),
             })
+            if self.step_name in REQUIRED_STEPS:
+                await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
+                return
             await ctx.send_message(msg)
 
     @response_handler
@@ -398,8 +427,18 @@ class BusinessValueExecutor(PipelineExecutor):
             ]
 
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self.agent.run, state)
-            state.mark_step_completed("business_value")
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self.agent.run, state),
+                    timeout=300,
+                )
+                state.mark_step_completed("business_value")
+            except Exception as e:
+                logger.exception("Phase 2 re-run failed for %s", self.step_name)
+                state.mark_step_failed("business_value")
+                await ctx.yield_output({"type": "agent_error", "step": "business_value", "error": str(e)})
+                await ctx.send_message(msg)
+                return
 
             output_text = self.pm.format_agent_output("business_value", state)
             summary = self.pm.approval_summary("business_value", state)
@@ -455,7 +494,10 @@ class ROIExecutor(PipelineExecutor):
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.agent.run, state)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
             state.mark_step_completed("roi")
 
             output_text = self.pm.format_agent_output("roi", state)
@@ -482,6 +524,9 @@ class ROIExecutor(PipelineExecutor):
             await ctx.yield_output({
                 "type": "agent_error", "step": "roi", "error": str(e),
             })
+            if self.step_name in REQUIRED_STEPS:
+                await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
+                return
             await ctx.send_message(msg)
 
     @response_handler
@@ -529,7 +574,10 @@ class PresentationExecutor(PipelineExecutor):
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.agent.run, state)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
             state.mark_step_completed("presentation")
 
             output_text = self.pm.format_agent_output("presentation", state)

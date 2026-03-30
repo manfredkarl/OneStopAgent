@@ -43,11 +43,10 @@ class ArchitectAgent:
     async def run_streaming(
         self, state: AgentState, on_token
     ) -> AgentState:
-        """Async streaming — runs full agent, then streams a narrative summary.
+        """Stream architecture narrative tokens.
 
-        Approach B per spec: the JSON architecture is generated synchronously,
-        then a 2-3 sentence plain-text summary is streamed token-by-token via
-        on_token(str) so the user sees text appearing while the diagram loads.
+        NOTE: Currently not called by MAF workflow executors (they use sync run()).
+        Retained for future streaming integration or direct API use.
         """
         loop = asyncio.get_event_loop()
         state = await loop.run_in_executor(None, self.run, state)
@@ -226,6 +225,16 @@ class ArchitectAgent:
                 comp.setdefault("description", comp.get("role", ""))
                 all_components.append(comp)
 
+        # Validate each component has required fields
+        validated = []
+        for comp in all_components:
+            comp.setdefault("name", comp.get("azureService", "Unknown"))
+            comp.setdefault("azureService", comp.get("name", "Unknown"))
+            comp.setdefault("role", "")
+            comp.setdefault("description", comp.get("role", ""))
+            validated.append(comp)
+        all_components = validated
+
         narrative = result.get("narrative", "")
         if not narrative:
             narrative = f"Layered Azure architecture with {len(layers)} functional layers."
@@ -287,4 +296,6 @@ class ArchitectAgent:
                 "⚠️ Generated from fallback — review and refine."
             ),
             "basedOn": "fallback (LLM unavailable)",
+            "basedOnUrl": None,
+            "adaptationNotes": "Generated from fallback when primary architecture generation was unavailable.",
         }

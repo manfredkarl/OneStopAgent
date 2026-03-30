@@ -614,4 +614,14 @@ class PresentationAgent:
         # Next steps (from LLM)
         merged["nextSteps"] = content.get("nextSteps", [])
 
+        # Truncate LLM content to prevent slide overflow
+        if isinstance(merged.get("executiveSummary"), list):
+            merged["executiveSummary"] = [s[:150] for s in merged["executiveSummary"]]
+        if isinstance(merged.get("nextSteps"), list):
+            merged["nextSteps"] = [s[:150] for s in merged["nextSteps"]]
+        if isinstance(merged.get("tagline"), str) and len(merged["tagline"]) > 80:
+            merged["tagline"] = merged["tagline"][:77] + "..."
+        if isinstance(merged.get("problemStatement"), str) and len(merged["problemStatement"]) > 300:
+            merged["problemStatement"] = merged["problemStatement"][:297] + "..."
+
         return merged

@@ -37,8 +37,8 @@ class ROIAgent:
             )
             return state
 
-        val_low = float(impact_range.get("low", 0))
-        val_high = float(impact_range.get("high", 0))
+        val_low = float(impact_range.get("low") or 0)
+        val_high = float(impact_range.get("high") or 0)
 
         if val_low <= 0 and val_high <= 0:
             state.roi = self._needs_info(
@@ -292,7 +292,7 @@ class ROIAgent:
                 round(annual_uplift),
                 round(annual_uplift * 2),
                 round(annual_uplift * 3),
-            ] if annual_uplift > 0 else None,
+            ],
         }
 
         # ── Methodology ─────────────────────────────────────────────

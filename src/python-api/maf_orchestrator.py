@@ -42,6 +42,11 @@ class MAFOrchestrator:
         self.pending_requests: dict[str, dict] = {}  # project_id → {request_id: ...}
         self._locks: dict[str, asyncio.Lock] = {}  # per-project concurrency guard (for future use)
 
+    def _cleanup_project(self, project_id: str) -> None:
+        """Remove workflow and pending requests for completed project."""
+        self.workflows.pop(project_id, None)
+        self.pending_requests.pop(project_id, None)
+
     def _get_lock(self, project_id: str) -> asyncio.Lock:
         if project_id not in self._locks:
             self._locks[project_id] = asyncio.Lock()
@@ -178,6 +183,12 @@ class MAFOrchestrator:
                 # Feed user response to the paused workflow
                 async for msg in self._resume_workflow(project_id, state, message, pending):
                     yield msg
+            elif intent == Intent.QUESTION:
+                follow_up = await llm.ainvoke([
+                    {"role": "system", "content": "You are a project manager. The solution is being built. Answer briefly."},
+                    {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser asks: {message}"},
+                ])
+                yield self._msg(project_id, follow_up.content)
             else:
                 yield self._msg(project_id, "I'll address that after the current step completes.")
 
@@ -344,6 +355,7 @@ class MAFOrchestrator:
 
                     elif etype == "pipeline_done":
                         self.phases[project_id] = "done"
+                        self._cleanup_project(project_id)
                         yield self._msg(
                             project_id,
                             "All steps complete! You can download the deck, ask follow-up questions, or request changes.",

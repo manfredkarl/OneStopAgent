@@ -11,8 +11,9 @@ def search_web(query: str, num_results: int = 5) -> list[dict[str, str]]:
 
     Uses a simple search approach. Falls back gracefully if unavailable.
     """
+    # NOTE: DuckDuckGo Instant Answer API returns disambiguation/related topics,
+    # not full search results. For production, consider Azure AI Search or Bing Search API.
     try:
-        # Use DuckDuckGo Instant Answer API (no API key needed)
         with httpx.Client(timeout=8) as client:
             resp = client.get(
                 "https://api.duckduckgo.com/",
@@ -64,7 +65,17 @@ def search_industry_benchmarks(industry: str, use_case: str) -> list[dict[str, s
         results = search_web(q, num_results=3)
         all_results.extend(results)
 
-    return all_results[:8]  # Cap at 8 results
+    # Deduplicate by URL
+    seen_urls = set()
+    unique_results = []
+    for r in all_results:
+        url = r.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            unique_results.append(r)
+    all_results = unique_results[:8]
+
+    return all_results
 
 
 def search_azure_architectures(query: str, max_results: int = 5) -> list[dict[str, str]]:
