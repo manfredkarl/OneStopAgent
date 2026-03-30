@@ -45,9 +45,9 @@ function AppContent() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Persistent sidebar */}
-        <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col">
-          {/* Agents section — fixed at top, never scrolls */}
-          <div className="shrink-0 overflow-visible">
+        <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col h-full overflow-hidden">
+          {/* Agents section — sticky at top, scrolls independently if needed */}
+          <div className="shrink-0 overflow-y-auto overflow-x-visible max-h-[60vh]">
             <AgentSidebar
               projectId=""
               agents={agents}
