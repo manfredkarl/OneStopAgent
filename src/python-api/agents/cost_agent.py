@@ -190,7 +190,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         selections = self._llm_map_services(components, users, primary_region, industry, state, usage_dict)
 
         # ── Step 2: Pricing API — validate SKUs + get prices ─────────
-        items, worst_source, assumptions = self._price_selections(selections, users)
+        items, worst_source, assumptions = self._price_selections(selections, users, usage_dict)
 
         # ── Step 3: Multi-region handling ────────────────────────────
         selections = _handle_multi_region(selections, regions)
@@ -345,7 +345,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
     # ── Pricing + Cost Estimation ────────────────────────────────────
 
     def _price_selections(
-        self, selections: list[dict], users: int,
+        self, selections: list[dict], users: int, usage_dict: dict | None = None,
     ) -> tuple[list[dict], str, list[str]]:
         """Query pricing API for each selection, compute monthly cost."""
         items: list[dict] = []
@@ -379,7 +379,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 warning = note or f"⚠️ Could not validate SKU for {service_name}"
                 sel["skuNote"] = f"{existing_note}. {warning}".strip(". ") if existing_note else warning
 
-            monthly = self._calculate_monthly(price, unit, service_name, users)
+            monthly = self._calculate_monthly(price, unit, service_name, users, usage_dict)
             monthly = self._apply_instance_count(monthly, sku)
 
             # Tag $0 items so downstream rendering explains the zero
@@ -417,12 +417,31 @@ Return ONLY valid JSON (no markdown fences) as an array:
 
     def _calculate_monthly(
         self, unit_price: float, unit: str, service_name: str, users: int,
+        usage_dict: dict | None = None,
     ) -> float:
-        """Convert unit price to monthly cost."""
+        """Convert unit price to monthly cost.
+
+        For per-request services (Azure OpenAI), multiplies by the user's
+        monthly request volume from usage assumptions.
+        """
         if unit_price <= 0:
             return 0.0
 
         unit_lower = unit.lower()
+
+        # Per-request pricing (Azure OpenAI, AI Foundry)
+        if "request" in unit_lower:
+            # Find monthly request volume from user assumptions
+            monthly_requests = 0
+            if usage_dict:
+                for key in ("monthly_copilot_agent_requests", "monthly_agent_requests",
+                            "monthly_ai_requests", "monthly_requests"):
+                    if key in usage_dict:
+                        monthly_requests = int(usage_dict[key])
+                        break
+            if monthly_requests == 0:
+                monthly_requests = 100_000  # default if not provided
+            return unit_price * monthly_requests
 
         if "hour" in unit_lower or service_name in HOURLY_SERVICES:
             return unit_price * 730

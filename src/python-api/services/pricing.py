@@ -73,18 +73,28 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "note": "Batch is free — compute cost from underlying VMs (see Virtual Machines line item)",
         "unit": "1/Month",
     },
-    # Azure OpenAI is token-based; not reliably in the retail API.
+    # Azure OpenAI uses per-token pricing not in the retail API.
+    # GPT-4o: $2.50/1M input tokens, $10/1M output tokens.
+    # Estimate assumes ~800 input + 400 output tokens per request.
+    # Formula: requests × (800/1M × $2.50 + 400/1M × $10.00)
+    # For reference: 100K req/mo ≈ $600, 200K ≈ $1,200, 500K ≈ $3,000
     "Azure OpenAI Service": {
-        "price": 3000.0,
-        "source": "estimated",
-        "note": "Estimated for moderate LLM usage (~200K requests/mo). Actual cost depends on model and token volume.",
-        "unit": "1/Month",
+        "price": 0.006,  # per-request cost (used by cost agent to multiply by volume)
+        "source": "calculated",
+        "note": "GPT-4o: $2.50/1M input + $10/1M output tokens (~800 in + 400 out per request = $0.006/req)",
+        "unit": "1/Request",
     },
     "Azure OpenAI": {
-        "price": 3000.0,
-        "source": "estimated",
-        "note": "Estimated for moderate LLM usage (~200K requests/mo). Actual cost depends on model and token volume.",
-        "unit": "1/Month",
+        "price": 0.006,
+        "source": "calculated",
+        "note": "GPT-4o: $2.50/1M input + $10/1M output tokens (~800 in + 400 out per request = $0.006/req)",
+        "unit": "1/Request",
+    },
+    "Azure AI Foundry": {
+        "price": 0.006,
+        "source": "calculated",
+        "note": "AI Foundry uses Azure OpenAI pricing. GPT-4o: ~$0.006/request (~800 in + 400 out tokens)",
+        "unit": "1/Request",
     },
 }
 
