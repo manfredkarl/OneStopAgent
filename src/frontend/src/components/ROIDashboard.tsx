@@ -81,6 +81,7 @@ const WATERFALL_MIN_LABEL_PCT = 22;
 export default function ROIDashboard({ data }: Props) {
   const {
     monthlySavings,
+    annualImpact,
     azureMonthlyCost,
     savingsPercentage,
     costComparisonAvailable,
