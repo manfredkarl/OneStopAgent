@@ -44,7 +44,7 @@ async def health():
 
 @app.get("/api/info")
 async def info():
-    return {"version": "1.0.0", "framework": "python-fastapi-langchain"}
+    return {"version": "1.0.0", "framework": "python-fastapi-agent-framework"}
 
 
 @app.post("/api/projects")

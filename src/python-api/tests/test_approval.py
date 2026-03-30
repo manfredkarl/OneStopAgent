@@ -10,7 +10,8 @@ from unittest.mock import MagicMock
 
 # ── Stub out Azure-dependent modules before importing approval ─────────────
 # This must happen before the first 'from approval import ...' call.
-sys.modules.setdefault("langchain_openai", MagicMock())
+sys.modules.setdefault("agent_framework", MagicMock())
+sys.modules.setdefault("agent_framework.azure", MagicMock())
 sys.modules.setdefault("agents.llm", MagicMock(llm=MagicMock()))
 
 # Also stub pm_agent / llm imports inside approval's dependency chain

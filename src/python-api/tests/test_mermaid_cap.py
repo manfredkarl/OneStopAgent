@@ -8,7 +8,8 @@ import os
 from unittest.mock import MagicMock
 
 # ── Stub out Azure-dependent modules before importing architect_agent ────────
-sys.modules.setdefault("langchain_openai", MagicMock())
+sys.modules.setdefault("agent_framework", MagicMock())
+sys.modules.setdefault("agent_framework.azure", MagicMock())
 sys.modules.setdefault("agents.llm", MagicMock(llm=MagicMock()))
 sys.modules.setdefault("services.mcp", MagicMock())
 sys.modules.setdefault("services.web_search", MagicMock())
