@@ -394,9 +394,8 @@ export default function ROIDashboard({ data }: Props) {
                         style={{ width: `${costPct}%`, minWidth: 4, maxWidth: '70%' }}
                         className="bg-blue-500 h-7 rounded-l-md flex items-center justify-end px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
                         title={`$${fmt(row.cost.amount)}/yr cost reduction`}
-                      >
-                        {costPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.cost.amount)}` : ""}
-                      </div>
+                      />
+                      <span className="text-xs font-semibold text-blue-400 shrink-0">${fmt(row.cost.amount)}</span>
                     </>
                   ) : (
                     <div className="flex-1" />
@@ -410,13 +409,12 @@ export default function ROIDashboard({ data }: Props) {
                 <div className="flex-1 flex items-center justify-start gap-2 min-w-0 overflow-hidden">
                   {row.uplift ? (
                     <>
+                      <span className="text-xs font-semibold text-purple-400 shrink-0">${fmt(row.uplift.amount)}</span>
                       <div
                         style={{ width: `${upliftPct}%`, minWidth: 4, maxWidth: '70%' }}
                         className="bg-purple-500 h-7 rounded-r-md flex items-center justify-start px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
                         title={`$${fmt(row.uplift.amount)}/yr revenue uplift`}
-                      >
-                        {upliftPct > WATERFALL_MIN_LABEL_PCT ? `$${fmt(row.uplift.amount)}` : ""}
-                      </div>
+                      />
                       <span className="text-xs text-[var(--text-muted)] truncate shrink min-w-0">
                         {row.uplift.label}
                       </span>
