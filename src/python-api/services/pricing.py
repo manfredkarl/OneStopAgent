@@ -16,7 +16,6 @@ PRICING_API = "https://prices.azure.com/api/retail/prices"
 
 # The Retail Prices API uses specific service names that differ from common names.
 SERVICE_NAME_MAP: dict[str, str] = {
-    "Azure OpenAI Service": "Azure OpenAI",
     "Azure AI Search": "Azure Cognitive Search",
     "Azure Logic Apps": "Logic Apps",
     "Azure Event Grid": "Event Grid",
@@ -25,8 +24,6 @@ SERVICE_NAME_MAP: dict[str, str] = {
     "Blob Storage": "Storage",
     "Azure Data Lake Storage": "Storage",
     "Data Lake Storage": "Storage",
-    "Azure Batch": "Virtual Machines",
-    "Azure CycleCloud": "Virtual Machines",
     "Azure Service Bus": "Service Bus",
     "Azure Event Hubs": "Event Hubs",
     "Azure Cosmos DB for NoSQL": "Azure Cosmos DB",
@@ -60,6 +57,33 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "price": 500.0,
         "source": "estimated",
         "note": "Estimated ~$500/month for moderate usage (SMS, voice, chat). Actual cost varies with volume.",
+        "unit": "1/Month",
+    },
+    # CycleCloud is a free orchestration layer; compute cost comes from underlying VMs.
+    "Azure CycleCloud": {
+        "price": 0.0,
+        "source": "estimated",
+        "note": "CycleCloud is free — compute cost from underlying VMs (see Virtual Machines line item)",
+        "unit": "1/Month",
+    },
+    # Batch is a free orchestration layer; compute cost comes from underlying VMs.
+    "Azure Batch": {
+        "price": 0.0,
+        "source": "estimated",
+        "note": "Batch is free — compute cost from underlying VMs (see Virtual Machines line item)",
+        "unit": "1/Month",
+    },
+    # Azure OpenAI is token-based; not reliably in the retail API.
+    "Azure OpenAI Service": {
+        "price": 3000.0,
+        "source": "estimated",
+        "note": "Estimated for moderate LLM usage (~200K requests/mo). Actual cost depends on model and token volume.",
+        "unit": "1/Month",
+    },
+    "Azure OpenAI": {
+        "price": 3000.0,
+        "source": "estimated",
+        "note": "Estimated for moderate LLM usage (~200K requests/mo). Actual cost depends on model and token volume.",
         "unit": "1/Month",
     },
 }

@@ -310,10 +310,8 @@ def search_local_patterns(query: str, top_k: int = 5) -> list[dict]:
 
     scored.sort(key=lambda x: x[0], reverse=True)
     if not scored:
-        return [
-            {**p, "confidence_score": 0.3}
-            for p in PATTERNS[: min(top_k, 3)]
-        ]
+        # No keyword matches — return empty instead of forcing irrelevant patterns
+        return []
     return [r for _, r in scored[:top_k]]
 
 

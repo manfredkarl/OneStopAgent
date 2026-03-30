@@ -505,8 +505,17 @@ RULES:
             parts.append(f"| **Annual** | **${annual:,.0f}** |")
             parts.append(f"| **Pricing source** | {source} |")
 
-            # Confidence based on pricing source
-            confidence = "high" if source == "live" else "medium" if source == "live-fallback" else "low"
+            # Confidence based on proportion of services with live pricing
+            _live_count = sum(
+                int(p.split()[0])
+                for p in source.split(", ")
+                if any(p.endswith(s) for s in ("live", "live-fallback"))
+            ) if isinstance(source, str) else 0
+            _total_count = sum(
+                int(p.split()[0]) for p in source.split(", ")
+            ) if isinstance(source, str) else 1
+            _live_pct = _live_count / max(_total_count, 1)
+            confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"
             parts.append(f"| **Confidence** | {confidence} |\n")
 
             # Top 5 cost drivers

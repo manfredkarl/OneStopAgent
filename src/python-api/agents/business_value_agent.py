@@ -110,7 +110,21 @@ Keep it to 3-5 questions max. Be concise."""},
                 if r.get("url"):
                     search_context += f"  URL: {r['url']}\n"
         else:
-            search_context = "No web search results available — DO NOT make up benchmark sources. Only cite sources if you are CERTAIN they are real published reports with verifiable URLs. Otherwise leave source_url empty and use 'Industry estimate' as source_name.\n"
+            search_context = (
+                "No web search results available.\n"
+                "DO NOT fabricate benchmark sources or URLs.\n"
+                "Since you are computing value from the user-provided assumptions below, "
+                "be HONEST about the source: the numbers come from the user's data combined "
+                "with a standard calculation methodology.\n"
+                "Use descriptive source_name labels such as:\n"
+                "  - 'Calculated from user assumptions' (when the math is based on user inputs)\n"
+                "  - 'Labor rate analysis' (for headcount × rate × savings calculations)\n"
+                "  - 'Spend optimization model' (for infrastructure cost reduction drivers)\n"
+                "  - 'Revenue acceleration estimate' (for revenue uplift drivers)\n"
+                "  - 'Azure industry analysis' or 'Microsoft customer evidence' (for Azure-specific claims)\n"
+                "NEVER use the vague label 'Industry estimate'.\n"
+                "Always set source_url to '' (empty string) when no real URL exists.\n"
+            )
 
         # Extra context from prior agents (iteration re-runs)
         extra = []
@@ -128,7 +142,15 @@ Keep it to 3-5 questions max. Be concise."""},
         if search_results:
             source_instruction = "Cite real, published sources with URLs for each driver."
         else:
-            source_instruction = "Mark source_name as 'Industry estimate' and source_url as '' since no published sources were found."
+            source_instruction = (
+                "Be honest about sources. Since calculations are derived from user-provided assumptions, "
+                "use descriptive labels like 'Calculated from user assumptions', 'Labor rate analysis', "
+                "'Spend optimization model', 'Revenue acceleration estimate', 'Azure industry analysis', "
+                "or 'Microsoft customer evidence'. NEVER use the vague label 'Industry estimate'. "
+                "Set source_url to '' (empty string). "
+                "In the description, briefly cite the methodology, e.g. "
+                "'Based on 20-30% engineering time savings applied to 1,600 hrs/week × $100/hr labor rate'."
+            )
 
         prompt = f"""You are a value engineer. Produce EXACTLY 3 benchmark-backed value drivers for this Azure solution.
 
@@ -173,8 +195,8 @@ Return ONLY valid JSON (no markdown fences):
       "metric": "10–20% time savings" or similar specific range,
       "description": "One sentence explaining the mechanism",
       "category": "cost_reduction" or "revenue_uplift",
-      "source_name": "Gartner 2024" or "McKinsey Digital" or similar,
-      "source_url": "https://..."
+      "source_name": "Calculated from user assumptions" or "Labor rate analysis" or "Spend optimization model",
+      "source_url": "" or "https://..." (empty string when no real URL exists)
     }}
   ],
   "annual_impact_range": {{ "low": 500000, "high": 1200000 }} or null,
@@ -194,7 +216,7 @@ CATEGORY RULES:
 
         try:
             response = llm.invoke([
-                {"role": "system", "content": "You are an Azure value engineer. Return ONLY valid JSON. Be realistic based on published industry data, cite real sources, no fluff."},
+                {"role": "system", "content": "You are an Azure value engineer. Return ONLY valid JSON. Be realistic based on published industry data when available; when computing from user-provided assumptions, honestly label sources as calculation-based rather than citing vague 'Industry estimate'. No fluff."},
                 {"role": "user", "content": prompt},
             ])
 
