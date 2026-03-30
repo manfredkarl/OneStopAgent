@@ -353,8 +353,8 @@ Return ONLY valid JSON (no markdown fences) as an array:
             "Based on 730 hours/month for hourly-priced services",
             "Pay-as-you-go pricing (no reservations or savings plans)",
         ]
-        worst_source = "live"
-        source_priority = {"live": 0, "live-fallback": 1, "approximate": 2}
+        source_counts: dict[str, int] = {}
+        source_priority = {"live": 0, "live-fallback": 1, "estimated": 2, "unavailable": 3}
 
         # TODO: Parallelize pricing lookups with concurrent.futures.ThreadPoolExecutor
         # Current: sequential calls, ~10s timeout each → 100s worst case for 10 services
@@ -398,8 +398,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 "pricingNote": cost_note,
             })
 
-            if source_priority.get(source, 2) > source_priority.get(worst_source, 0):
-                worst_source = source
+            source_counts[source] = source_counts.get(source, 0) + 1
 
             consumption = CONSUMPTION_ASSUMPTIONS.get(service_name)
             if consumption:
@@ -407,7 +406,12 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 if assumption_text not in assumptions:
                     assumptions.append(assumption_text)
 
-        return items, worst_source, assumptions
+        # Build pricing source summary (e.g. "12 live, 3 estimated")
+        label_order = ["live", "live-fallback", "estimated", "unavailable"]
+        parts = [f"{source_counts[s]} {s}" for s in label_order if s in source_counts]
+        pricing_source_label = ", ".join(parts) if parts else "unavailable"
+
+        return items, pricing_source_label, assumptions
 
     # ── Helpers ──────────────────────────────────────────────────────
 

@@ -27,11 +27,41 @@ SERVICE_NAME_MAP: dict[str, str] = {
     "Data Lake Storage": "Storage",
     "Azure Batch": "Virtual Machines",
     "Azure CycleCloud": "Virtual Machines",
-    "Microsoft Entra ID": "Azure Active Directory",
-    "Entra ID": "Azure Active Directory",
     "Azure Service Bus": "Service Bus",
     "Azure Event Hubs": "Event Hubs",
     "Azure Cosmos DB for NoSQL": "Azure Cosmos DB",
+    # API names verified against the Retail Prices API
+    "Azure API Management": "API Management",
+    "Azure Digital Twins": "Digital Twins",
+    "Azure IoT Hub": "IoT Hub",
+    # AI Foundry is built on Azure ML — use ML pricing as closest proxy
+    "Azure AI Foundry": "Azure Machine Learning",
+}
+
+# Services that have NO entries in the Retail Prices API.
+# These use per-user licensing or pure consumption billing not listed in retail prices.
+ESTIMATED_PRICES: dict[str, dict] = {
+    # Entra ID is licensed per-user/month via Microsoft 365; not in the retail API.
+    "Microsoft Entra ID": {
+        "price": 6.0,
+        "source": "estimated",
+        "note": "Entra ID P1: $6/user/month (Microsoft 365 licensing)",
+        "unit": "1/Month per user",
+    },
+    "Entra ID": {
+        "price": 6.0,
+        "source": "estimated",
+        "note": "Entra ID P1: $6/user/month (Microsoft 365 licensing)",
+        "unit": "1/Month per user",
+    },
+    # Communication Services is pure consumption (per SMS/minute/message);
+    # no retail price entries exist.
+    "Azure Communication Services": {
+        "price": 500.0,
+        "source": "estimated",
+        "note": "Estimated ~$500/month for moderate usage (SMS, voice, chat). Actual cost varies with volume.",
+        "unit": "1/Month",
+    },
 }
 
 # Services whose API prices are per-hour (need ×730 for monthly estimate)
@@ -101,12 +131,18 @@ def query_azure_pricing_sync(
 ) -> dict:
     """Query Azure Retail Prices API. Returns {price, source, note, unit}.
 
-    Sources: "live", "live-fallback", "unavailable"
+    Sources: "live", "live-fallback", "estimated", "unavailable"
     """
     with _tracer.start_as_current_span("azure.pricing.query") as span:
         span.set_attribute("pricing.service_name", service_name)
         span.set_attribute("pricing.sku", sku)
         span.set_attribute("pricing.region", region)
+
+        # Return a known estimate for services not in the Retail Prices API
+        if service_name in ESTIMATED_PRICES:
+            est = ESTIMATED_PRICES[service_name]
+            span.set_attribute("pricing.source", "estimated")
+            return dict(est)  # return a copy
 
         # Translate service name for API
         api_name = SERVICE_NAME_MAP.get(service_name, service_name)

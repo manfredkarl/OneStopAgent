@@ -39,9 +39,8 @@ Be specific to the industry and use case. Include things like:
 - Time spent on manual processes
 - Revenue or transaction volumes
 
-IMPORTANT: Use CONSERVATIVE default values. Better to underestimate —
-the user can always increase them. Avoid defaults that would produce
-an ROI above 5x.
+IMPORTANT: Use REALISTIC default values based on published industry midpoints
+for mid-size enterprises. Do not artificially deflate defaults.
 Keep it to 3-5 questions max. Be concise."""},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"}
             ])
@@ -56,12 +55,12 @@ Keep it to 3-5 questions max. Be concise."""},
         except Exception:
             pass
 
-        # Fallback generic assumptions — slightly conservative defaults
+        # Fallback generic assumptions — realistic enterprise defaults
         return [
-            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 30, "hint": "How many people will use or benefit from this solution"},
-            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 15000, "hint": "Approximate monthly infrastructure/operations cost"},
-            {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 15, "hint": "Time that could be automated or reduced"},
-            {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 150000, "hint": "Revenue from the business area this solution touches"},
+            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 100, "hint": "How many people will use or benefit from this solution"},
+            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 50000, "hint": "Approximate monthly infrastructure/operations cost"},
+            {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 40, "hint": "Time that could be automated or reduced"},
+            {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 250000, "hint": "Revenue from the business area this solution touches"},
         ]
 
     def run(self, state: AgentState) -> AgentState:
@@ -147,6 +146,7 @@ USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
 RULES — follow precisely:
 1. Return EXACTLY 3 value drivers. No more, no fewer.
 2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
+   Use the midpoint of published industry ranges — do not artificially deflate percentages.
 3. {source_instruction}
    Include the source name AND a URL. If you don't have a real URL, use the best matching web search result above.
 4. Do NOT write long prose. Each description is 1 sentence max.
@@ -155,6 +155,15 @@ RULES — follow precisely:
 6. List every assumption behind that number explicitly (headcount, hourly rate, hours saved, etc.).
 7. If you cannot compute a dollar range without knowing something, still give the percentage drivers
    but set annual_impact_range to null and list what's missing in assumptions.
+
+CALCULATION APPROACH:
+- Calculate each driver INDEPENDENTLY using the user-provided assumptions.
+- Use realistic percentage ranges based on published industry data (not artificially deflated).
+- For revenue uplift drivers, count the revenue impact at face value — do NOT discount
+  revenue uplift to a small fraction (e.g. 5%) of the actual calculated impact.
+- Sum the drivers directly. Do NOT apply "overlap adjustments", "double counting reductions",
+  or any cross-driver deductions.
+- Set confidence to "moderate" by default.
 
 Return ONLY valid JSON (no markdown fences):
 {{
@@ -173,7 +182,7 @@ Return ONLY valid JSON (no markdown fences):
     "500 engineers at $75/hr average fully loaded cost",
     "15% reduction in search time = 120 hrs/engineer/year"
   ],
-  "confidence": "conservative" | "moderate" | "optimistic"
+  "confidence": "moderate"
 }}
 
 CATEGORY RULES:
@@ -185,7 +194,7 @@ CATEGORY RULES:
 
         try:
             response = llm.invoke([
-                {"role": "system", "content": "You are an Azure value engineer. Return ONLY valid JSON. Be specific, cite real sources, no fluff."},
+                {"role": "system", "content": "You are an Azure value engineer. Return ONLY valid JSON. Be realistic based on published industry data, cite real sources, no fluff."},
                 {"role": "user", "content": prompt},
             ])
 
