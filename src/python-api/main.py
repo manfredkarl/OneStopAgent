@@ -240,15 +240,27 @@ async def download_pptx(project_id: str, x_user_id: str = Header()):
 _DEVUI_PORT = 8081
 
 
-def _start_devui_background(entities_dir: str = "agents", port: int = _DEVUI_PORT) -> None:
-    """Launch MAF DevUI on a background thread for local debugging."""
+def _start_devui_background(port: int = _DEVUI_PORT) -> None:
+    """Launch MAF DevUI on a background thread with the pipeline workflow registered."""
     import threading
 
     def _run() -> None:
         try:
-            from agent_framework_devui import serve
+            from agent_framework_devui import EntityInfo, serve
 
-            serve(entities_dir=entities_dir, port=port, host="127.0.0.1", auto_open=True)
+            from workflow import create_pipeline_workflow
+
+            wf = create_pipeline_workflow()
+            entity = EntityInfo(
+                id="onestop-pipeline",
+                type="workflow",
+                name="OneStopAgent Pipeline",
+                description="Architect → Cost → BV → ROI → Presentation with HITL approval gates",
+                framework="agent-framework",
+                executors=[e.id for e in wf.get_executors_list()],
+                start_executor_id=wf.get_start_executor().id,
+            )
+            serve(entities=[entity], port=port, host="127.0.0.1", auto_open=True)
         except Exception as exc:
             import logging
 
