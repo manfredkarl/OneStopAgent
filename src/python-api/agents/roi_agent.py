@@ -129,6 +129,15 @@ class ROIAgent:
         if payback_months is not None and payback_months > 120:
             payback_months = 120.0
 
+        # Cap displayed ROI to avoid unrealistic precision
+        MAX_DISPLAY_ROI = 1000  # 10x = 1000%
+        roi_display = min(roi_mid, MAX_DISPLAY_ROI)
+        roi_capped = roi_mid > MAX_DISPLAY_ROI
+
+        # Payback: cap at reasonable max
+        if payback_months is not None and payback_months < 0.5:
+            payback_months = max(payback_months, 0.5)  # Minimum half-month payback
+
         state.roi = {
             "annual_cost": round(annual_cost, 2),
             "annual_value": round(val_mid, 2),
@@ -210,7 +219,9 @@ class ROIAgent:
 
     def _build_dashboard(self, state: AgentState, annual_cost: float,
                          annual_value: float, roi_percent: float | None,
-                         payback_months: float | None) -> dict:
+                         payback_months: float | None,
+                         roi_capped: bool = False,
+                         max_display_roi: int = 1000) -> dict:
         """Build the cost-breakdown data for the frontend ROI dashboard.
 
         Pulls REAL data from upstream agents — not hardcoded values.
@@ -319,6 +330,9 @@ class ROIAgent:
 
         ai_total = sum(item["amount"] for item in ai_breakdown)
 
+        # Add AI inference estimate from cost items
+        ai_inference = sum(item.get("monthlyCost", 0) for item in cost_items if "openai" in item.get("serviceName", "").lower() or "ai" in item.get("serviceName", "").lower())
+
         # ── Cost comparison ──────────────────────────────────────────
         if current_total > 0:
             savings = current_total - ai_total
@@ -326,6 +340,14 @@ class ROIAgent:
         else:
             savings = 0
             savings_pct = 0
+
+        # Cap savings at 60% of baseline — 99% reduction is not realistic
+        MAX_SAVINGS_PCT = 60
+        if savings > 0 and current_total > 0:
+            actual_pct = (savings / current_total) * 100
+            if actual_pct > MAX_SAVINGS_PCT:
+                savings = current_total * (MAX_SAVINGS_PCT / 100)
+                savings_pct = MAX_SAVINGS_PCT
 
         # ── Value drivers from BV agent ──────────────────────────────
         drivers = [
@@ -366,31 +388,25 @@ class ROIAgent:
         annual_total_value = annual_cost_reduction + annual_uplift
         annual_net_value = annual_total_value - annual_azure_cost
 
+        # Adoption ramp: Year 1 = 50% value (ramp-up), Year 2 = 85%, Year 3 = 100%
+        ADOPTION_RAMP = [0.50, 0.85, 1.00]
+
         projection = {
             "years": [1, 2, 3],
+            "adoptionRamp": ["50%", "85%", "100%"],
             "annualAzureCost": round(annual_azure_cost),
             "annualCostReduction": round(annual_cost_reduction),
             "annualRevenueUplift": round(annual_uplift),
             "annualNetValue": round(annual_net_value),
             "cumulative": [
                 {
-                    "year": 1,
-                    "azureCost": round(annual_azure_cost),
-                    "totalValue": round(annual_total_value),
-                    "netValue": round(annual_net_value),
-                },
-                {
-                    "year": 2,
-                    "azureCost": round(annual_azure_cost * 2),
-                    "totalValue": round(annual_total_value * 2),
-                    "netValue": round(annual_net_value * 2),
-                },
-                {
-                    "year": 3,
-                    "azureCost": round(annual_azure_cost * 3),
-                    "totalValue": round(annual_total_value * 3),
-                    "netValue": round(annual_net_value * 3),
-                },
+                    "year": yr + 1,
+                    "adoption": f"{int(ADOPTION_RAMP[yr] * 100)}%",
+                    "azureCost": round(annual_azure_cost * (yr + 1)),  # Full cost from day 1
+                    "totalValue": round(annual_total_value * sum(ADOPTION_RAMP[:yr+1])),  # Ramped value
+                    "netValue": round(annual_total_value * sum(ADOPTION_RAMP[:yr+1]) - annual_azure_cost * (yr + 1)),
+                }
+                for yr in range(3)
             ],
         }
 
@@ -432,10 +448,24 @@ class ROIAgent:
             methodology += f"Current operational costs derived from {assumption_note}. "
         methodology += (
             driver_note
-            + "Projection uses flat annual figures; one-time implementation costs are excluded. "
+            + "Projection assumes 50/85/100% adoption ramp over 3 years. "
+            + "One-time implementation costs are excluded. "
             + "Risk reduction estimated at 3% of current annual spend (governance, compliance, reduced outage exposure). "
             + "ROI = (Annual Value \u2212 Annual Cost) \u00f7 Annual Cost \u00d7 100."
         )
+        methodology += f" Savings capped at {MAX_SAVINGS_PCT}% of current baseline to ensure realism."
+
+        # Classify assumptions
+        assumption_types = []
+        if sa_annual_spend:
+            assumption_types.append("Current baseline: user-provided")
+        else:
+            assumption_types.append("Current baseline: estimated (1.5\u00d7 Azure cost)")
+        if bv_drivers:
+            assumption_types.append(f"Value drivers: {len(bv_drivers)} identified ({state.business_value.get('confidence', 'moderate')} confidence)")
+        assumption_types.append(f"Azure costs: {cost_source}")
+
+        methodology += " Assumptions: " + "; ".join(assumption_types) + "."
 
         # ── Business Case ────────────────────────────────────────────
         business_case = self._build_business_case(
@@ -444,10 +474,20 @@ class ROIAgent:
             bv_drivers,
         )
 
+        # Append risk methodology note determined by _build_business_case
+        if hasattr(self, '_methodology_risk') and self._methodology_risk:
+            methodology += " " + self._methodology_risk
+
+        bv = state.business_value
+
         dashboard: dict = {
             "monthlySavings": savings,
             "annualImpact": round(annual_value),
             "azureMonthlyCost": azure_monthly,
+            "platformCostMonthly": azure_monthly,
+            "platformCostAnnual": round(azure_monthly * 12),
+            "totalOperatingCostMonthly": round(current_total) if current_total else None,
+            "aiInferenceMonthlyCost": round(ai_inference) if ai_inference else None,
             "savingsPercentage": savings_pct,
             "costComparisonAvailable": True,
             "currentCost": {
@@ -459,8 +499,20 @@ class ROIAgent:
                 "breakdown": ai_breakdown,
             },
             "roiPercent": roi_percent,
+            "roiCapped": roi_capped,
+            "roiDisplayText": f">{max_display_roi // 100}x" if roi_capped else f"{(roi_percent/100 + 1):.1f}x" if roi_percent is not None else None,
+            "confidenceLevel": bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
-            "drivers": drivers,
+            "drivers": [
+                {
+                    "name": d.get("name", ""),
+                    "metric": d.get("metric", ""),
+                    "category": d.get("category", "cost_reduction"),
+                    "annualImpact": driver_amounts[idx],
+                    "methodology": d.get("description", ""),
+                }
+                for idx, d in enumerate(bv_drivers)
+            ],
             "valueWaterfall": value_waterfall,
             "projection": projection,
             "methodology": methodology,
@@ -540,6 +592,14 @@ class ROIAgent:
         # include labor/time savings) — don't double-count.
         productivity = 0
         risk_reduction = round(current_annual * 0.03) if current_annual else 0
+
+        # Only include risk reduction if material (>5% of total value)
+        preliminary_total = hard_savings + revenue_uplift
+        if risk_reduction < preliminary_total * 0.05:
+            self._methodology_risk = f"Risk reduction ({risk_reduction:,.0f}) excluded as immaterial (<5% of total value)."
+            risk_reduction = 0
+        else:
+            self._methodology_risk = "Risk reduction estimated at 3% of current annual spend."
 
         total_value = round(hard_savings + revenue_uplift + risk_reduction)
 

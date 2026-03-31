@@ -28,7 +28,7 @@ interface Projection {
   annualCostReduction?: number;
   annualRevenueUplift?: number;
   annualNetValue?: number;
-  cumulative?: { year: number; azureCost: number; totalValue: number; netValue: number }[];
+  cumulative?: { year: number; azureCost: number; totalValue: number; netValue: number; adoption?: string }[];
   // Legacy fields (backward compat)
   cumulativeSavings?: number[] | null;
   cumulativeCost?: number[];
@@ -61,6 +61,9 @@ interface ROIDashboardData {
   };
 
   roiPercent: number | null;
+  roiCapped?: number | null;
+  roiDisplayText?: string;
+  confidenceLevel?: 'high' | 'moderate' | 'low';
   paybackMonths: number | null;
 
   costComparisonAvailable?: boolean;
@@ -120,6 +123,9 @@ export default function ROIDashboard({ data }: Props) {
   const aiBarWidth = hasAiCost ? (aiCost.total / maxCostBar) * 100 : 0;
 
   const roiMultiple = roiPercent != null ? ((roiPercent / 100) + 1) : null;
+  const roiDisplay = data.roiDisplayText || (roiMultiple != null
+    ? (roiMultiple > 10 ? ">10x" : `${roiMultiple.toFixed(1)}x`)
+    : "—");
 
   // Butterfly chart helpers
   const maxWaterfallAmount = hasWaterfall
@@ -183,11 +189,18 @@ export default function ROIDashboard({ data }: Props) {
             Return on Investment
           </p>
           <p className="text-2xl font-bold text-[var(--accent)]">
-            {roiMultiple != null ? `${roiMultiple.toFixed(1)}x` : "—"}
+            {roiDisplay}
           </p>
+          {data.confidenceLevel && (
+            <p className={`text-[10px] px-2 py-0.5 rounded-full inline-block mt-1 ${
+              data.confidenceLevel === 'high' ? 'bg-green-500/20 text-green-400' :
+              data.confidenceLevel === 'moderate' ? 'bg-yellow-500/20 text-yellow-400' :
+              'bg-red-500/20 text-red-400'
+            }`}>{data.confidenceLevel} confidence</p>
+          )}
           {paybackMonths != null && (
             <p className="text-xs text-[var(--text-muted)]">
-              {paybackMonths.toFixed(1)} month payback
+              {paybackMonths < 1 ? "<1 month" : paybackMonths > 36 ? ">3 year" : `${paybackMonths.toFixed(0)} month`} payback
             </p>
           )}
         </div>
@@ -520,7 +533,7 @@ export default function ROIDashboard({ data }: Props) {
                   return (
                     <div key={yr.year} className="text-center">
                       <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
-                        Year {yr.year}
+                        Year {yr.year} {yr.adoption && <span className="text-[var(--accent)] normal-case">({yr.adoption})</span>}
                       </p>
                       <div className="flex items-end justify-center gap-3 mb-2" style={{ height: 112 }}>
                         <div className="text-center">
