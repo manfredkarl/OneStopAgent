@@ -175,6 +175,12 @@ class ArchitectExecutor(PipelineExecutor):
 
         if resp_lower in ("skip", "skip this", "next"):
             msg.state.mark_step_skipped(self.step_name)
+        elif resp_lower in ("refine", "redo", "again", "retry"):
+            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+            })
         # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
         await ctx.send_message(msg)
 
@@ -314,10 +320,16 @@ class CostExecutor(PipelineExecutor):
                 await ctx.send_message(msg)
             return
 
-        # ApprovalRequest path — check for skip intent
+        # ApprovalRequest path — check for skip or refine intent
         resp_lower = response.strip().lower()
         if resp_lower in ("skip", "skip this", "next"):
             state.mark_step_skipped("cost")
+        elif resp_lower in ("refine", "redo", "again", "retry"):
+            state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+            })
         await ctx.send_message(msg)
 
 
@@ -458,10 +470,16 @@ class BusinessValueExecutor(PipelineExecutor):
                 await ctx.send_message(msg)
             return
 
-        # ApprovalRequest path — check for skip intent
+        # ApprovalRequest path — check for skip or refine intent
         resp_lower = response.strip().lower()
         if resp_lower in ("skip", "skip this", "next"):
             state.mark_step_skipped("business_value")
+        elif resp_lower in ("refine", "redo", "again", "retry"):
+            state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+            })
         await ctx.send_message(msg)
 
 
@@ -538,6 +556,12 @@ class ROIExecutor(PipelineExecutor):
 
         if resp_lower in ("skip", "skip this", "next"):
             msg.state.mark_step_skipped(self.step_name)
+        elif resp_lower in ("refine", "redo", "again", "retry"):
+            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+            })
         # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
         await ctx.send_message(msg)
 
@@ -618,10 +642,16 @@ class PresentationExecutor(PipelineExecutor):
         self, request: ApprovalRequest, response: str,
         ctx: WorkflowContext,
     ) -> None:
+        msg: PipelineMessage = ctx.get_state("pipeline")
         resp_lower = response.strip().lower()
         if resp_lower in ("skip", "skip this", "next"):
-            msg: PipelineMessage = ctx.get_state("pipeline")
             msg.state.mark_step_skipped("presentation")
+        elif resp_lower in ("refine", "redo", "again", "retry"):
+            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+            })
         await ctx.yield_output({
             "type": "pipeline_done",
             "content": "Pipeline complete.",

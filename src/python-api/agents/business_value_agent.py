@@ -78,9 +78,24 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
             logger.warning("Phase 1 assumption generation failed: %s", e)
 
         # Fallback generic assumptions — realistic enterprise defaults
+        # Use shared assumptions to inform defaults if available
+        sa = state.shared_assumptions or {} if hasattr(state, 'shared_assumptions') else {}
+        default_employees = 100
+        default_spend = 50000
+        for k, v in sa.items():
+            kl = k.lower()
+            try:
+                fv = float(v)
+            except (ValueError, TypeError):
+                continue
+            if ("user" in kl or "engineer" in kl) and fv > 1:
+                default_employees = int(fv)
+            elif ("spend" in kl or "cost" in kl) and fv > 1000:
+                default_spend = int(fv / 12)  # Convert annual to monthly
+
         return [
-            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": 100, "hint": "How many people will use or benefit from this solution"},
-            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": 50000, "hint": "Approximate monthly infrastructure/operations cost"},
+            {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": default_employees, "hint": "How many people will use or benefit from this solution"},
+            {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": default_spend, "hint": "Approximate monthly infrastructure/operations cost"},
             {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 40, "hint": "Time that could be automated or reduced"},
             {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 250000, "hint": "Revenue from the business area this solution touches"},
         ]

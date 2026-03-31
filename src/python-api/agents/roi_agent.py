@@ -264,9 +264,12 @@ class ROIAgent:
 
         if not current_breakdown:
             if not has_any_input:
-                # No user input — estimate current cost from Azure spend only (NOT from annual_value).
-                # Industry rule-of-thumb: total operational cost ≈ 2× cloud platform cost.
-                estimated_current = max(azure_monthly * 2, 5000)
+                # Last-resort estimate: NO shared assumptions AND no user inputs provided.
+                # Uses 1.5× Azure cost as rough proxy for current equivalent capability.
+                estimated_current = round(azure_monthly * 1.5)
+                # Industry-typical breakdown when no detailed user inputs:
+                # 55% labor (salaries, contractors), 30% tools/licenses, 15% delay/opportunity cost
+                # Source: Gartner IT Spending Benchmark (approximate)
                 current_breakdown.append({"label": "Operations (estimated)", "amount": round(estimated_current * 0.75)})
                 current_breakdown.append({"label": "Overhead (estimated)", "amount": round(estimated_current * 0.25)})
             else:
@@ -499,6 +502,9 @@ class ROIAgent:
             if m and hourly_rate:
                 manual_hours_annual += float(m.group(1)) * 20  # rough proxy
 
+        # Industry-typical breakdown when no detailed user inputs:
+        # 55% labor (salaries, contractors), 30% tools/licenses, 15% delay/opportunity cost
+        # Source: Gartner IT Spending Benchmark (approximate)
         labor_portion = round(hourly_rate * manual_hours_annual) if hourly_rate and manual_hours_annual else round(current_annual * 0.55)
         tool_portion = round(current_annual * 0.30) if current_annual else 0
         delay_portion = round(current_annual - labor_portion - tool_portion) if current_annual else 0

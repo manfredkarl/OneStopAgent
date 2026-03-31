@@ -35,11 +35,13 @@ def _build_credential():
         from azure.core.credentials import AccessToken
 
         class _StaticTokenCredential:
-            """Credential that returns a pre-fetched token (no refresh)."""
+            """Credential that uses AZURE_OPENAI_TOKEN env var, re-reading on each call."""
             def get_token(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                return AccessToken(token, int(time.time()) + 3600)
+                current_token = os.environ.get("AZURE_OPENAI_TOKEN", token)
+                return AccessToken(current_token, int(time.time()) + 3600)
             async def get_token_async(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                return AccessToken(token, int(time.time()) + 3600)
+                current_token = os.environ.get("AZURE_OPENAI_TOKEN", token)
+                return AccessToken(current_token, int(time.time()) + 3600)
 
         return _StaticTokenCredential()
 

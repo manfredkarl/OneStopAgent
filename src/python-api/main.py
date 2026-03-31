@@ -22,6 +22,12 @@ from telemetry import setup_telemetry
 setup_telemetry()
 
 # ---------------------------------------------------------------------------
+# Security — allowed output directory for file downloads
+# ---------------------------------------------------------------------------
+
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "output"))
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -295,9 +301,16 @@ async def download_pptx(project_id: str, x_user_id: str = Header()):
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Presentation not generated yet. Run all agents first.")
 
-    filename = os.path.basename(path)
+    # Path validation — prevent directory traversal
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(OUTPUT_DIR):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not abs_path.endswith(".pptx"):
+        raise HTTPException(status_code=403, detail="Invalid file type")
+
+    filename = os.path.basename(abs_path)
     return FileResponse(
-        path,
+        abs_path,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},

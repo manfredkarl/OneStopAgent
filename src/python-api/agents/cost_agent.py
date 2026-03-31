@@ -443,16 +443,22 @@ Return ONLY valid JSON (no markdown fences) as an array:
 
         # Per-request pricing (Azure OpenAI, AI Foundry)
         if "request" in unit_lower:
-            # Find monthly request volume from user assumptions
+            # Find monthly request volume from user assumptions (usage_dict
+            # already includes shared_assumptions merged upstream)
             monthly_requests = 0
             if usage_dict:
                 for key in ("monthly_copilot_agent_requests", "monthly_agent_requests",
-                            "monthly_ai_requests", "monthly_requests"):
-                    if key in usage_dict:
-                        monthly_requests = int(usage_dict[key])
+                            "monthly_ai_requests", "monthly_requests",
+                            "daily_agent_and_model_requests", "daily_requests"):
+                    if usage_dict.get(key):
+                        val = int(usage_dict[key])
+                        # Convert daily to monthly if needed
+                        if "daily" in key:
+                            val = val * 30
+                        monthly_requests = val
                         break
             if monthly_requests == 0:
-                monthly_requests = 100_000  # default if not provided
+                monthly_requests = 50_000  # Conservative default (reduced from 100K)
             return unit_price * monthly_requests
 
         if "hour" in unit_lower or service_name in HOURLY_SERVICES:

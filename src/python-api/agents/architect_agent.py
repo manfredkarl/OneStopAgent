@@ -32,6 +32,7 @@ class ArchitectAgent:
             scenarios = state.brainstorming.get("scenarios", [])
             state.architecture = self._generate_architecture(
                 requirements, pattern, industry, scenarios,
+                shared_assumptions=state.shared_assumptions,
             )
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
@@ -83,6 +84,7 @@ class ArchitectAgent:
         pattern: dict | None,
         industry: str,
         scenarios: list[dict],
+        shared_assumptions: dict | None = None,
     ) -> dict:
         """Generate a layered, use-case-framed architecture in one LLM call."""
         pattern_context = ""
@@ -97,6 +99,28 @@ class ArchitectAgent:
                 "ADAPT this reference architecture to the user's specific scenario.\n"
                 "Mention by name which Microsoft pattern you adapted and why.\n"
             )
+
+        # Add scale context from shared assumptions
+        scale_context = ""
+        sa = shared_assumptions or {}
+        if sa:
+            scale_parts = []
+            for k, v in sa.items():
+                if k.startswith("_"):
+                    continue
+                kl = k.lower()
+                try:
+                    fv = float(v)
+                except (ValueError, TypeError):
+                    continue
+                if ("user" in kl or "engineer" in kl) and fv > 1:
+                    scale_parts.append(f"- Total users: {int(fv)}")
+                elif "concurrent" in kl and fv > 1:
+                    scale_parts.append(f"- Peak concurrent users: {int(fv)}")
+                elif ("volume" in kl or "storage" in kl or "data" in kl) and "gb" in kl and fv > 0:
+                    scale_parts.append(f"- Data volume: {int(fv)} GB")
+            if scale_parts:
+                scale_context = "SCALE REQUIREMENTS (from shared assumptions):\n" + "\n".join(scale_parts) + "\nDesign the architecture to handle this scale appropriately.\n\n"
 
         scenario_context = ""
         if scenarios:
@@ -113,6 +137,7 @@ class ArchitectAgent:
                     "Do NOT produce a generic list of Azure services. Instead, organize around functional LAYERS\n"
                     "that map to what the customer is actually trying to do.\n\n"
                     f"INDUSTRY: {industry}\n"
+                    f"{scale_context}"
                     f"{pattern_context}"
                     f"{scenario_context}\n"
                     "Return ONLY valid JSON (no markdown fences) with this structure:\n"
