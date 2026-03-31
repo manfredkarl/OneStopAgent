@@ -226,7 +226,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
   const stats = [
     { label: "Monthly Estimate", value: fmt$(DATA.costs.totalMonthly) },
     { label: "Annual Estimate", value: fmt$(DATA.costs.totalAnnual) },
-    { label: "Pricing Source", value: safe(DATA.costs.pricingSource, "Azure Pricing") }
+    { label: "Confidence", value: safe(DATA.costs.confidence, "Moderate") }
   ];
   stats.forEach(function(st, i) {
     const cardX = 0.5 + i * 3.1;
@@ -253,10 +253,10 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
       labels: top.map(function(ci) { return ci.service; }),
       values: top.map(function(ci) { return ci.monthly; })
     }], {
-      x: 0.5, y: 2.7, w: 9.0, h: 2.7, barDir: "col",
+      x: 0.5, y: 2.7, w: 9.0, h: 2.7, barDir: "bar",
       chartColors: [ACCENT, TEAL, "5B9BD5", "A5A5A5", "FFC000"],
       chartArea: { fill: { color: WHITE }, roundedCorners: true },
-      catAxisLabelColor: MUTED, catAxisLabelFontSize: 9, catAxisLabelFontFace: FONT,
+      catAxisLabelColor: MUTED, catAxisLabelFontSize: 10, catAxisLabelFontFace: FONT,
       valAxisLabelColor: MUTED, valAxisLabelFontSize: 9,
       valGridLine: { color: BORDER, size: 0.5 }, catGridLine: { style: "none" },
       showValue: true, dataLabelPosition: "outEnd", dataLabelColor: TEXT_C, dataLabelFontSize: 9,
@@ -364,9 +364,9 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
         ]);
       });
       s.addTable(sensRows, {
-        x: 1.5, y: 3.5, w: 7.0,
+        x: 0.5, y: 3.5, w: 9.0,
         border: { pt: 0.5, color: BORDER },
-        colW: [1.5, 2.0, 1.5, 2.0],
+        colW: [2.0, 2.5, 2.0, 2.5],
         rowH: 0.35,
         autoPage: false
       });
@@ -383,18 +383,19 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
       { label: "Annual Value", value: fmt$(DATA.roi.annualValue) },
       { label: "Annual Cost", value: fmt$(DATA.roi.annualCost) }
     ];
+    var roiCardW = 2.1;
     roiStats.forEach(function(st, i) {
-      var cx = 0.3 + i * 2.4;
+      var cx = 0.5 + i * (roiCardW + 0.2);
       s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-        x: cx, y: 1.1, w: 2.2, h: 1.4,
+        x: cx, y: 1.1, w: roiCardW, h: 1.4,
         fill: { color: i === 0 ? ACCENT : LIGHT }, rectRadius: 0.1
       });
       s.addText(st.value, {
-        x: cx, y: 1.2, w: 2.2, h: 0.8,
+        x: cx, y: 1.2, w: roiCardW, h: 0.8,
         fontSize: 28, fontFace: FONT, color: i === 0 ? WHITE : ACCENT, bold: true, align: "center", shrinkText: true
       });
       s.addText(st.label, {
-        x: cx, y: 1.95, w: 2.2, h: 0.4,
+        x: cx, y: 1.95, w: roiCardW, h: 0.4,
         fontSize: 11, fontFace: FONT, color: i === 0 ? WHITE : MUTED, align: "center"
       });
     });
@@ -431,7 +432,7 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
     x: 0.5, y: 1.5, w: 9.0, h: 1.0,
     fontSize: 40, fontFace: FONT, color: WHITE, bold: true, align: "center"
   });
-  s.addText(safe(DATA.customer, ""), {
+  s.addText(safe(DATA.customer, "Customer"), {
     x: 0.5, y: 2.6, w: 9.0, h: 0.6,
     fontSize: 20, fontFace: FONT, color: TEAL, align: "center"
   });
@@ -587,10 +588,23 @@ class PresentationAgent:
 
         if state.costs.get("estimate"):
             est = state.costs["estimate"]
+            # Compute confidence from pricing source breakdown
+            source_str = est.get("pricingSource", "")
+            if "live" in source_str:
+                parts = [p.strip() for p in source_str.split(",") if p.strip()]
+                live_count = sum(
+                    int(p.split()[0]) for p in parts
+                    if "live" in p and "fallback" not in p
+                )
+                total_items = sum(int(p.split()[0]) for p in parts)
+                confidence = "High" if live_count / max(total_items, 1) > 0.7 else "Moderate"
+            else:
+                confidence = "Estimated"
+
             data["costs"] = {
                 "totalMonthly": est.get("totalMonthly", 0),
                 "totalAnnual": est.get("totalAnnual", 0),
-                "pricingSource": est.get("pricingSource", "N/A"),
+                "confidence": confidence,
                 "items": [
                     {"service": i.get("serviceName", ""), "sku": i.get("sku", ""), "monthly": i.get("monthlyCost", 0)}
                     for i in est.get("items", [])[:12]
