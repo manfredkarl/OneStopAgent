@@ -1,63 +1,86 @@
 """Web search service for finding industry benchmarks and metrics."""
+import re
 import httpx
 import logging
 from typing import Any
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
+AUTHORITATIVE_DOMAINS = {
+    "microsoft.com", "gartner.com", "mckinsey.com", "forrester.com",
+    "idc.com", "deloitte.com", "accenture.com", "pwc.com", "bcg.com",
+}
+
+
+def _score_result(result: dict) -> int:
+    """Score a search result by source authority and title relevance."""
+    url = result.get("url", "").lower()
+    score = 0
+    for domain in AUTHORITATIVE_DOMAINS:
+        if domain in url:
+            score += 10
+    if any(kw in result.get("title", "").lower() for kw in ["case study", "roi", "benchmark", "report"]):
+        score += 5
+    return score
+
 
 def search_web(query: str, num_results: int = 5) -> list[dict[str, str]]:
-    """Search the web for relevant content. Returns list of {title, snippet, url}.
+    """Search DuckDuckGo for web results.
 
-    Uses a simple search approach. Falls back gracefully if unavailable.
+    Uses the DuckDuckGo HTML endpoint to retrieve real search results
+    instead of the Instant Answer API which only returns Wikipedia
+    disambiguation pages.
     """
-    # NOTE: DuckDuckGo Instant Answer API returns disambiguation/related topics,
-    # not full search results. For production, consider Azure AI Search or Bing Search API.
     try:
-        with httpx.Client(timeout=8) as client:
-            resp = client.get(
-                "https://api.duckduckgo.com/",
-                params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+        url = "https://html.duckduckgo.com/html/"
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; OneStopAgent/1.0)"}
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            resp = client.post(url, data={"q": query}, headers=headers)
+            if resp.status_code != 200:
+                return []
+
+            results = []
+            links = re.findall(
+                r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.+?)</a>',
+                resp.text,
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                results = []
+            snippets = re.findall(
+                r'<a class="result__snippet"[^>]*>(.+?)</a>',
+                resp.text,
+            )
 
-                # Abstract (main answer)
-                if data.get("Abstract"):
-                    results.append({
-                        "title": data.get("Heading", ""),
-                        "snippet": data["Abstract"][:300],
-                        "url": data.get("AbstractURL", ""),
-                        "source": data.get("AbstractSource", ""),
-                    })
+            for i, (url_raw, title_raw) in enumerate(links[:num_results]):
+                title = re.sub(r'<[^>]+>', '', title_raw).strip()
+                snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+                # Decode DuckDuckGo redirect URL
+                url_match = re.search(r'uddg=([^&]+)', url_raw)
+                try:
+                    clean_url = unquote(url_match.group(1)) if url_match else url_raw
+                except Exception:
+                    clean_url = url_raw
 
-                # Related topics
-                for topic in data.get("RelatedTopics", [])[:num_results]:
-                    if isinstance(topic, dict) and topic.get("Text"):
-                        results.append({
-                            "title": topic.get("Text", "")[:100],
-                            "snippet": topic.get("Text", "")[:300],
-                            "url": topic.get("FirstURL", ""),
-                            "source": "DuckDuckGo",
-                        })
+                results.append({
+                    "title": title,
+                    "snippet": snippet,
+                    "url": clean_url,
+                })
 
-                if results:
-                    logger.info(f"Web search returned {len(results)} results for: {query[:50]}")
-                    return results
+            if results:
+                logger.info("Web search returned %d results for: %s", len(results), query[:50])
+            return results
 
     except Exception as e:
-        logger.warning(f"Web search failed: {e}")
-
-    return []
+        logger.warning("DuckDuckGo search failed: %s", e)
+        return []
 
 
 def search_industry_benchmarks(industry: str, use_case: str) -> list[dict[str, str]]:
     """Search for industry-specific benchmarks and metrics."""
     queries = [
-        f"{industry} {use_case} Azure ROI case study",
-        f"{industry} cloud migration cost savings benchmark",
-        f"{industry} digital transformation metrics statistics",
+        f"{industry} {use_case} Azure ROI case study site:microsoft.com OR site:gartner.com OR site:mckinsey.com",
+        f"{industry} cloud digital transformation savings benchmark 2024 2025",
+        f"{industry} {use_case} total cost ownership analysis",
     ]
 
     all_results = []
@@ -66,16 +89,17 @@ def search_industry_benchmarks(industry: str, use_case: str) -> list[dict[str, s
         all_results.extend(results)
 
     # Deduplicate by URL
-    seen_urls = set()
+    seen_urls: set[str] = set()
     unique_results = []
     for r in all_results:
         url = r.get("url", "")
         if url and url not in seen_urls:
             seen_urls.add(url)
             unique_results.append(r)
-    all_results = unique_results[:8]
 
-    return all_results
+    # Sort by authority/relevance score, best first
+    unique_results.sort(key=_score_result, reverse=True)
+    return unique_results[:8]
 
 
 def search_azure_architectures(query: str, max_results: int = 5) -> list[dict[str, str]]:
