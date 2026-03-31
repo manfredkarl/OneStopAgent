@@ -36,6 +36,15 @@ interface Projection {
   cumulativeUplift?: number[] | null;
 }
 
+interface BusinessCase {
+  currentState: { totalAnnual: number; breakdown: { category: string; description: string; annual: number }[] };
+  futureState: { azurePlatformAnnual: number; implementationCost: number; changeCost: number };
+  valueBridge: { hardSavings: number; productivityGains: number; revenueUplift: number; riskReduction: number; totalAnnualValue: number };
+  investment: { year1Total: number; year2Total: number; year1NetValue: number; year2NetValue: number };
+  sensitivity: { adoption: string; annualValue: number; roi: number; paybackMonths: number }[];
+  decisionDrivers: string[];
+}
+
 interface ROIDashboardData {
   monthlySavings: number;
   annualImpact: number;
@@ -59,6 +68,7 @@ interface ROIDashboardData {
   valueWaterfall?: ValueWaterfall;
   projection: Projection;
   methodology: string;
+  businessCase?: BusinessCase;
 }
 
 interface Props {
@@ -92,7 +102,9 @@ export default function ROIDashboard({ data }: Props) {
     methodology,
   } = data;
 
-  const hasCurrentCost = costComparisonAvailable && currentCost && currentCost.total > 0;
+  const businessCase = data.businessCase as BusinessCase | undefined;
+
+  const hasCurrentCost= costComparisonAvailable && currentCost && currentCost.total > 0;
   const hasAiCost = costComparisonAvailable && aiCost && aiCost.total > 0;
   const hasDrivers = drivers && drivers.length > 0;
   const hasProjection = projection && projection.years?.length > 0;
@@ -190,6 +202,128 @@ export default function ROIDashboard({ data }: Props) {
           </p>
         </div>
       </div>
+
+      {/* ── Business Case Narrative ──────────────────────────── */}
+      {businessCase && (
+        <div className="space-y-4">
+          {/* Section: Current State → Future State */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Current State card */}
+            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+              <h3 className="text-sm font-bold text-orange-400 uppercase tracking-wider mb-3">Current State</h3>
+              <p className="text-2xl font-bold text-[var(--text-primary)] mb-3">${fmt(businessCase.currentState.totalAnnual)}<span className="text-sm font-normal text-[var(--text-muted)]">/yr</span></p>
+              {businessCase.currentState.breakdown.map((item, i) => (
+                <div key={i} className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+                  <span>{item.category}</span>
+                  <span className="text-[var(--text-secondary)]">${fmt(item.annual)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Future State card */}
+            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+              <h3 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-3">Future State (Azure)</h3>
+              <p className="text-2xl font-bold text-[var(--text-primary)] mb-3">${fmt(businessCase.futureState.azurePlatformAnnual)}<span className="text-sm font-normal text-[var(--text-muted)]">/yr platform</span></p>
+              <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+                <span>Azure platform (annual)</span>
+                <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.azurePlatformAnnual)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+                <span>Implementation (one-time)</span>
+                <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.implementationCost)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+                <span>Change management</span>
+                <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.changeCost)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Value Bridge */}
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+            <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-4">Value Bridge — Annual Impact</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Hard Savings", value: businessCase.valueBridge.hardSavings, color: "text-blue-400", icon: "💰" },
+                { label: "Productivity", value: businessCase.valueBridge.productivityGains, color: "text-green-400", icon: "⚡" },
+                { label: "Revenue Uplift", value: businessCase.valueBridge.revenueUplift, color: "text-purple-400", icon: "📈" },
+                { label: "Risk Reduction", value: businessCase.valueBridge.riskReduction, color: "text-teal-400", icon: "🛡️" },
+              ].filter(item => item.value > 0).map((item, i) => (
+                <div key={i} className="text-center p-3 bg-[var(--bg-secondary)] rounded-lg">
+                  <p className="text-lg mb-1">{item.icon}</p>
+                  <p className={`text-xl font-bold ${item.color}`}>${fmt(item.value)}</p>
+                  <p className="text-[10px] text-[var(--text-muted)] uppercase">{item.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-[var(--border)] flex justify-between">
+              <span className="text-sm font-semibold text-[var(--text-primary)]">Total Annual Value</span>
+              <span className="text-sm font-bold text-green-400">${fmt(businessCase.valueBridge.totalAnnualValue)}</span>
+            </div>
+          </div>
+
+          {/* Investment & Sensitivity side by side */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Year 1 vs Year 2 */}
+            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+              <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">Investment Analysis</h3>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-[var(--text-muted)] mb-1">Year 1 (incl. implementation)</p>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-[var(--text-secondary)]">Investment</span>
+                    <span className="text-sm font-semibold text-orange-400">${fmt(businessCase.investment.year1Total)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-[var(--text-secondary)]">Net Value</span>
+                    <span className={`text-sm font-semibold ${businessCase.investment.year1NetValue >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {businessCase.investment.year1NetValue >= 0 ? '+' : ''}${fmt(businessCase.investment.year1NetValue)}
+                    </span>
+                  </div>
+                </div>
+                <div className="border-t border-[var(--border)] pt-2">
+                  <p className="text-xs text-[var(--text-muted)] mb-1">Year 2+ (run cost only)</p>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-[var(--text-secondary)]">Investment</span>
+                    <span className="text-sm font-semibold text-orange-400">${fmt(businessCase.investment.year2Total)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-[var(--text-secondary)]">Net Value</span>
+                    <span className="text-sm font-bold text-green-400">+${fmt(businessCase.investment.year2NetValue)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sensitivity */}
+            {businessCase.sensitivity && businessCase.sensitivity.length > 0 && (
+              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+                <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">Sensitivity to Adoption</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[var(--text-muted)]">
+                      <th className="text-left pb-2">Adoption</th>
+                      <th className="text-right pb-2">Value/yr</th>
+                      <th className="text-right pb-2">ROI</th>
+                      <th className="text-right pb-2">Payback</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {businessCase.sensitivity.map((row, i) => (
+                      <tr key={i} className={`text-[var(--text-secondary)] ${i === businessCase.sensitivity.length - 1 ? 'font-semibold text-[var(--text-primary)]' : ''}`}>
+                        <td className="py-1">{row.adoption}</td>
+                        <td className="text-right">${fmt(row.annualValue)}</td>
+                        <td className="text-right">{row.roi?.toFixed(0)}%</td>
+                        <td className="text-right">{row.paybackMonths != null ? `${row.paybackMonths.toFixed(1)} mo` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Cost comparison unavailable notice ───────────────── */}
       {!costComparisonAvailable && (

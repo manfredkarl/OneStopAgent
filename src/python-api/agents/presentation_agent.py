@@ -293,48 +293,111 @@ function safe(v, fallback) { return (v != null && v !== "") ? String(v) : (fallb
 })();
 
 // ════════════════════════════════════════════════════════════════════════
-// SLIDE 7 — ROI
+// SLIDE 7 — Business Case / ROI
 // ════════════════════════════════════════════════════════════════════════
 (function roiSlide() {
   if (!DATA.roi) return;
   const s = pres.addSlide();
   s.background = { color: WHITE };
-  s.addText("Return on Investment", {
-    x: 0.5, y: 0.3, w: 9.0, h: 0.6,
-    fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
-  });
-  const roiStats = [
-    { label: "ROI", value: fmtPct(DATA.roi.percent) },
-    { label: "Payback Period", value: DATA.roi.paybackMonths != null ? DATA.roi.paybackMonths + " mo" : "N/A" },
-    { label: "Annual Value", value: fmt$(DATA.roi.annualValue) },
-    { label: "Annual Cost", value: fmt$(DATA.roi.annualCost) }
-  ];
-  roiStats.forEach(function(st, i) {
-    const cx = 0.3 + i * 2.4;
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-      x: cx, y: 1.1, w: 2.2, h: 1.4,
-      fill: { color: i === 0 ? ACCENT : LIGHT }, rectRadius: 0.1
+
+  var bc = DATA.businessCase;
+
+  if (bc && bc.valueBridge) {
+    // Business Case view
+    s.addText("Business Case", {
+      x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+      fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
     });
-    s.addText(st.value, {
-      x: cx, y: 1.2, w: 2.2, h: 0.8,
-      fontSize: 28, fontFace: FONT, color: i === 0 ? WHITE : ACCENT, bold: true, align: "center", shrinkText: true
+
+    // Value bridge cards
+    var vb = bc.valueBridge;
+    var items = [
+      { label: "Hard Savings", value: vb.hardSavings },
+      { label: "Productivity", value: vb.productivityGains },
+      { label: "Revenue Uplift", value: vb.revenueUplift },
+      { label: "Risk Reduction", value: vb.riskReduction },
+    ].filter(function(it) { return it.value > 0; });
+
+    var cardW = items.length > 0 ? (9.0 - 0.2 * (items.length - 1)) / items.length : 9.0;
+    items.forEach(function(it, i) {
+      var cx = 0.5 + i * (cardW + 0.2);
+      s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+        x: cx, y: 1.1, w: cardW, h: 1.2,
+        fill: { color: LIGHT }, rectRadius: 0.1
+      });
+      s.addText(fmt$(it.value), {
+        x: cx, y: 1.15, w: cardW, h: 0.7,
+        fontSize: 22, fontFace: FONT, color: ACCENT, bold: true, align: "center"
+      });
+      s.addText(it.label, {
+        x: cx, y: 1.8, w: cardW, h: 0.4,
+        fontSize: 10, fontFace: FONT, color: MUTED, align: "center"
+      });
     });
-    s.addText(st.label, {
-      x: cx, y: 1.95, w: 2.2, h: 0.4,
-      fontSize: 11, fontFace: FONT, color: i === 0 ? WHITE : MUTED, align: "center"
+
+    // Total value
+    s.addText("Total Annual Value: " + fmt$(vb.totalAnnualValue), {
+      x: 0.5, y: 2.5, w: 9.0, h: 0.4,
+      fontSize: 16, fontFace: FONT, color: TEXT_C, bold: true, align: "center"
     });
-  });
-  // Qualitative benefits
-  var quals = DATA.roi.qualitativeBenefits || [];
-  if (quals.length > 0) {
-    var qBullets = quals.slice(0, 5).map(function(b, i) {
-      return { text: String(b), options: { bullet: true, breakLine: i < Math.min(quals.length, 5) - 1, fontSize: 11, fontFace: FONT, color: TEXT_C, paraSpaceAfter: 6 } };
+
+    // Investment & Sensitivity table
+    if (bc.sensitivity && bc.sensitivity.length > 0) {
+      s.addText("Sensitivity to Adoption", {
+        x: 0.5, y: 3.1, w: 9.0, h: 0.4,
+        fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true
+      });
+      var sensHeader = [
+        { text: "Adoption", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 10, fontFace: FONT } },
+        { text: "Annual Value", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 10, fontFace: FONT } },
+        { text: "ROI", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 10, fontFace: FONT } },
+        { text: "Payback", options: { fill: { color: ACCENT }, color: WHITE, bold: true, fontSize: 10, fontFace: FONT } },
+      ];
+      var sensRows = [sensHeader];
+      bc.sensitivity.forEach(function(row, idx) {
+        var bg = idx % 2 === 0 ? WHITE : LIGHT;
+        sensRows.push([
+          { text: row.adoption, options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C, bold: true } },
+          { text: fmt$(row.annualValue), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+          { text: fmtPct(row.roi), options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+          { text: row.paybackMonths != null ? row.paybackMonths.toFixed(1) + " mo" : "—", options: { fill: { color: bg }, fontSize: 10, fontFace: FONT, color: TEXT_C } },
+        ]);
+      });
+      s.addTable(sensRows, {
+        x: 1.5, y: 3.5, w: 7.0,
+        border: { pt: 0.5, color: BORDER },
+        colW: [1.5, 2.0, 1.5, 2.0],
+        rowH: 0.35,
+        autoPage: false
+      });
+    }
+  } else {
+    // Fallback: original ROI cards
+    s.addText("Return on Investment", {
+      x: 0.5, y: 0.3, w: 9.0, h: 0.6,
+      fontSize: 28, fontFace: FONT, color: TEXT_C, bold: true
     });
-    s.addText("Additional Benefits", {
-      x: 0.5, y: 2.7, w: 9.0, h: 0.4,
-      fontSize: 14, fontFace: FONT, color: TEXT_C, bold: true
+    var roiStats = [
+      { label: "ROI", value: fmtPct(DATA.roi.percent) },
+      { label: "Payback Period", value: DATA.roi.paybackMonths != null ? DATA.roi.paybackMonths + " mo" : "N/A" },
+      { label: "Annual Value", value: fmt$(DATA.roi.annualValue) },
+      { label: "Annual Cost", value: fmt$(DATA.roi.annualCost) }
+    ];
+    roiStats.forEach(function(st, i) {
+      var cx = 0.3 + i * 2.4;
+      s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+        x: cx, y: 1.1, w: 2.2, h: 1.4,
+        fill: { color: i === 0 ? ACCENT : LIGHT }, rectRadius: 0.1
+      });
+      s.addText(st.value, {
+        x: cx, y: 1.2, w: 2.2, h: 0.8,
+        fontSize: 28, fontFace: FONT, color: i === 0 ? WHITE : ACCENT, bold: true, align: "center", shrinkText: true
+      });
+      s.addText(st.label, {
+        x: cx, y: 1.95, w: 2.2, h: 0.4,
+        fontSize: 11, fontFace: FONT, color: i === 0 ? WHITE : MUTED, align: "center"
+      });
     });
-    s.addText(qBullets, { x: 0.5, y: 3.1, w: 9.0, h: 2.2, valign: "top" });
   }
 })();
 
@@ -554,6 +617,11 @@ class PresentationAgent:
                 "monetizedDrivers": roi.get("monetized_drivers", []),
                 "qualitativeBenefits": roi.get("qualitative_benefits", []),
             }
+            # Add business case data for slides
+            dashboard = roi.get("dashboard", {})
+            bc = dashboard.get("businessCase")
+            if bc:
+                data["businessCase"] = bc
 
         if state.brainstorming.get("scenarios"):
             data["scenarios"] = state.brainstorming["scenarios"][:3]
@@ -662,6 +730,10 @@ class PresentationAgent:
         # ROI (from pipeline)
         if slide_data.get("roi"):
             merged["roi"] = slide_data["roi"]
+
+        # Business case (from pipeline)
+        if slide_data.get("businessCase"):
+            merged["businessCase"] = slide_data["businessCase"]
 
         # Next steps (from LLM)
         merged["nextSteps"] = content.get("nextSteps", [])

@@ -356,6 +356,13 @@ class ROIAgent:
             + "ROI = (Annual Value \u2212 Annual Cost) \u00f7 Annual Cost \u00d7 100."
         )
 
+        # ── Business Case ────────────────────────────────────────────
+        business_case = self._build_business_case(
+            state, azure_monthly, annual_azure_cost, annual_value,
+            current_total, waterfall_cost_reduction, waterfall_revenue_uplift,
+            bv_drivers,
+        )
+
         dashboard: dict = {
             "monthlySavings": savings,
             "annualImpact": round(annual_value),
@@ -376,6 +383,7 @@ class ROIAgent:
             "valueWaterfall": value_waterfall,
             "projection": projection,
             "methodology": methodology,
+            "businessCase": business_case,
         }
 
         if cost_estimated:
@@ -383,6 +391,134 @@ class ROIAgent:
             dashboard["warning"] = "Current cost estimated \u2014 provide actual figures for accurate ROI"
 
         return dashboard
+
+    # ── Business-case builder ────────────────────────────────────────
+    def _build_business_case(
+        self,
+        state: AgentState,
+        azure_monthly: float,
+        azure_annual: float,
+        annual_value: float,
+        current_annual_from_dash: float,
+        waterfall_cost_reduction: list[dict],
+        waterfall_revenue_uplift: list[dict],
+        bv_drivers: list[dict],
+    ) -> dict:
+        """Produce a full economic business case alongside the existing dashboard."""
+
+        sa = state.shared_assumptions or {}
+
+        # ── currentState ─────────────────────────────────────────────
+        current_annual = sa.get("current_annual_spend", 0) or (current_annual_from_dash * 12)
+
+        hourly_rate = sa.get("hourly_labor_rate", 0)
+        manual_hours_annual = 0
+        for d in bv_drivers:
+            metric = d.get("metric", "")
+            m = self._PERCENTAGE_RE.search(metric)
+            if m and hourly_rate:
+                manual_hours_annual += float(m.group(1)) * 20  # rough proxy
+
+        labor_portion = round(hourly_rate * manual_hours_annual) if hourly_rate and manual_hours_annual else round(current_annual * 0.55)
+        tool_portion = round(current_annual * 0.30) if current_annual else 0
+        delay_portion = round(current_annual - labor_portion - tool_portion) if current_annual else 0
+
+        current_state = {
+            "totalAnnual": round(current_annual),
+            "breakdown": [
+                {"category": "Manual operations", "description": "Staff labor on repetitive and manual tasks", "annual": labor_portion},
+                {"category": "Tool/platform spend", "description": "Existing software licenses, hosting, and infrastructure", "annual": tool_portion},
+                {"category": "Delay/opportunity cost", "description": "Revenue leakage and slower time-to-market", "annual": max(delay_portion, 0)},
+            ],
+        }
+
+        # ── futureState ──────────────────────────────────────────────
+        timeline_months = sa.get("timeline_months", 0)
+        if timeline_months and azure_monthly:
+            impl_cost = round(azure_monthly * timeline_months)
+        else:
+            impl_cost = round(azure_annual * 0.5)
+        change_cost = round(impl_cost * 0.10)
+
+        future_state = {
+            "azurePlatformAnnual": round(azure_annual),
+            "implementationCost": impl_cost,
+            "changeCost": change_cost,
+        }
+
+        # ── valueBridge ──────────────────────────────────────────────
+        hard_savings = sum(item["amount"] for item in waterfall_cost_reduction)
+        revenue_uplift = sum(item["amount"] for item in waterfall_revenue_uplift)
+
+        productivity = 0
+        for d in bv_drivers:
+            name = (d.get("name", "") + " " + d.get("description", "")).lower()
+            if any(kw in name for kw in ("productivity", "time saving", "efficiency", "faster")):
+                amounts = self._compute_per_driver_amounts([d], annual_value / max(len(bv_drivers), 1))
+                productivity += amounts[0] if amounts else 0
+
+        risk_reduction = round(current_annual * 0.05) if current_annual else 0
+
+        total_value = round(hard_savings + productivity + revenue_uplift + risk_reduction)
+
+        value_bridge = {
+            "hardSavings": round(hard_savings),
+            "productivityGains": round(productivity),
+            "revenueUplift": round(revenue_uplift),
+            "riskReduction": risk_reduction,
+            "totalAnnualValue": total_value,
+        }
+
+        # ── investment ───────────────────────────────────────────────
+        year1_total = round(azure_annual + impl_cost + change_cost)
+        year2_total = round(azure_annual)
+
+        investment = {
+            "year1Total": year1_total,
+            "year2Total": year2_total,
+            "year1NetValue": round(total_value - year1_total),
+            "year2NetValue": round(total_value - year2_total),
+        }
+
+        # ── sensitivity ──────────────────────────────────────────────
+        sensitivity = []
+        for pct, label in [(0.5, "50%"), (0.75, "75%"), (1.0, "100%")]:
+            adj_value = total_value * pct
+            adj_roi = ((adj_value - azure_annual) / azure_annual) * 100 if azure_annual > 0 else 0
+            adj_payback = round((azure_annual / (adj_value / 12)), 1) if adj_value > 0 else None
+            sensitivity.append({
+                "adoption": label,
+                "annualValue": round(adj_value),
+                "roi": round(adj_roi, 1),
+                "paybackMonths": adj_payback,
+            })
+
+        # ── decisionDrivers ──────────────────────────────────────────
+        default_drivers = [
+            "Lower cost to serve",
+            "Faster growth through shorter cycles",
+            "Reduced operational risk",
+            "Higher employee productivity",
+            "Strategic platform flexibility",
+        ]
+        # Enrich with actual BV driver names when available
+        decision_drivers = []
+        driver_names = [d.get("name", "") for d in bv_drivers if d.get("name")]
+        if driver_names:
+            for dn in driver_names[:3]:
+                decision_drivers.append(dn)
+            decision_drivers.extend(default_drivers[len(decision_drivers):5])
+        else:
+            decision_drivers = default_drivers
+
+        return {
+            "currentState": current_state,
+            "futureState": future_state,
+            "valueBridge": value_bridge,
+            "investment": investment,
+            "sensitivity": sensitivity,
+            "decisionDrivers": decision_drivers,
+        }
 
 
     def _needs_info(self, reason: str, questions: list[str], qualitative: list[str] | None = None) -> dict:

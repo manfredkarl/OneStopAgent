@@ -638,6 +638,25 @@ RULES:
                         parts.append(f"- {b}")
             else:
                 parts = ["## \U0001f4c8 ROI Analysis\n", "ROI could not be calculated quantitatively.\n"]
+
+            # ── Business Case Summary ────────────────────────────────
+            bc = roi.get("dashboard", {}).get("businessCase")
+            if bc:
+                parts.append("\n### 💼 Business Case Summary\n")
+                vs = bc.get("valueBridge", {})
+                inv = bc.get("investment", {})
+                if vs.get("totalAnnualValue"):
+                    parts.append(f"**Annual value**: ${vs['totalAnnualValue']:,.0f}")
+                if inv.get("year1Total"):
+                    parts.append(f"**Year 1 investment**: ${inv['year1Total']:,.0f}")
+                if inv.get("year1NetValue"):
+                    parts.append(f"**Year 1 net value**: ${inv['year1NetValue']:,.0f}")
+                sens = bc.get("sensitivity", [])
+                if sens:
+                    parts.append("\n**Sensitivity to adoption:**")
+                    for s in sens:
+                        parts.append(f"- {s['adoption']} adoption → ${s['annualValue']:,.0f}/yr value, {s.get('roi', 0):.0f}% ROI")
+
             return "\n".join(parts)
 
         if step == "presentation":
