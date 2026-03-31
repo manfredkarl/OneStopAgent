@@ -59,7 +59,6 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
           const isError = agent.status === 'error';
           const isComingSoon = !!(reg as any)?.comingSoon;
           const description = (reg as any)?.description || '';
-          const isHovered = hoveredAgent === agent.agentId;
 
           return (
             <div
