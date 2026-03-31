@@ -292,32 +292,28 @@ class MAFOrchestrator:
     # ── Shared assumption generation ───────────────────────────────
 
     async def _generate_shared_assumptions(self, state: AgentState) -> list[dict]:
-        """Generate overarching scenario assumptions that all agents share."""
+        """Generate overarching scenario assumptions that all agents share.
+        
+        Keeps it lean — only the essentials that ALL agents need for consistency.
+        Technical details (data volume, timeline, requests/day) belong in agent-specific questions.
+        """
         industry = state.brainstorming.get("industry", "Cross-Industry")
         description = state.user_input
 
         try:
             response = await llm.ainvoke([
                 {"role": "system", "content": (
-                    "Generate 6-8 scenario assumption questions that define the canonical context "
-                    "for an Azure solution design.\n"
-                    "These assumptions will be shared across ALL agents (architecture, cost, business value, ROI).\n\n"
-                    "Return ONLY a JSON array. Each item:\n"
-                    "{\n"
-                    '    "id": "snake_case_key",\n'
-                    '    "label": "Human-readable question",\n'
-                    '    "unit": "count" or "GB" or "$" or "hours" or "%" or "months",\n'
-                    '    "default": realistic_numeric_default,\n'
-                    '    "hint": "Why this matters for the solution"\n'
-                    "}\n\n"
-                    "REQUIRED categories (include at least one question per category):\n"
-                    "1. SCALE: Total users, concurrent users, or transaction volume\n"
-                    "2. DATA: Data volume to store/process (GB or TB)\n"
-                    "3. GEOGRAPHY: Primary region and multi-region needs\n"
-                    "4. CURRENT STATE: Current annual spend on equivalent capability OR current headcount involved\n"
-                    "5. LABOR: Fully loaded hourly labor rate for affected staff\n"
-                    "6. TIMELINE: Months to production deployment\n\n"
-                    "Use REALISTIC mid-market enterprise defaults. Be specific to the industry and use case."
+                    "Generate EXACTLY 4 scenario assumption questions that define the business context "
+                    "for an Azure solution. These will be shared across all agents.\n\n"
+                    "Return ONLY a JSON array with 4 items:\n"
+                    '{"id": "snake_case", "label": "Question", "unit": "count" or "$", "default": number, "hint": "Why it matters"}\n\n'
+                    "The 4 questions MUST cover:\n"
+                    "1. USERS: How many people will use or benefit from the solution\n"
+                    "2. CURRENT SPEND: Current annual spend on equivalent tools/processes ($)\n"
+                    "3. LABOR RATE: Fully loaded hourly cost for affected staff ($/hr)\n"
+                    "4. CONCURRENT SCALE: Peak concurrent users or transactions\n\n"
+                    "Use realistic enterprise defaults. Be specific to the industry. "
+                    "Unit for labor rate must be '$/hr' not 'hours'."
                 )},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"},
             ])
@@ -325,20 +321,17 @@ class MAFOrchestrator:
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             assumptions = json.loads(text)
-            if isinstance(assumptions, list) and len(assumptions) >= 4:
-                return assumptions[:8]
+            if isinstance(assumptions, list) and len(assumptions) >= 3:
+                return assumptions[:5]
         except Exception as e:
             logger.warning("Failed to generate shared assumptions: %s", e)
 
-        # Fallback defaults
+        # Fallback defaults — lean and essential
         return [
             {"id": "total_users", "label": "Total users who will use the platform", "unit": "count", "default": 500, "hint": "Drives architecture scale and licensing"},
+            {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI and value calculation"},
+            {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$/hr", "default": 85, "hint": "Used to monetize time savings"},
             {"id": "concurrent_users", "label": "Peak concurrent users", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
-            {"id": "data_volume_gb", "label": "Total data to store and process", "unit": "GB", "default": 1000, "hint": "Drives storage and database sizing"},
-            {"id": "primary_region", "label": "Primary Azure region (1=East US, 2=West Europe, 3=Southeast Asia)", "unit": "count", "default": 1, "hint": "Affects pricing and compliance"},
-            {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI calculation"},
-            {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$", "default": 85, "hint": "Used to monetize time savings"},
-            {"id": "timeline_months", "label": "Target months to production", "unit": "months", "default": 6, "hint": "Affects implementation cost and time-to-value"},
         ]
 
     # ── MAF Workflow execution ──────────────────────────────────────

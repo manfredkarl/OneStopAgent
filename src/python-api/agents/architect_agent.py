@@ -81,33 +81,12 @@ class ArchitectAgent:
 
     @classmethod
     def _select_pattern(cls, patterns: list[dict], industry: str = "") -> dict | None:
-        """Pick the best pattern, but only if it's actually relevant."""
+        """Pick the best pattern — let the LLM handle cross-domain adaptation."""
         if not patterns:
             return None
-
         best = max(patterns, key=lambda p: p.get("confidence_score", 0.0))
-
-        # Low-confidence patterns are not trustworthy
-        if best.get("confidence_score", 0.0) < 0.3:
-            logger.info("Best pattern '%s' below relevance threshold (%.2f)",
-                        best.get("title", ""), best.get("confidence_score", 0.0))
+        if best.get("confidence_score", 0) < 0.1:
             return None
-
-        # Cross-domain mismatch check: if the pattern is from a specific
-        # industry that clearly doesn't match the user's industry, reject it.
-        pattern_industry = best.get("industry", "Cross-Industry")
-        if pattern_industry != "Cross-Industry" and industry:
-            industry_lower = industry.lower()
-            pattern_title_lower = best.get("title", "").lower()
-            # Check if the pattern's domain keywords appear in its title
-            # but the user's industry is different
-            for domain, keywords in cls._DOMAIN_KEYWORDS.items():
-                if domain.lower() == pattern_industry.lower() and domain.lower() != industry_lower:
-                    if any(kw in pattern_title_lower for kw in keywords):
-                        logger.info("Rejecting pattern '%s' (%s) — mismatches user industry '%s'",
-                                    best.get("title", ""), pattern_industry, industry)
-                        return None
-
         return best
 
     # ── Layered architecture generation ───────────────────────────────
@@ -149,11 +128,9 @@ class ArchitectAgent:
                 f"Summary: {pattern.get('summary', '')}\n"
                 f"Recommended services: {', '.join(pattern.get('recommended_services', []))}\n"
                 f"URL: {pattern.get('url', '')}\n\n"
-                "Use this reference architecture as STRUCTURAL INSPIRATION if relevant, "
-                "but design the architecture for the actual use case. "
-                "If the reference pattern is from a different domain (e.g., healthcare for a "
-                "manufacturing use case), ignore the pattern name and design from scratch "
-                "based on Azure best practices.\n"
+                "Adapt this reference architecture to the actual use case. "
+                "Re-use its structural patterns and service selections where they fit, "
+                "and substitute domain-specific components as needed.\n"
             )
         else:
             pattern_context = (

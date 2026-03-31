@@ -111,43 +111,28 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
 
         # Build assumption context from user-provided values
         assumption_context = "\n".join([
-            f"- {a['label']}: {a['value']} {a.get('unit', '')}"
+            f"- {a.get('label', a.get('id', 'Unknown'))}: {a.get('value', 'N/A')} {a.get('unit', '')}"
             for a in user_assumptions
         ])
 
-        # Prepend shared assumptions as authoritative baseline
-        sa = state.shared_assumptions
-        if sa:
-            authoritative = []
-            for key, val in sa.items():
-                if key.startswith("_"):
-                    continue
-                if isinstance(val, (int, float)):
-                    authoritative.append(f"- {key}: {val}")
-                else:
-                    authoritative.append(f"- {key}: {val}")
+        # Prepend shared assumptions as authoritative baseline (only key fields)
+        sa = state.shared_assumptions or {}
+        shared_lines = []
+        for spend_key in ["current_annual_engineering_toolchain_spend", "current_annual_spend"]:
+            if sa.get(spend_key):
+                shared_lines.append(f"- Current annual spend: ${float(sa[spend_key]):,.0f}")
+                break
+        for rate_key in ["fully_loaded_engineering_labor_rate", "hourly_labor_rate"]:
+            if sa.get(rate_key):
+                shared_lines.append(f"- Hourly labor rate: ${float(sa[rate_key])}/hr")
+                break
+        for user_key in ["active_rd_engineering_users", "total_users"]:
+            if sa.get(user_key):
+                shared_lines.append(f"- Platform users: {sa[user_key]}")
+                break
 
-            # Also surface well-known keys with friendly labels
-            shared_lines = []
-            spend = sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend")
-            if spend:
-                shared_lines.append(f"- Current annual spend on equivalent capability: ${spend:,.0f}")
-            rate = sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate")
-            if rate:
-                shared_lines.append(f"- Fully loaded hourly labor rate: ${rate}/hr")
-            users = sa.get("active_rd_engineering_users") or sa.get("total_users")
-            if users:
-                shared_lines.append(f"- Total platform users: {users}")
-            if sa.get("timeline_months"):
-                shared_lines.append(f"- Deployment timeline: {sa['timeline_months']} months")
-
-            if authoritative or shared_lines:
-                header_lines = shared_lines if shared_lines else authoritative
-                assumption_context = (
-                    "AUTHORITATIVE SHARED ASSUMPTIONS (use these for calculations):\n"
-                    + "\n".join(header_lines)
-                    + "\n\nADDITIONAL USER INPUTS:\n" + assumption_context
-                )
+        if shared_lines:
+            assumption_context = "SHARED BASELINE:\n" + "\n".join(shared_lines) + "\n\nUSER INPUTS:\n" + assumption_context
 
         # Search for real industry benchmarks
         use_case = description[:120]
@@ -307,7 +292,7 @@ CATEGORY RULES:
             }
 
         except Exception as e:
-            logger.warning("BV LLM call failed: %s", e)
+            logger.error("BV LLM call failed: %s", e, exc_info=True)
             state.business_value = {
                 "drivers": [],
                 "annual_impact_range": None,
