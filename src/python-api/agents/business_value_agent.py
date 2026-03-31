@@ -21,17 +21,39 @@ class BusinessValueAgent:
         industry = state.brainstorming.get("industry", "Cross-Industry")
         description = state.user_input
 
+        # Build shared-assumption context so the LLM doesn't re-ask known values
+        sa = state.shared_assumptions
+        shared_lines: list[str] = []
+        if sa:
+            if sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend"):
+                spend = sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend")
+                shared_lines.append(f"Current annual spend: ${spend:,.0f} (ALREADY PROVIDED)")
+            if sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate"):
+                rate = sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate")
+                shared_lines.append(f"Hourly labor rate: ${rate}/hr (ALREADY PROVIDED)")
+            if sa.get("active_rd_engineering_users") or sa.get("total_users"):
+                users = sa.get("active_rd_engineering_users") or sa.get("total_users")
+                shared_lines.append(f"Total users: {users} (ALREADY PROVIDED)")
+
+        shared_context_block = ""
+        if shared_lines:
+            shared_context_block = (
+                "\n\nThe following values are ALREADY PROVIDED from the shared scenario assumptions — "
+                "do NOT ask for them again:\n" + "\n".join(shared_lines) + "\n\n"
+                "Only ask 3-4 questions about business-value-specific metrics NOT covered above."
+            )
+
         try:
             response = llm.invoke([
-                {"role": "system", "content": """Generate 3-5 business assumption questions for calculating Azure solution value.
+                {"role": "system", "content": f"""Generate 3-5 business assumption questions for calculating Azure solution value.
 Return ONLY a JSON array. Each item:
-{
+{{
     "id": "unique_key",
     "label": "Human-readable question",
     "unit": "$" or "hours" or "count" or "%",
     "default": numeric_default_value,
     "hint": "Brief explanation of why this matters"
-}
+}}
 
 Be specific to the industry and use case. Include things like:
 - Number of employees/users affected
@@ -41,7 +63,7 @@ Be specific to the industry and use case. Include things like:
 
 IMPORTANT: Use REALISTIC default values based on published industry midpoints
 for mid-size enterprises. Do not artificially deflate defaults.
-Keep it to 3-5 questions max. Be concise."""},
+Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"}
             ])
 
@@ -93,23 +115,39 @@ Keep it to 3-5 questions max. Be concise."""},
             for a in user_assumptions
         ])
 
-        # Prepend shared assumptions for consistency
+        # Prepend shared assumptions as authoritative baseline
         sa = state.shared_assumptions
-        shared_lines = []
-        if sa.get("current_annual_spend"):
-            shared_lines.append(f"- Current annual spend on equivalent capability: ${sa['current_annual_spend']:,.0f}")
-        if sa.get("hourly_labor_rate"):
-            shared_lines.append(f"- Fully loaded hourly labor rate: ${sa['hourly_labor_rate']}")
-        if sa.get("total_users"):
-            shared_lines.append(f"- Total platform users: {sa['total_users']}")
-        if sa.get("timeline_months"):
-            shared_lines.append(f"- Deployment timeline: {sa['timeline_months']} months")
+        if sa:
+            authoritative = []
+            for key, val in sa.items():
+                if key.startswith("_"):
+                    continue
+                if isinstance(val, (int, float)):
+                    authoritative.append(f"- {key}: {val}")
+                else:
+                    authoritative.append(f"- {key}: {val}")
 
-        if shared_lines:
-            assumption_context = (
-                "SHARED SCENARIO ASSUMPTIONS (locked):\n" + "\n".join(shared_lines)
-                + "\n\nAGENT-SPECIFIC ASSUMPTIONS:\n" + assumption_context
-            )
+            # Also surface well-known keys with friendly labels
+            shared_lines = []
+            spend = sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend")
+            if spend:
+                shared_lines.append(f"- Current annual spend on equivalent capability: ${spend:,.0f}")
+            rate = sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate")
+            if rate:
+                shared_lines.append(f"- Fully loaded hourly labor rate: ${rate}/hr")
+            users = sa.get("active_rd_engineering_users") or sa.get("total_users")
+            if users:
+                shared_lines.append(f"- Total platform users: {users}")
+            if sa.get("timeline_months"):
+                shared_lines.append(f"- Deployment timeline: {sa['timeline_months']} months")
+
+            if authoritative or shared_lines:
+                header_lines = shared_lines if shared_lines else authoritative
+                assumption_context = (
+                    "AUTHORITATIVE SHARED ASSUMPTIONS (use these for calculations):\n"
+                    + "\n".join(header_lines)
+                    + "\n\nADDITIONAL USER INPUTS:\n" + assumption_context
+                )
 
         # Search for real industry benchmarks
         use_case = description[:120]
@@ -181,7 +219,7 @@ USE CASE: {description}
 USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
 {assumption_context}
 
-Use the SHARED SCENARIO ASSUMPTIONS as your baseline. The hourly_labor_rate and current_annual_spend are the authoritative values — do not invent different ones.
+Use the SHARED current_annual_spend as the baseline for spend optimization calculations. Use the SHARED hourly_labor_rate for labor savings calculations. Do NOT derive your own labor rate or annual spend — the AUTHORITATIVE SHARED ASSUMPTIONS above are the single source of truth.
 
 {search_context}
 

@@ -12,6 +12,39 @@ class ROIAgent:
     name = "ROI Calculator"
     emoji = "📈"
 
+    # Key name variants the LLM may generate for shared assumptions
+    _CURRENT_SPEND_KEYS = [
+        "current_annual_spend",
+        "current_annual_engineering_toolchain_spend",
+        "current_annual_engineering_spend",
+        "current_annual_toolchain_spend",
+        "current_annual_operational_spend",
+        "current_annual_platform_spend",
+    ]
+    _LABOR_RATE_KEYS = [
+        "hourly_labor_rate",
+        "fully_loaded_engineering_labor_rate",
+        "fully_loaded_hourly_rate",
+        "hourly_rate",
+        "loaded_labor_rate",
+    ]
+
+    @staticmethod
+    def _resolve_sa(sa: dict, candidates: list[str]) -> float | None:
+        """Return the first truthy numeric value from *sa* matching any candidate key."""
+        if not sa:
+            return None
+        for key in candidates:
+            raw = sa.get(key)
+            if raw:
+                try:
+                    val = float(raw)
+                    if val > 0:
+                        return val
+                except (ValueError, TypeError):
+                    continue
+        return None
+
     def run(self, state: AgentState) -> AgentState:
         annual_cost = state.costs.get("estimate", {}).get("totalAnnual", 0)
         bv = state.business_value
@@ -174,16 +207,19 @@ class ROIAgent:
         has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
 
         # Use shared assumptions as authoritative baseline when available
-        sa = state.shared_assumptions
-        if sa and sa.get("current_annual_spend"):
+        sa = state.shared_assumptions or {}
+        sa_annual_spend = self._resolve_sa(sa, self._CURRENT_SPEND_KEYS)
+        sa_labor_rate = self._resolve_sa(sa, self._LABOR_RATE_KEYS)
+
+        if sa_annual_spend:
             # Use authoritative baseline from shared assumptions
-            current_monthly = sa["current_annual_spend"] / 12
+            current_monthly = sa_annual_spend / 12
             current_breakdown = [
                 {"label": "Current operations (user-provided)", "amount": round(current_monthly)},
             ]
             has_any_input = True  # Mark as real data, not estimated
-        elif sa and sa.get("hourly_labor_rate") and not hourly_rate:
-            hourly_rate = sa["hourly_labor_rate"]
+        elif sa_labor_rate and not hourly_rate:
+            hourly_rate = sa_labor_rate
 
         if not current_breakdown:
             if not has_any_input:
@@ -337,10 +373,10 @@ class ROIAgent:
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
         )
-        if sa and sa.get("current_annual_spend"):
+        if sa_annual_spend:
             methodology += (
                 f"Current operational cost from user-provided baseline "
-                f"(${sa['current_annual_spend']:,.0f}/yr). "
+                f"(${sa_annual_spend:,.0f}/yr). "
             )
         elif cost_estimated:
             methodology += (
@@ -409,9 +445,11 @@ class ROIAgent:
         sa = state.shared_assumptions or {}
 
         # ── currentState ─────────────────────────────────────────────
-        current_annual = sa.get("current_annual_spend", 0) or (current_annual_from_dash * 12)
+        sa_annual = self._resolve_sa(sa, self._CURRENT_SPEND_KEYS)
+        current_annual = sa_annual or (current_annual_from_dash * 12)
 
-        hourly_rate = sa.get("hourly_labor_rate", 0)
+        sa_hourly = self._resolve_sa(sa, self._LABOR_RATE_KEYS)
+        hourly_rate = sa_hourly or 0
         manual_hours_annual = 0
         for d in bv_drivers:
             metric = d.get("metric", "")
