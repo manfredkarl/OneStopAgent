@@ -33,10 +33,13 @@ OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "output"))
 
 app = FastAPI(title="OneStopAgent API", version="1.0.0")
 
+_cors_origins = os.environ.get("CORS_ORIGINS", "")
+_allow_origins = _cors_origins.split(",") if _cors_origins else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:4200,http://localhost:3000").split(","),
-    allow_credentials=True,
+    allow_origins=_allow_origins,
+    allow_credentials="*" not in _allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
