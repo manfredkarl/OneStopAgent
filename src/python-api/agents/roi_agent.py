@@ -31,9 +31,14 @@ class ROIAgent:
 
     @staticmethod
     def _resolve_sa(sa: dict, candidates: list[str]) -> float | None:
-        """Return the first truthy numeric value from *sa* matching any candidate key."""
+        """Return the first truthy numeric value from *sa* matching any candidate key.
+        
+        Tries exact match first, then fuzzy substring match to handle
+        LLM-generated dynamic key names like 'hourly_engineering_labor_rate'.
+        """
         if not sa:
             return None
+        # 1. Exact match
         for key in candidates:
             raw = sa.get(key)
             if raw:
@@ -43,6 +48,34 @@ class ROIAgent:
                         return val
                 except (ValueError, TypeError):
                     continue
+        # 2. Fuzzy: check if any sa key contains a candidate substring or vice versa
+        for sa_key, raw in sa.items():
+            if sa_key.startswith("_"):
+                continue
+            sk = sa_key.lower()
+            for cand in candidates:
+                if cand in sk or sk in cand:
+                    try:
+                        val = float(raw)
+                        if val > 0:
+                            return val
+                    except (ValueError, TypeError):
+                        continue
+        # 3. Keyword match: "labor" + "rate" or "annual" + "spend"
+        for sa_key, raw in sa.items():
+            if sa_key.startswith("_"):
+                continue
+            sk = sa_key.lower()
+            if ("labor" in sk and "rate" in sk) and any("labor" in c or "rate" in c for c in candidates):
+                try:
+                    return float(raw)
+                except (ValueError, TypeError):
+                    pass
+            if ("annual" in sk and "spend" in sk) and any("spend" in c or "annual" in c for c in candidates):
+                try:
+                    return float(raw)
+                except (ValueError, TypeError):
+                    pass
         return None
 
     def run(self, state: AgentState) -> AgentState:
