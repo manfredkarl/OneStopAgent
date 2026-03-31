@@ -32,6 +32,7 @@ export async function listProjects() {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     headers: { 'x-user-id': 'demo-user' },
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
@@ -39,6 +40,7 @@ export async function getProject(id: string) {
   const res = await fetch(`${BASE_URL}/api/projects/${id}`, {
     headers: { 'x-user-id': 'demo-user' },
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
@@ -46,6 +48,7 @@ export async function getChatHistory(projectId: string): Promise<ChatMessage[]> 
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
     headers: { 'x-user-id': 'demo-user' },
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   return (data.messages || []).map(normalizeMessage);
 }
@@ -54,6 +57,7 @@ export async function getAgents(projectId: string): Promise<AgentStatus[]> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agents`, {
     headers: { 'x-user-id': 'demo-user' },
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   return data.agents || [];
 }
@@ -64,6 +68,7 @@ export async function toggleAgent(projectId: string, agentId: string, active: bo
     headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
     body: JSON.stringify({ active }),
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   return data.agents || [];
 }
@@ -112,6 +117,7 @@ export async function sendMessage(projectId: string, message: string): Promise<C
     headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
     body: JSON.stringify({ message }),
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   return (Array.isArray(data) ? data : [data]).map(normalizeMessage);
 }

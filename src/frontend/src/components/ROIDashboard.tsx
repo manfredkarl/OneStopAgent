@@ -87,6 +87,8 @@ const AI_TEXT = ["text-white", "text-white", "text-white", "text-gray-800"];
 const WATERFALL_MAX_BAR_PCT = 90;
 
 export default function ROIDashboard({ data }: Props) {
+  if (!data) return null;
+
   const {
     monthlySavings,
     annualImpact,

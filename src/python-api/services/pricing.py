@@ -98,13 +98,6 @@ ESTIMATED_PRICES: dict[str, dict] = {
     },
 }
 
-# Services whose API prices are per-hour (need ×730 for monthly estimate)
-HOURLY_SERVICES = {
-    "Azure App Service", "Azure Cache for Redis", "Azure Container Apps",
-    "Azure Kubernetes Service", "Virtual Machines", "Azure Cognitive Search",
-    "Azure Cosmos DB", "Logic Apps",
-}
-
 
 def _query_api(service_name: str, region: str) -> list[dict]:
     """Query the Retail Prices API. Returns list of price items."""

@@ -79,7 +79,7 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
 
         # Fallback generic assumptions — realistic enterprise defaults
         # Use shared assumptions to inform defaults if available
-        sa = state.shared_assumptions or {} if hasattr(state, 'shared_assumptions') else {}
+        sa = getattr(state, 'shared_assumptions', None) or {}
         default_employees = 100
         default_spend = 50000
         for k, v in sa.items():
@@ -230,7 +230,6 @@ RULES — follow precisely:
 2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
    Use the midpoint of published industry ranges — do not artificially deflate percentages.
 3. {source_instruction}
-   Include the source name AND a URL. If you don't have a real URL, use the best matching web search result above.
 4. Do NOT write long prose. Each description is 1 sentence max.
 5. Provide an aggregated annual_impact_range (low–high dollars) across all 3 drivers.
    USE THE USER-PROVIDED ASSUMPTIONS ABOVE to compute real dollar values.
@@ -244,7 +243,6 @@ CALCULATION APPROACH:
 - For revenue uplift drivers, apply a conservative realization factor: use 25-50% of the gross revenue impact to account for adoption timing, competitive dynamics, and execution risk. Show the full gross impact AND the realized value clearly.
 - Sum the drivers directly. Do NOT apply "overlap adjustments", "double counting reductions",
   or any cross-driver deductions.
-- Set confidence to "moderate" by default.
 
 Return ONLY valid JSON (no markdown fences):
 {{

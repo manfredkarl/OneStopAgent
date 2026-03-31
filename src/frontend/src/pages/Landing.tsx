@@ -180,6 +180,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
       navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);
     } catch (err) {
       console.error('Failed to create project:', err);
+    } finally {
       setLoading(false);
     }
   };

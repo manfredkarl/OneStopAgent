@@ -133,21 +133,21 @@ class ArchitectExecutor(PipelineExecutor):
                 loop.run_in_executor(None, self.agent.run, state),
                 timeout=300,
             )
-            state.mark_step_completed("architect")
+            state.mark_step_completed(self.step_name)
 
-            summary = self.pm.approval_summary("architect", state)
-            output_text = self.pm.format_agent_output("architect", state)
+            summary = self.pm.approval_summary(self.step_name, state)
+            output_text = self.pm.format_agent_output(self.step_name, state)
 
             await ctx.yield_output({
-                "type": "agent_result", "step": "architect",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
             # Approval gate
-            if _should_pause(msg.execution_mode, "architect"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
-                        step="architect", summary=summary,
+                        step=self.step_name, summary=summary,
                     ),
                     response_type=str,
                 )
@@ -156,9 +156,9 @@ class ArchitectExecutor(PipelineExecutor):
 
         except Exception as e:
             logger.exception("Architect agent failed")
-            state.mark_step_failed("architect")
+            state.mark_step_failed(self.step_name)
             await ctx.yield_output({
-                "type": "agent_error", "step": "architect",
+                "type": "agent_error", "step": self.step_name,
                 "error": str(e),
             })
             if self.step_name in REQUIRED_STEPS:
@@ -235,18 +235,18 @@ class CostExecutor(PipelineExecutor):
                 )
                 return
 
-            state.mark_step_completed("cost")
-            output_text = self.pm.format_agent_output("cost", state)
-            summary = self.pm.approval_summary("cost", state)
+            state.mark_step_completed(self.step_name)
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
 
             await ctx.yield_output({
-                "type": "agent_result", "step": "cost",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, "cost"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
-                    request_data=ApprovalRequest(step="cost", summary=summary),
+                    request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
                 )
             else:
@@ -254,9 +254,9 @@ class CostExecutor(PipelineExecutor):
 
         except Exception as e:
             logger.exception("Cost agent failed")
-            state.mark_step_failed("cost")
+            state.mark_step_failed(self.step_name)
             await ctx.yield_output({
-                "type": "agent_error", "step": "cost", "error": str(e),
+                "type": "agent_error", "step": self.step_name, "error": str(e),
             })
             if self.step_name in REQUIRED_STEPS:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
@@ -296,24 +296,24 @@ class CostExecutor(PipelineExecutor):
                     loop.run_in_executor(None, self.agent.run, state),
                     timeout=300,
                 )
-                state.mark_step_completed("cost")
+                state.mark_step_completed(self.step_name)
             except Exception as e:
                 logger.exception("Phase 2 re-run failed for %s", self.step_name)
-                state.mark_step_failed("cost")
-                await ctx.yield_output({"type": "agent_error", "step": "cost", "error": str(e)})
+                state.mark_step_failed(self.step_name)
+                await ctx.yield_output({"type": "agent_error", "step": self.step_name, "error": str(e)})
                 await ctx.send_message(msg)
                 return
 
-            output_text = self.pm.format_agent_output("cost", state)
-            summary = self.pm.approval_summary("cost", state)
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
             await ctx.yield_output({
-                "type": "agent_result", "step": "cost",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, "cost"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
-                    request_data=ApprovalRequest(step="cost", summary=summary),
+                    request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
                 )
             else:
@@ -381,19 +381,19 @@ class BusinessValueExecutor(PipelineExecutor):
                 )
                 return
 
-            state.mark_step_completed("business_value")
-            output_text = self.pm.format_agent_output("business_value", state)
-            summary = self.pm.approval_summary("business_value", state)
+            state.mark_step_completed(self.step_name)
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
 
             await ctx.yield_output({
-                "type": "agent_result", "step": "business_value",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, "business_value"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
-                        step="business_value", summary=summary,
+                        step=self.step_name, summary=summary,
                     ),
                     response_type=str,
                 )
@@ -402,9 +402,9 @@ class BusinessValueExecutor(PipelineExecutor):
 
         except Exception as e:
             logger.exception("Business Value agent failed")
-            state.mark_step_failed("business_value")
+            state.mark_step_failed(self.step_name)
             await ctx.yield_output({
-                "type": "agent_error", "step": "business_value",
+                "type": "agent_error", "step": self.step_name,
                 "error": str(e),
             })
             if self.step_name in REQUIRED_STEPS:
@@ -444,25 +444,25 @@ class BusinessValueExecutor(PipelineExecutor):
                     loop.run_in_executor(None, self.agent.run, state),
                     timeout=300,
                 )
-                state.mark_step_completed("business_value")
+                state.mark_step_completed(self.step_name)
             except Exception as e:
                 logger.exception("Phase 2 re-run failed for %s", self.step_name)
-                state.mark_step_failed("business_value")
-                await ctx.yield_output({"type": "agent_error", "step": "business_value", "error": str(e)})
+                state.mark_step_failed(self.step_name)
+                await ctx.yield_output({"type": "agent_error", "step": self.step_name, "error": str(e)})
                 await ctx.send_message(msg)
                 return
 
-            output_text = self.pm.format_agent_output("business_value", state)
-            summary = self.pm.approval_summary("business_value", state)
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
             await ctx.yield_output({
-                "type": "agent_result", "step": "business_value",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, "business_value"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
-                        step="business_value", summary=summary,
+                        step=self.step_name, summary=summary,
                     ),
                     response_type=str,
                 )
@@ -516,21 +516,21 @@ class ROIExecutor(PipelineExecutor):
                 loop.run_in_executor(None, self.agent.run, state),
                 timeout=300,
             )
-            state.mark_step_completed("roi")
+            state.mark_step_completed(self.step_name)
 
-            output_text = self.pm.format_agent_output("roi", state)
-            summary = self.pm.approval_summary("roi", state)
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
             dashboard = state.roi.get("dashboard")
 
             await ctx.yield_output({
-                "type": "agent_result", "step": "roi",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
                 "dashboard": dashboard,
             })
 
-            if _should_pause(msg.execution_mode, "roi"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
-                    request_data=ApprovalRequest(step="roi", summary=summary),
+                    request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
                 )
             else:
@@ -538,9 +538,9 @@ class ROIExecutor(PipelineExecutor):
 
         except Exception as e:
             logger.exception("ROI agent failed")
-            state.mark_step_failed("roi")
+            state.mark_step_failed(self.step_name)
             await ctx.yield_output({
-                "type": "agent_error", "step": "roi", "error": str(e),
+                "type": "agent_error", "step": self.step_name, "error": str(e),
             })
             if self.step_name in REQUIRED_STEPS:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
@@ -602,20 +602,20 @@ class PresentationExecutor(PipelineExecutor):
                 loop.run_in_executor(None, self.agent.run, state),
                 timeout=300,
             )
-            state.mark_step_completed("presentation")
+            state.mark_step_completed(self.step_name)
 
-            output_text = self.pm.format_agent_output("presentation", state)
+            output_text = self.pm.format_agent_output(self.step_name, state)
 
             await ctx.yield_output({
-                "type": "agent_result", "step": "presentation",
+                "type": "agent_result", "step": self.step_name,
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, "presentation"):
+            if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
-                        step="presentation",
-                        summary=self.pm.approval_summary("presentation", state),
+                        step=self.step_name,
+                        summary=self.pm.approval_summary(self.step_name, state),
                     ),
                     response_type=str,
                 )
@@ -627,9 +627,9 @@ class PresentationExecutor(PipelineExecutor):
 
         except Exception as e:
             logger.exception("Presentation agent failed")
-            state.mark_step_failed("presentation")
+            state.mark_step_failed(self.step_name)
             await ctx.yield_output({
-                "type": "agent_error", "step": "presentation",
+                "type": "agent_error", "step": self.step_name,
                 "error": str(e),
             })
             await ctx.yield_output({

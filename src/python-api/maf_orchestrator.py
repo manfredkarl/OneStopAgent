@@ -74,7 +74,13 @@ class MAFOrchestrator:
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
 
-        intent, meta = await pm.intent_interpreter.aclassify(message)
+        try:
+            intent, meta = await asyncio.wait_for(
+                pm.intent_interpreter.aclassify(message), timeout=30
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Intent classification timed out, defaulting to INPUT")
+            intent, meta = Intent.INPUT, {}
 
         # ── Phase: new ──────────────────────────────────────────────
         if phase == "new":
@@ -176,16 +182,16 @@ class MAFOrchestrator:
                 else:
                     state.clarifications = message
                 try:
-                    ack = await llm.ainvoke([
+                    ack = await asyncio.wait_for(llm.ainvoke([
                         {"role": "system", "content": (
                             "You are a project manager. The user just answered your questions about their Azure project. "
                             "Briefly acknowledge their input in 1-2 sentences. Then ask if there's anything else or if they want to proceed. "
                             "Be concise. Use **proceed** in bold."
                         )},
                         {"role": "user", "content": f"User's original request: {state.user_input}\n\nUser's additional input: {message}"},
-                    ])
+                    ]), timeout=30)
                     ack_text = ack.content.strip()
-                except Exception:
+                except (asyncio.TimeoutError, Exception):
                     ack_text = "Got it. Anything else, or say **proceed** to start?"
                 yield self._msg(project_id, ack_text)
 
@@ -230,11 +236,15 @@ class MAFOrchestrator:
                 async for msg in self._resume_workflow(project_id, state, message, pending):
                     yield msg
             elif intent == Intent.QUESTION:
-                follow_up = await llm.ainvoke([
-                    {"role": "system", "content": "You are a project manager. The solution is being built. Answer briefly."},
-                    {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser asks: {message}"},
-                ])
-                yield self._msg(project_id, follow_up.content)
+                try:
+                    follow_up = await asyncio.wait_for(llm.ainvoke([
+                        {"role": "system", "content": "You are a project manager. The solution is being built. Answer briefly."},
+                        {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser asks: {message}"},
+                    ]), timeout=30)
+                    follow_up_text = follow_up.content
+                except asyncio.TimeoutError:
+                    follow_up_text = "I'm still working on it. Please hold on."
+                yield self._msg(project_id, follow_up_text)
             else:
                 yield self._msg(project_id, "I'll address that after the current step completes.")
 
@@ -289,11 +299,15 @@ class MAFOrchestrator:
                 yield self._msg(project_id, "Starting fresh! Tell me about your project.")
 
             else:
-                follow_up = await llm.ainvoke([
-                    {"role": "system", "content": "You are an Azure solution project manager. The solution has been designed. Help the user with follow-up questions or modifications. Be brief."},
-                    {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser says: {message}"},
-                ])
-                yield self._msg(project_id, follow_up.content)
+                try:
+                    follow_up = await asyncio.wait_for(llm.ainvoke([
+                        {"role": "system", "content": "You are an Azure solution project manager. The solution has been designed. Help the user with follow-up questions or modifications. Be brief."},
+                        {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser says: {message}"},
+                    ]), timeout=30)
+                    follow_up_text = follow_up.content
+                except asyncio.TimeoutError:
+                    follow_up_text = "I'm having trouble processing that right now. Could you try again?"
+                yield self._msg(project_id, follow_up_text)
 
     # ── Shared assumption generation ───────────────────────────────
 
@@ -307,7 +321,7 @@ class MAFOrchestrator:
         description = state.user_input
 
         try:
-            response = await llm.ainvoke([
+            response = await asyncio.wait_for(llm.ainvoke([
                 {"role": "system", "content": (
                     "Generate EXACTLY 4 scenario assumption questions that define the business context "
                     "for an Azure solution. These will be shared across all agents.\n\n"
@@ -322,7 +336,7 @@ class MAFOrchestrator:
                     "Unit for labor rate must be '$/hr' not 'hours'."
                 )},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"},
-            ])
+            ]), timeout=30)
             text = response.content.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
