@@ -262,66 +262,6 @@ export default function ROIDashboard({ data }: Props) {
             </div>
           </div>
 
-          {/* Investment & Sensitivity side by side */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Year 1 vs Year 2 */}
-            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-              <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">Investment Analysis</h3>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-[var(--text-muted)] mb-1">Year 1 (incl. implementation)</p>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-[var(--text-secondary)]">Investment</span>
-                    <span className="text-sm font-semibold text-orange-400">${fmt(businessCase.investment.year1Total)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-[var(--text-secondary)]">Net Value</span>
-                    <span className={`text-sm font-semibold ${businessCase.investment.year1NetValue >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {businessCase.investment.year1NetValue >= 0 ? '+' : ''}${fmt(businessCase.investment.year1NetValue)}
-                    </span>
-                  </div>
-                </div>
-                <div className="border-t border-[var(--border)] pt-2">
-                  <p className="text-xs text-[var(--text-muted)] mb-1">Year 2+ (run cost only)</p>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-[var(--text-secondary)]">Investment</span>
-                    <span className="text-sm font-semibold text-orange-400">${fmt(businessCase.investment.year2Total)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-[var(--text-secondary)]">Net Value</span>
-                    <span className="text-sm font-bold text-green-400">+${fmt(businessCase.investment.year2NetValue)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Sensitivity */}
-            {businessCase.sensitivity && businessCase.sensitivity.length > 0 && (
-              <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
-                <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">Sensitivity to Adoption</h3>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-[var(--text-muted)]">
-                      <th className="text-left pb-2">Adoption</th>
-                      <th className="text-right pb-2">Value/yr</th>
-                      <th className="text-right pb-2">ROI</th>
-                      <th className="text-right pb-2">Payback</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {businessCase.sensitivity.map((row, i) => (
-                      <tr key={i} className={`text-[var(--text-secondary)] ${i === businessCase.sensitivity.length - 1 ? 'font-semibold text-[var(--text-primary)]' : ''}`}>
-                        <td className="py-1">{row.adoption}</td>
-                        <td className="text-right">${fmt(row.annualValue)}</td>
-                        <td className="text-right">{row.roi?.toFixed(0)}%</td>
-                        <td className="text-right">{row.paybackMonths != null ? `${row.paybackMonths.toFixed(1)} mo` : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
