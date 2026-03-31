@@ -448,54 +448,49 @@ export default function ROIDashboard({ data }: Props) {
           </div>
 
           {/* Butterfly rows */}
-          {waterfallRows.map((row, i) => {
-            const costPct = row.cost ? Math.min((row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT) : 0;
-            const upliftPct = row.uplift ? Math.min((row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT) : 0;
-            return (
-              <div key={i} className="flex items-center mb-3 gap-1">
-                {/* Left: cost reduction (right-aligned) */}
-                <div className="flex-1 flex items-center justify-end gap-2 min-w-0 overflow-hidden">
+          {waterfallRows.map((row, i) => (
+            <div key={i} className="mb-4">
+              {/* Row with labels on top, bars below */}
+              <div className="flex items-center gap-1">
+                {/* Left: cost reduction */}
+                <div className="flex-1 flex flex-col items-end gap-1 min-w-0">
                   {row.cost ? (
                     <>
-                      <span className="text-xs text-[var(--text-muted)] text-right truncate shrink min-w-0">
-                        {row.cost.label}
-                      </span>
-                      <div
-                        style={{ width: `${costPct}%`, minWidth: 4, maxWidth: '70%' }}
-                        className="bg-blue-500 h-7 rounded-l-md flex items-center justify-end px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
-                        title={`$${fmt(row.cost.amount)}/yr cost reduction`}
-                      />
-                      <span className="text-xs font-semibold text-blue-400 shrink-0">${fmt(row.cost.amount)}</span>
+                      <span className="text-[11px] text-[var(--text-muted)] text-right w-full">{row.cost.label}</span>
+                      <div className="flex items-center gap-1.5 w-full justify-end">
+                        <span className="text-xs font-bold text-blue-400 shrink-0">${fmt(row.cost.amount)}</span>
+                        <div
+                          style={{ width: `${Math.min((row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT)}%`, minWidth: 8 }}
+                          className="bg-blue-500 h-6 rounded-l-md shrink-0"
+                          title={`$${fmt(row.cost.amount)}/yr cost reduction`}
+                        />
+                      </div>
                     </>
-                  ) : (
-                    <div className="flex-1" />
-                  )}
+                  ) : <div className="flex-1" />}
                 </div>
 
                 {/* Center zero line */}
-                <div className="h-8 w-px bg-[var(--border)] shrink-0" />
+                <div className="h-12 w-px bg-[var(--border)] shrink-0" />
 
-                {/* Right: revenue uplift (left-aligned) */}
-                <div className="flex-1 flex items-center justify-start gap-2 min-w-0 overflow-hidden">
+                {/* Right: revenue uplift */}
+                <div className="flex-1 flex flex-col items-start gap-1 min-w-0">
                   {row.uplift ? (
                     <>
-                      <span className="text-xs font-semibold text-purple-400 shrink-0">${fmt(row.uplift.amount)}</span>
-                      <div
-                        style={{ width: `${upliftPct}%`, minWidth: 4, maxWidth: '70%' }}
-                        className="bg-purple-500 h-7 rounded-r-md flex items-center justify-start px-1 text-xs text-white font-medium whitespace-nowrap shrink-0"
-                        title={`$${fmt(row.uplift.amount)}/yr revenue uplift`}
-                      />
-                      <span className="text-xs text-[var(--text-muted)] truncate shrink min-w-0">
-                        {row.uplift.label}
-                      </span>
+                      <span className="text-[11px] text-[var(--text-muted)] text-left w-full">{row.uplift.label}</span>
+                      <div className="flex items-center gap-1.5 w-full justify-start">
+                        <div
+                          style={{ width: `${Math.min((row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT)}%`, minWidth: 8 }}
+                          className="bg-purple-500 h-6 rounded-r-md shrink-0"
+                          title={`$${fmt(row.uplift.amount)}/yr revenue uplift`}
+                        />
+                        <span className="text-xs font-bold text-purple-400 shrink-0">${fmt(row.uplift.amount)}</span>
+                      </div>
                     </>
-                  ) : (
-                    <div className="flex-1" />
-                  )}
+                  ) : <div className="flex-1" />}
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
 
           {/* Legend */}
           <div className="flex justify-center gap-6 mt-3 text-xs text-[var(--text-muted)]">

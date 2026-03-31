@@ -310,23 +310,35 @@ class ROIAgent:
         current_total = sum(item["amount"] for item in current_breakdown)
 
         # ── Build AI-assisted cost ───────────────────────────────────
+        # Future state must include ALL operating costs (not just Azure)
+        # so we compare apples-to-apples with current state
         ai_breakdown: list[dict] = []
         ai_breakdown.append({"label": "Azure platform", "amount": azure_monthly})
 
         if current_breakdown:
-            # Pull AI coverage % from BV driver metrics, default to 25% if unparseable
             ai_coverage = self._extract_coverage_from_drivers(bv_drivers) or 0.25
-            labor_items = [item for item in current_breakdown if "labor" in item["label"].lower() or "operations" in item["label"].lower()]
-            if labor_items:
-                reduced_labor = round(labor_items[0]["amount"] * (1 - ai_coverage))
-                ai_breakdown.append({"label": "Staff labor", "amount": reduced_labor})
-
-            error_items = [item for item in current_breakdown if "error" in item["label"].lower() or "rework" in item["label"].lower()]
-            if error_items:
-                error_reduction = assumptions_dict.get("error_reduction", 50) / 100
-                reduced_errors = round(error_items[0]["amount"] * (1 - error_reduction))
-                if reduced_errors > 0:
-                    ai_breakdown.append({"label": "Errors & rework", "amount": reduced_errors})
+            for item in current_breakdown:
+                label_lower = item["label"].lower()
+                if "labor" in label_lower or "operations" in label_lower:
+                    # Labor reduced by AI coverage
+                    reduced = round(item["amount"] * (1 - ai_coverage))
+                    ai_breakdown.append({"label": "Staff labor (reduced)", "amount": reduced})
+                elif "error" in label_lower or "rework" in label_lower:
+                    # Errors reduced by 50%
+                    error_reduction = assumptions_dict.get("error_reduction", 50) / 100
+                    reduced = round(item["amount"] * (1 - error_reduction))
+                    if reduced > 0:
+                        ai_breakdown.append({"label": "Errors & rework (reduced)", "amount": reduced})
+                elif "overhead" in label_lower or "it spend" in label_lower or "tool" in label_lower:
+                    # Overhead/tools carry over (slight reduction ~10% from better tooling)
+                    reduced = round(item["amount"] * 0.9)
+                    ai_breakdown.append({"label": item["label"], "amount": reduced})
+                elif "user-provided" in label_lower:
+                    # Single-line current cost — split into labor (reduced) + overhead (carried)
+                    labor_share = round(item["amount"] * 0.6 * (1 - ai_coverage))
+                    overhead_share = round(item["amount"] * 0.4 * 0.9)
+                    ai_breakdown.append({"label": "Staff labor (reduced)", "amount": labor_share})
+                    ai_breakdown.append({"label": "Tools & overhead", "amount": overhead_share})
 
         ai_total = sum(item["amount"] for item in ai_breakdown)
 
