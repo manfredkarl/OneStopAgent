@@ -158,7 +158,7 @@ class LLMClient:
             future = asyncio.run_coroutine_threadsafe(
                 self._ainvoke(messages), loop,
             )
-            return future.result(timeout=120)
+            return future.result(timeout=300)  # 5 min for long generation (e.g. full PPTX scripts)
 
         # Slow path: reuse a cached sync client on a fresh event loop.
         # This avoids cross-loop issues with aiohttp/httpx connection pools.
