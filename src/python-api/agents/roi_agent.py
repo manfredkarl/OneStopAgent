@@ -61,21 +61,27 @@ class ROIAgent:
                             return val
                     except (ValueError, TypeError):
                         continue
-        # 3. Keyword match: "labor" + "rate" or "annual" + "spend"
+        # 3. Keyword match: find spend-like or rate-like keys
         for sa_key, raw in sa.items():
             if sa_key.startswith("_"):
                 continue
             sk = sa_key.lower()
-            if ("labor" in sk and "rate" in sk) and any("labor" in c or "rate" in c for c in candidates):
-                try:
-                    return float(raw)
-                except (ValueError, TypeError):
-                    pass
-            if ("annual" in sk and "spend" in sk) and any("spend" in c or "annual" in c for c in candidates):
-                try:
-                    return float(raw)
-                except (ValueError, TypeError):
-                    pass
+            # Match any key with "labor"/"hourly" + "rate" against rate candidates
+            if ("labor" in sk or "hourly" in sk) and "rate" in sk:
+                if any("labor" in c or "rate" in c for c in candidates):
+                    try:
+                        return float(raw)
+                    except (ValueError, TypeError):
+                        pass
+            # Match any key with "spend" or "cost" (current/annual) against spend candidates
+            if "spend" in sk or ("cost" in sk and "current" in sk):
+                if any("spend" in c or "cost" in c for c in candidates):
+                    try:
+                        val = float(raw)
+                        if val > 1000:  # Sanity: spend should be > $1K
+                            return val
+                    except (ValueError, TypeError):
+                        pass
         return None
 
     def run(self, state: AgentState) -> AgentState:
