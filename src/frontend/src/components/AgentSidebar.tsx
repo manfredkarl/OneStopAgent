@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { AgentStatus } from '../types';
 import { AGENT_REGISTRY } from '../types';
 import { toggleAgent } from '../api';
@@ -22,8 +21,6 @@ const EMOJIS: Record<string, string> = {
 };
 
 export default function AgentSidebar({ projectId, agents, onAgentsChange }: Props) {
-  const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
-
   const handleToggle = async (agentId: string, currentActive: boolean) => {
     const reg = AGENT_REGISTRY.find(a => a.agentId === agentId);
     if (reg?.required || (reg as any)?.comingSoon) return;
@@ -68,8 +65,7 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
             <div
               key={agent.agentId}
               className="relative"
-              onMouseEnter={() => setHoveredAgent(agent.agentId)}
-              onMouseLeave={() => setHoveredAgent(null)}
+              title={description}
             >
               <div
                 role="button"
@@ -109,13 +105,6 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
                   </span>
                 )}
               </div>
-
-              {/* Tooltip */}
-              {description && isHovered && (
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 w-60 px-3 py-2.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)] shadow-xl pointer-events-none">
-                  <p className="text-[11.5px] text-[var(--text-secondary)] leading-relaxed">{description}</p>
-                </div>
-              )}
             </div>
           );
         })}
