@@ -37,17 +37,17 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top nav */}
-      <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center px-5 shrink-0">
+    <div className="h-screen flex flex-col">
+      {/* Top nav — fixed */}
+      <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center px-5 shrink-0 z-10">
         <a href="/" className="text-sm font-bold text-[var(--accent)] no-underline">OneStopAgent</a>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Persistent sidebar */}
-        <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col h-full overflow-hidden">
-          {/* Agents section — sticky at top, scrolls independently if needed */}
-          <div className="shrink-0 overflow-y-auto overflow-x-visible max-h-[60vh]">
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar — fixed, internal scroll */}
+        <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col min-h-0">
+          {/* Agents — scrolls independently */}
+          <div className="shrink-0 overflow-y-auto max-h-[55vh]">
             <AgentSidebar
               projectId=""
               agents={agents}
