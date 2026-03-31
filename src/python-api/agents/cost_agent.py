@@ -238,7 +238,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         # Skew check: if one service is >90% of total cost, flag it
         if total_monthly > 0 and items:
             for item in items:
-                pct = (item["monthlyCost"] / total_monthly) * 100
+                pct = (item["monthlyCost"] / total_monthly) * 100 if total_monthly > 0 else 0
                 if pct > 90:
                     assumptions.append(
                         f"⚠️ {item['serviceName']} ({item['sku']}) accounts for {pct:.0f}% of total cost — "
@@ -462,7 +462,13 @@ Return ONLY valid JSON (no markdown fences) as an array:
         elif "day" in unit_lower:
             return unit_price * 30
         elif "gb" in unit_lower:
-            return unit_price * 100
+            gb_volume = 100  # default
+            if usage_dict:
+                for key in ("data_storage_gb", "data_volume_gb", "engineering_data_volume_gb", "engineering_data_lake_volume_gb"):
+                    if usage_dict.get(key):
+                        gb_volume = int(usage_dict[key])
+                        break
+            return unit_price * gb_volume
         elif "10k" in unit_lower or "10,000" in unit_lower:
             return unit_price * 1
         else:

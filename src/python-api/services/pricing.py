@@ -201,7 +201,7 @@ def query_azure_pricing_sync(
         match = _find_best_match(items, sku)
 
         if match:
-            price = match["retailPrice"]
+            price = match.get("retailPrice", 0)
             unit = match.get("unitOfMeasure", "1 Hour")
             matched_sku = match.get("skuName", "")
             exact = sku.lower() in matched_sku.lower()

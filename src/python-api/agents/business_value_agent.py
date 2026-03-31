@@ -74,8 +74,8 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
             assumptions = json.loads(text)
             if isinstance(assumptions, list) and len(assumptions) > 0:
                 return assumptions[:5]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Phase 1 assumption generation failed: %s", e)
 
         # Fallback generic assumptions — realistic enterprise defaults
         return [
@@ -226,8 +226,7 @@ RULES — follow precisely:
 CALCULATION APPROACH:
 - Calculate each driver INDEPENDENTLY using the user-provided assumptions.
 - Use realistic percentage ranges based on published industry data (not artificially deflated).
-- For revenue uplift drivers, count the revenue impact at face value — do NOT discount
-  revenue uplift to a small fraction (e.g. 5%) of the actual calculated impact.
+- For revenue uplift drivers, apply a conservative realization factor: use 25-50% of the gross revenue impact to account for adoption timing, competitive dynamics, and execution risk. Show the full gross impact AND the realized value clearly.
 - Sum the drivers directly. Do NOT apply "overlap adjustments", "double counting reductions",
   or any cross-driver deductions.
 - Set confidence to "moderate" by default.

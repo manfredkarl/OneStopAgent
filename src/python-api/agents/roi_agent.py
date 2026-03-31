@@ -125,7 +125,9 @@ class ROIAgent:
         roi_low = ((val_low - annual_cost) / annual_cost) * 100
         roi_high = ((val_high - annual_cost) / annual_cost) * 100
         roi_mid = ((val_mid - annual_cost) / annual_cost) * 100
-        payback_months = (annual_cost / (val_mid / 12)) if val_mid > 0 else None
+        payback_months = round((annual_cost * 12 / val_mid), 1) if val_mid > 0 else None
+        if payback_months is not None and payback_months > 120:
+            payback_months = 120.0
 
         state.roi = {
             "annual_cost": round(annual_cost, 2),
@@ -428,6 +430,7 @@ class ROIAgent:
         methodology += (
             driver_note
             + "Projection uses flat annual figures; one-time implementation costs are excluded. "
+            + "Risk reduction estimated at 3% of current annual spend (governance, compliance, reduced outage exposure). "
             + "ROI = (Annual Value \u2212 Annual Cost) \u00f7 Annual Cost \u00d7 100."
         )
 
@@ -527,16 +530,12 @@ class ROIAgent:
         hard_savings = sum(item["amount"] for item in waterfall_cost_reduction)
         revenue_uplift = sum(item["amount"] for item in waterfall_revenue_uplift)
 
+        # Productivity is already part of hard_savings (cost_reduction drivers
+        # include labor/time savings) — don't double-count.
         productivity = 0
-        for d in bv_drivers:
-            name = (d.get("name", "") + " " + d.get("description", "")).lower()
-            if any(kw in name for kw in ("productivity", "time saving", "efficiency", "faster")):
-                amounts = self._compute_per_driver_amounts([d], annual_value / max(len(bv_drivers), 1))
-                productivity += amounts[0] if amounts else 0
+        risk_reduction = round(current_annual * 0.03) if current_annual else 0
 
-        risk_reduction = round(current_annual * 0.05) if current_annual else 0
-
-        total_value = round(hard_savings + productivity + revenue_uplift + risk_reduction)
+        total_value = round(hard_savings + revenue_uplift + risk_reduction)
 
         value_bridge = {
             "hardSavings": round(hard_savings),
@@ -562,7 +561,9 @@ class ROIAgent:
         for pct, label in [(0.5, "50%"), (0.75, "75%"), (1.0, "100%")]:
             adj_value = total_value * pct
             adj_roi = ((adj_value - azure_annual) / azure_annual) * 100 if azure_annual > 0 else 0
-            adj_payback = round((azure_annual / (adj_value / 12)), 1) if adj_value > 0 else None
+            adj_payback = round((azure_annual * 12 / adj_value), 1) if adj_value > 0 else None
+            if adj_payback is not None and adj_payback > 120:
+                adj_payback = 120.0
             sensitivity.append({
                 "adoption": label,
                 "annualValue": round(adj_value),

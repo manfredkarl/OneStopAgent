@@ -47,6 +47,8 @@ class MAFOrchestrator:
         """Remove workflow and pending requests for completed project."""
         self.workflows.pop(project_id, None)
         self.pending_requests.pop(project_id, None)
+        self._pending_assumptions.pop(project_id, None)
+        self._locks.pop(project_id, None)
 
     def _get_lock(self, project_id: str) -> asyncio.Lock:
         if project_id not in self._locks:
@@ -103,9 +105,12 @@ class MAFOrchestrator:
             await task
             result = result_holder[0]
 
-            state.brainstorming = {"scenarios": result["scenarios"], "industry": result["industry"]}
-            state.azure_fit = result["azure_fit"]
-            state.azure_fit_explanation = result["azure_fit_explanation"]
+            state.brainstorming = {
+                "scenarios": result.get("scenarios", []),
+                "industry": result.get("industry", "Cross-Industry"),
+            }
+            state.azure_fit = result.get("azure_fit", "unclear")
+            state.azure_fit_explanation = result.get("azure_fit_explanation", "")
             greeting = result["response"]
 
             if isinstance(greeting, str) and greeting.strip().startswith("{"):
@@ -275,6 +280,7 @@ class MAFOrchestrator:
                     yield msg
 
             elif intent == Intent.BRAINSTORM:
+                self._cleanup_project(project_id)
                 self.phases[project_id] = "new"
                 state.mode = "brainstorm"
                 state.completed_steps.clear()
@@ -374,6 +380,9 @@ class MAFOrchestrator:
             return
 
         # Respond to first pending request only
+        if not pending:
+            yield self._msg(project_id, "No pending request to respond to.")
+            return
         first_req_id = next(iter(pending))
         responses = {first_req_id: message}
 

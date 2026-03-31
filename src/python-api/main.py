@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -28,7 +29,7 @@ app = FastAPI(title="OneStopAgent API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:4200,http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
