@@ -29,6 +29,10 @@ class AgentState:
 
     # ── Agent outputs ────────────────────────────────────────────────
     brainstorming: dict[str, Any] = field(default_factory=dict)
+
+    # ── Shared assumptions (locked before pipeline runs) ────────
+    shared_assumptions: dict[str, Any] = field(default_factory=dict)
+
     architecture: dict[str, Any] = field(default_factory=dict)
     services: dict[str, Any] = field(default_factory=dict)
     costs: dict[str, Any] = field(default_factory=dict)
@@ -65,6 +69,10 @@ class AgentState:
         parts = [f"User request: {self.user_input}"]
         if self.clarifications:
             parts.append(f"Clarifications: {self.clarifications}")
+        if self.shared_assumptions:
+            parts.append("Shared scenario assumptions:")
+            for key, val in self.shared_assumptions.items():
+                parts.append(f"  {key}: {val}")
         if self.azure_fit:
             parts.append(f"Azure fit: {self.azure_fit} — {self.azure_fit_explanation}")
         if self.retrieved_patterns:

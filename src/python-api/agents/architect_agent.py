@@ -32,6 +32,7 @@ class ArchitectAgent:
             scenarios = state.brainstorming.get("scenarios", [])
             state.architecture = self._generate_architecture(
                 requirements, pattern, industry, scenarios,
+                shared_assumptions=state.shared_assumptions,
             )
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
@@ -117,8 +118,26 @@ class ArchitectAgent:
         pattern: dict | None,
         industry: str,
         scenarios: list[dict],
+        shared_assumptions: dict | None = None,
     ) -> dict:
         """Generate a layered, use-case-framed architecture in one LLM call."""
+        # Build scale context from shared assumptions
+        scale_context = ""
+        sa = shared_assumptions or {}
+        if sa:
+            parts = []
+            if sa.get("total_users"):
+                parts.append(f"Total users: {sa['total_users']}")
+            if sa.get("concurrent_users"):
+                parts.append(f"Peak concurrent: {sa['concurrent_users']}")
+            if sa.get("data_volume_gb"):
+                parts.append(f"Data volume: {sa['data_volume_gb']} GB")
+            if parts:
+                scale_context = (
+                    "SCALE REQUIREMENTS:\n" + "\n".join(parts)
+                    + "\n\nDesign the architecture to handle this scale. Choose appropriate SKU tiers.\n\n"
+                )
+
         pattern_context = ""
         pattern_title = ""
         pattern_relevant = False
@@ -158,6 +177,7 @@ class ArchitectAgent:
                     "Do NOT produce a generic list of Azure services. Instead, organize around functional LAYERS\n"
                     "that map to what the customer is actually trying to do.\n\n"
                     f"INDUSTRY: {industry}\n"
+                    f"{scale_context}"
                     f"{pattern_context}"
                     f"{scenario_context}\n"
                     "Return ONLY valid JSON (no markdown fences) with this structure:\n"

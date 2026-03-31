@@ -93,6 +93,24 @@ Keep it to 3-5 questions max. Be concise."""},
             for a in user_assumptions
         ])
 
+        # Prepend shared assumptions for consistency
+        sa = state.shared_assumptions
+        shared_lines = []
+        if sa.get("current_annual_spend"):
+            shared_lines.append(f"- Current annual spend on equivalent capability: ${sa['current_annual_spend']:,.0f}")
+        if sa.get("hourly_labor_rate"):
+            shared_lines.append(f"- Fully loaded hourly labor rate: ${sa['hourly_labor_rate']}")
+        if sa.get("total_users"):
+            shared_lines.append(f"- Total platform users: {sa['total_users']}")
+        if sa.get("timeline_months"):
+            shared_lines.append(f"- Deployment timeline: {sa['timeline_months']} months")
+
+        if shared_lines:
+            assumption_context = (
+                "SHARED SCENARIO ASSUMPTIONS (locked):\n" + "\n".join(shared_lines)
+                + "\n\nAGENT-SPECIFIC ASSUMPTIONS:\n" + assumption_context
+            )
+
         # Search for real industry benchmarks
         use_case = description[:120]
         search_results: list[dict[str, str]] = []
@@ -162,6 +180,8 @@ USE CASE: {description}
 
 USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
 {assumption_context}
+
+Use the SHARED SCENARIO ASSUMPTIONS as your baseline. The hourly_labor_rate and current_annual_spend are the authoritative values — do not invent different ones.
 
 {search_context}
 

@@ -40,6 +40,7 @@ class MAFOrchestrator:
         self.phases: dict[str, str] = {}
         self.workflows: dict[str, object] = {}  # MAF Workflow per project
         self.pending_requests: dict[str, dict] = {}  # project_id → {request_id: ...}
+        self._pending_assumptions: dict[str, list] = {}  # project_id → generated assumptions
         self._locks: dict[str, asyncio.Lock] = {}  # per-project concurrency guard (for future use)
 
     def _cleanup_project(self, project_id: str) -> None:
@@ -150,9 +151,16 @@ class MAFOrchestrator:
                 if intent == Intent.FAST_RUN:
                     yield self._msg(project_id, "Running in fast mode — I'll pause at architecture and before the final deck.", {"type": "pm_response"})
 
-                self.phases[project_id] = "executing"
-                async for msg in self._run_workflow(project_id, state, active_agents):
-                    yield msg
+                # Generate shared assumptions before starting the pipeline
+                assumptions = await self._generate_shared_assumptions(state)
+                self._pending_assumptions[project_id] = assumptions
+                self.phases[project_id] = "collecting_assumptions"
+
+                yield ChatMessage(
+                    project_id=project_id, role="agent", agent_id="pm",
+                    content="Before we start, please confirm the scenario assumptions that all agents will use:",
+                    metadata={"type": "assumptions_input", "step": "shared", "assumptions": assumptions},
+                )
 
             elif intent == Intent.SKIP:
                 yield self._msg(project_id, "Got it. What else would you like to adjust, or say **proceed** to start?")
@@ -175,6 +183,39 @@ class MAFOrchestrator:
                 except Exception:
                     ack_text = "Got it. Anything else, or say **proceed** to start?"
                 yield self._msg(project_id, ack_text)
+
+        # ── Phase: collecting_assumptions ──────────────────────────────
+        elif phase == "collecting_assumptions":
+            # Parse user's response (JSON from the assumptions form, or free-text fallback)
+            try:
+                user_values = json.loads(message)
+            except json.JSONDecodeError:
+                # User said "proceed" with defaults
+                assumptions = self._pending_assumptions.get(project_id, [])
+                user_values = [
+                    {"id": a["id"], "label": a.get("label", a["id"]), "value": a.get("default", 0), "unit": a.get("unit", "")}
+                    for a in assumptions
+                ]
+
+            # Store as shared assumptions dict
+            state.shared_assumptions = {
+                item.get("id", ""): item.get("value", 0)
+                for item in user_values if item.get("id")
+            }
+            # Also store the full items for display
+            state.shared_assumptions["_items"] = user_values
+
+            self._pending_assumptions.pop(project_id, None)
+
+            yield self._msg(project_id, "✅ Scenario assumptions locked. Starting agent pipeline...", {"type": "pm_response"})
+
+            self.phases[project_id] = "executing"
+            normalized_agents = [a.replace("-", "_") for a in active_agents]
+            plan = pm.build_plan(normalized_agents)
+            state.plan_steps = plan
+
+            async for msg in self._run_workflow(project_id, state, active_agents):
+                yield msg
 
         # ── Phase: executing (workflow paused for HITL) ─────────────
         elif phase == "executing":
@@ -247,6 +288,58 @@ class MAFOrchestrator:
                     {"role": "user", "content": f"Context: {state.to_context_string()}\n\nUser says: {message}"},
                 ])
                 yield self._msg(project_id, follow_up.content)
+
+    # ── Shared assumption generation ───────────────────────────────
+
+    async def _generate_shared_assumptions(self, state: AgentState) -> list[dict]:
+        """Generate overarching scenario assumptions that all agents share."""
+        industry = state.brainstorming.get("industry", "Cross-Industry")
+        description = state.user_input
+
+        try:
+            response = await llm.ainvoke([
+                {"role": "system", "content": (
+                    "Generate 6-8 scenario assumption questions that define the canonical context "
+                    "for an Azure solution design.\n"
+                    "These assumptions will be shared across ALL agents (architecture, cost, business value, ROI).\n\n"
+                    "Return ONLY a JSON array. Each item:\n"
+                    "{\n"
+                    '    "id": "snake_case_key",\n'
+                    '    "label": "Human-readable question",\n'
+                    '    "unit": "count" or "GB" or "$" or "hours" or "%" or "months",\n'
+                    '    "default": realistic_numeric_default,\n'
+                    '    "hint": "Why this matters for the solution"\n'
+                    "}\n\n"
+                    "REQUIRED categories (include at least one question per category):\n"
+                    "1. SCALE: Total users, concurrent users, or transaction volume\n"
+                    "2. DATA: Data volume to store/process (GB or TB)\n"
+                    "3. GEOGRAPHY: Primary region and multi-region needs\n"
+                    "4. CURRENT STATE: Current annual spend on equivalent capability OR current headcount involved\n"
+                    "5. LABOR: Fully loaded hourly labor rate for affected staff\n"
+                    "6. TIMELINE: Months to production deployment\n\n"
+                    "Use REALISTIC mid-market enterprise defaults. Be specific to the industry and use case."
+                )},
+                {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"},
+            ])
+            text = response.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            assumptions = json.loads(text)
+            if isinstance(assumptions, list) and len(assumptions) >= 4:
+                return assumptions[:8]
+        except Exception as e:
+            logger.warning("Failed to generate shared assumptions: %s", e)
+
+        # Fallback defaults
+        return [
+            {"id": "total_users", "label": "Total users who will use the platform", "unit": "count", "default": 500, "hint": "Drives architecture scale and licensing"},
+            {"id": "concurrent_users", "label": "Peak concurrent users", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
+            {"id": "data_volume_gb", "label": "Total data to store and process", "unit": "GB", "default": 1000, "hint": "Drives storage and database sizing"},
+            {"id": "primary_region", "label": "Primary Azure region (1=East US, 2=West Europe, 3=Southeast Asia)", "unit": "count", "default": 1, "hint": "Affects pricing and compliance"},
+            {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI calculation"},
+            {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$", "default": 85, "hint": "Used to monetize time savings"},
+            {"id": "timeline_months", "label": "Target months to production", "unit": "months", "default": 6, "hint": "Affects implementation cost and time-to-value"},
+        ]
 
     # ── MAF Workflow execution ──────────────────────────────────────
 

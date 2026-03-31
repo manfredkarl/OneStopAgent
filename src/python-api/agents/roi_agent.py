@@ -173,35 +173,48 @@ class ROIAgent:
         # If we have at least one input, fill in the gaps with sensible defaults
         has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
 
-        if not has_any_input:
-            # No user input — estimate current cost from Azure spend only (NOT from annual_value).
-            # Industry rule-of-thumb: total operational cost ≈ 2× cloud platform cost.
-            estimated_current = max(azure_monthly * 2, 5000)
-            current_breakdown.append({"label": "Operations (estimated)", "amount": round(estimated_current * 0.75)})
-            current_breakdown.append({"label": "Overhead (estimated)", "amount": round(estimated_current * 0.25)})
-        else:
-            # Fill missing fields with reasonable defaults
-            if not employees:
-                employees = 30
-            if not hourly_rate:
-                hourly_rate = 45
-            if not manual_hours:
-                manual_hours = 15
+        # Use shared assumptions as authoritative baseline when available
+        sa = state.shared_assumptions
+        if sa and sa.get("current_annual_spend"):
+            # Use authoritative baseline from shared assumptions
+            current_monthly = sa["current_annual_spend"] / 12
+            current_breakdown = [
+                {"label": "Current operations (user-provided)", "amount": round(current_monthly)},
+            ]
+            has_any_input = True  # Mark as real data, not estimated
+        elif sa and sa.get("hourly_labor_rate") and not hourly_rate:
+            hourly_rate = sa["hourly_labor_rate"]
 
-            monthly_labor = round(employees * hourly_rate * manual_hours * 4.33)
-            current_breakdown.append({"label": "Staff labor", "amount": monthly_labor})
+        if not current_breakdown:
+            if not has_any_input:
+                # No user input — estimate current cost from Azure spend only (NOT from annual_value).
+                # Industry rule-of-thumb: total operational cost ≈ 2× cloud platform cost.
+                estimated_current = max(azure_monthly * 2, 5000)
+                current_breakdown.append({"label": "Operations (estimated)", "amount": round(estimated_current * 0.75)})
+                current_breakdown.append({"label": "Overhead (estimated)", "amount": round(estimated_current * 0.25)})
+            else:
+                # Fill missing fields with reasonable defaults
+                if not employees:
+                    employees = 30
+                if not hourly_rate:
+                    hourly_rate = 45
+                if not manual_hours:
+                    manual_hours = 15
 
-            if monthly_it_spend:
-                current_breakdown.append({"label": "IT spend", "amount": round(monthly_it_spend)})
+                monthly_labor = round(employees * hourly_rate * manual_hours * 4.33)
+                current_breakdown.append({"label": "Staff labor", "amount": monthly_labor})
 
-            error_rate = assumptions_dict.get("error_rate", 8) / 100
-            error_cost = round(monthly_labor * error_rate)
-            if error_cost > 0:
-                current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
+                if monthly_it_spend:
+                    current_breakdown.append({"label": "IT spend", "amount": round(monthly_it_spend)})
 
-            overhead = assumptions_dict.get("overhead", 0)
-            if overhead:
-                current_breakdown.append({"label": "Overhead / tools", "amount": round(overhead)})
+                error_rate = assumptions_dict.get("error_rate", 8) / 100
+                error_cost = round(monthly_labor * error_rate)
+                if error_cost > 0:
+                    current_breakdown.append({"label": "Errors & rework", "amount": error_cost})
+
+                overhead = assumptions_dict.get("overhead", 0)
+                if overhead:
+                    current_breakdown.append({"label": "Overhead / tools", "amount": round(overhead)})
 
         current_total = sum(item["amount"] for item in current_breakdown)
 
@@ -324,7 +337,12 @@ class ROIAgent:
         methodology = (
             f"Azure costs based on {service_count} services ({cost_source} pricing). "
         )
-        if cost_estimated:
+        if sa and sa.get("current_annual_spend"):
+            methodology += (
+                f"Current operational cost from user-provided baseline "
+                f"(${sa['current_annual_spend']:,.0f}/yr). "
+            )
+        elif cost_estimated:
             methodology += (
                 "Current operational cost estimated as 2\u00d7 Azure cost "
                 "(industry rule-of-thumb for cloud migration). "

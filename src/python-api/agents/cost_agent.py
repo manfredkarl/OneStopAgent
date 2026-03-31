@@ -181,7 +181,19 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
 
         # Build usage context from user-provided values
         usage_dict = {a.get("id", ""): a.get("value", 0) for a in user_assumptions if a.get("id")}
-        users = usage_dict.get("concurrent_users", _extract_users(full_text))
+
+        # Use shared assumptions as authoritative baseline
+        sa = state.shared_assumptions
+        if sa:
+            if not usage_dict.get("concurrent_users") and sa.get("concurrent_users"):
+                usage_dict["concurrent_users"] = sa["concurrent_users"]
+            if not usage_dict.get("total_users") and sa.get("total_users"):
+                usage_dict["total_users"] = sa["total_users"]
+            if not usage_dict.get("data_storage_gb") and sa.get("data_volume_gb"):
+                usage_dict["data_storage_gb"] = sa["data_volume_gb"]
+
+        users = usage_dict.get("concurrent_users",
+            sa.get("concurrent_users", sa.get("total_users", _extract_users(full_text))) if sa else _extract_users(full_text))
         regions = _extract_regions(full_text)
         primary_region = regions[0]
         industry = state.brainstorming.get("industry", "Cross-Industry")
