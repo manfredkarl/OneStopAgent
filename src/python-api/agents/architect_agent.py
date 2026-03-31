@@ -26,13 +26,12 @@ class ArchitectAgent:
         self._retrieve_patterns(state)
 
         try:
-            industry = state.brainstorming.get("industry", "Cross-Industry")
-            pattern = self._select_pattern(state.retrieved_patterns, industry)
+            pattern = self._select_pattern(state.retrieved_patterns)
             requirements = state.to_context_string()
+            industry = state.brainstorming.get("industry", "Cross-Industry")
             scenarios = state.brainstorming.get("scenarios", [])
             state.architecture = self._generate_architecture(
                 requirements, pattern, industry, scenarios,
-                shared_assumptions=state.shared_assumptions,
             )
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
@@ -70,24 +69,11 @@ class ArchitectAgent:
         else:
             logger.warning("No patterns found in local knowledge base either")
 
-    # Domain keywords used to detect cross-domain mismatches between a
-    # reference pattern and the user's stated industry.
-    _DOMAIN_KEYWORDS: dict[str, list[str]] = {
-        "Healthcare": ["patient", "telehealth", "clinical", "fhir", "hipaa", "health", "medical", "ehr"],
-        "Retail": ["e-commerce", "ecommerce", "storefront", "shopping", "cart", "product recommendation"],
-        "Financial Services": ["fraud", "transaction", "banking", "payment", "fintech"],
-        "Manufacturing": ["iot", "telemetry", "factory", "sensor", "plc", "scada", "plant"],
-    }
-
-    @classmethod
-    def _select_pattern(cls, patterns: list[dict], industry: str = "") -> dict | None:
-        """Pick the best pattern — let the LLM handle cross-domain adaptation."""
+    @staticmethod
+    def _select_pattern(patterns: list[dict]) -> dict | None:
         if not patterns:
             return None
-        best = max(patterns, key=lambda p: p.get("confidence_score", 0.0))
-        if best.get("confidence_score", 0) < 0.1:
-            return None
-        return best
+        return max(patterns, key=lambda p: p.get("confidence_score", 0.0))
 
     # ── Layered architecture generation ───────────────────────────────
 
@@ -97,46 +83,19 @@ class ArchitectAgent:
         pattern: dict | None,
         industry: str,
         scenarios: list[dict],
-        shared_assumptions: dict | None = None,
     ) -> dict:
         """Generate a layered, use-case-framed architecture in one LLM call."""
-        # Build scale context from shared assumptions
-        scale_context = ""
-        sa = shared_assumptions or {}
-        if sa:
-            parts = []
-            if sa.get("total_users"):
-                parts.append(f"Total users: {sa['total_users']}")
-            if sa.get("concurrent_users"):
-                parts.append(f"Peak concurrent: {sa['concurrent_users']}")
-            if sa.get("data_volume_gb"):
-                parts.append(f"Data volume: {sa['data_volume_gb']} GB")
-            if parts:
-                scale_context = (
-                    "SCALE REQUIREMENTS:\n" + "\n".join(parts)
-                    + "\n\nDesign the architecture to handle this scale. Choose appropriate SKU tiers.\n\n"
-                )
-
         pattern_context = ""
         pattern_title = ""
-        pattern_relevant = False
         if pattern:
             pattern_title = pattern.get("title", "")
-            pattern_relevant = True
             pattern_context = (
                 f"\nREFERENCE ARCHITECTURE: {pattern_title}\n"
                 f"Summary: {pattern.get('summary', '')}\n"
                 f"Recommended services: {', '.join(pattern.get('recommended_services', []))}\n"
                 f"URL: {pattern.get('url', '')}\n\n"
-                "Adapt this reference architecture to the actual use case. "
-                "Re-use its structural patterns and service selections where they fit, "
-                "and substitute domain-specific components as needed.\n"
-            )
-        else:
-            pattern_context = (
-                "\nNo closely matching reference architecture was found.\n"
-                "Design the architecture from scratch using Azure Well-Architected Framework "
-                "best practices and services appropriate for the stated industry and use case.\n"
+                "ADAPT this reference architecture to the user's specific scenario.\n"
+                "Mention by name which Microsoft pattern you adapted and why.\n"
             )
 
         scenario_context = ""
@@ -154,7 +113,6 @@ class ArchitectAgent:
                     "Do NOT produce a generic list of Azure services. Instead, organize around functional LAYERS\n"
                     "that map to what the customer is actually trying to do.\n\n"
                     f"INDUSTRY: {industry}\n"
-                    f"{scale_context}"
                     f"{pattern_context}"
                     f"{scenario_context}\n"
                     "Return ONLY valid JSON (no markdown fences) with this structure:\n"
@@ -241,26 +199,16 @@ class ArchitectAgent:
         if not narrative:
             narrative = f"Layered Azure architecture with {len(layers)} functional layers."
 
-        adapted = result.get("adaptedFrom") or (pattern_title if pattern_relevant else None)
-
-        # When no relevant pattern was found, attribute to Azure best practices
-        if pattern_relevant:
-            based_on = adapted or "custom design"
-            based_on_url = result.get("adaptedFromUrl") or (pattern.get("url") if pattern else None)
-            adaptation_notes = result.get("adaptationNotes")
-        else:
-            based_on = "Azure Well-Architected Framework"
-            based_on_url = "https://learn.microsoft.com/azure/well-architected/"
-            adaptation_notes = f"Architecture designed from Azure best practices for {industry}"
+        adapted = result.get("adaptedFrom") or (pattern_title if pattern else None)
 
         return {
             "mermaidCode": mermaid,
             "layers": layers,
             "components": all_components,
             "narrative": narrative,
-            "basedOn": based_on,
-            "basedOnUrl": based_on_url,
-            "adaptationNotes": adaptation_notes,
+            "basedOn": adapted or "custom design",
+            "basedOnUrl": result.get("adaptedFromUrl") or (pattern.get("url") if pattern else None),
+            "adaptationNotes": result.get("adaptationNotes"),
         }
 
     # ── Fallback ──────────────────────────────────────────────────────

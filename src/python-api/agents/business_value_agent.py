@@ -115,21 +115,23 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
             for a in user_assumptions
         ])
 
-        # Prepend shared assumptions as authoritative baseline (only key fields)
+        # Prepend shared assumptions as baseline (fuzzy key matching)
         sa = state.shared_assumptions or {}
         shared_lines = []
-        for spend_key in ["current_annual_engineering_toolchain_spend", "current_annual_spend"]:
-            if sa.get(spend_key):
-                shared_lines.append(f"- Current annual spend: ${float(sa[spend_key]):,.0f}")
-                break
-        for rate_key in ["fully_loaded_engineering_labor_rate", "hourly_labor_rate"]:
-            if sa.get(rate_key):
-                shared_lines.append(f"- Hourly labor rate: ${float(sa[rate_key])}/hr")
-                break
-        for user_key in ["active_rd_engineering_users", "total_users"]:
-            if sa.get(user_key):
-                shared_lines.append(f"- Platform users: {sa[user_key]}")
-                break
+        for k, v in sa.items():
+            if k.startswith("_"):
+                continue
+            kl = k.lower()
+            try:
+                fv = float(v)
+            except (ValueError, TypeError):
+                continue
+            if ("spend" in kl or "cost" in kl) and "annual" in kl and fv > 1000:
+                shared_lines.append(f"- Current annual spend: ${fv:,.0f}")
+            elif ("labor" in kl or "hourly" in kl) and "rate" in kl and 10 < fv < 500:
+                shared_lines.append(f"- Hourly labor rate: ${fv}/hr")
+            elif ("user" in kl or "engineer" in kl) and fv > 1:
+                shared_lines.append(f"- Platform users: {int(fv)}")
 
         if shared_lines:
             assumption_context = "SHARED BASELINE:\n" + "\n".join(shared_lines) + "\n\nUSER INPUTS:\n" + assumption_context
