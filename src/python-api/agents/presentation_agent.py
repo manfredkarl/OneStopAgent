@@ -35,20 +35,41 @@ class PresentationAgent:
                 cls._DESIGN_RULES = f.read()
 
     def run(self, state: AgentState) -> AgentState:
-        """Build slides by having the LLM generate a complete PptxGenJS script.
+        """Build slides with a refinement round for quality.
 
         1. Extract structured data from pipeline state
-        2. Have the LLM generate a full PptxGenJS script using the PPTX skill
-        3. Execute the script via Node.js
+        2. LLM generates initial PptxGenJS script
+        3. Execute → if it fails, LLM fixes the error
+        4. If it succeeds, LLM reviews and polishes the script
+        5. Execute the refined script
         """
         slide_data = self._build_slide_data(state)
         customer = state.customer_name or "Customer"
 
         from agents.llm import llm
+        from services.presentation import execute_pptxgenjs
+
+        # Round 1: Initial generation
         script = self._generate_pptxgenjs_script(slide_data, llm)
 
-        from services.presentation import execute_pptxgenjs
-        path = execute_pptxgenjs(script, customer)
+        try:
+            path = execute_pptxgenjs(script, customer)
+        except Exception as e:
+            # Round 1 failed — LLM fixes the error
+            logger.warning("Round 1 PPTX failed: %s — asking LLM to fix", e)
+            script = self._fix_script(script, str(e), llm)
+            path = execute_pptxgenjs(script, customer)
+
+        # Round 2: Refinement — LLM reviews and polishes
+        try:
+            refined = self._refine_script(script, slide_data, llm)
+            refined_path = execute_pptxgenjs(refined, customer)
+            path = refined_path  # Use refined version
+            logger.info("Presentation refined successfully")
+        except Exception as e:
+            logger.warning("Refinement failed: %s — keeping round 1 output", e)
+            # Keep the round 1 output — it worked
+
         state.presentation_path = path
         return state
 
@@ -214,5 +235,52 @@ Azure solution proposal presentation.
 
         if "pptxgenjs" not in script.lower() or "writefile" not in script.lower():
             raise ValueError("Generated script missing required PptxGenJS structure")
+
+        return script
+
+    def _fix_script(self, broken_script: str, error: str, llm) -> str:
+        """Ask LLM to fix a broken PptxGenJS script based on the error."""
+        response = llm.invoke([
+            {"role": "system", "content": "You are a PptxGenJS expert. Fix the JavaScript error in this script. Return ONLY the corrected JavaScript code, no markdown fences."},
+            {"role": "user", "content": f"This PptxGenJS script failed with error:\n{error[:500]}\n\nFix the script:\n{broken_script[:8000]}"},
+        ])
+        script = response.content.strip()
+        if script.startswith("```"):
+            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        return script
+
+    def _refine_script(self, working_script: str, slide_data: dict, llm) -> str:
+        """LLM reviews a working script and polishes it for quality."""
+        data_summary = json.dumps({
+            "customer": slide_data.get("customer", ""),
+            "industry": slide_data.get("industry", ""),
+            "driverCount": len(slide_data.get("valueDrivers", [])),
+            "serviceCount": len(slide_data.get("services", [])),
+            "hasROI": bool(slide_data.get("roi")),
+        }, default=str)
+
+        response = llm.invoke([
+            {"role": "system", "content": (
+                "You are a PptxGenJS expert and presentation design critic. "
+                "Review this working script and improve it. Focus on:\n"
+                "1. Visual polish — ensure consistent spacing, alignment, margins\n"
+                "2. Text fitting — shorten any text that would overflow slide bounds\n"
+                "3. Data accuracy — verify all numbers from the DATA object are used correctly\n"
+                "4. Color consistency — ensure the Microsoft color palette is applied throughout\n"
+                "5. Professional feel — add subtle design touches (accent lines, card shadows)\n\n"
+                "Return the COMPLETE improved script. Do NOT return a diff or partial changes."
+            )},
+            {"role": "user", "content": (
+                f"Context: {data_summary}\n\n"
+                f"Review and improve this working PptxGenJS script:\n{working_script}"
+            )},
+        ])
+
+        script = response.content.strip()
+        if script.startswith("```"):
+            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        if "pptxgenjs" not in script.lower() or "writefile" not in script.lower():
+            raise ValueError("Refined script missing required PptxGenJS structure")
 
         return script
