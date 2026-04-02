@@ -583,25 +583,32 @@ class ROIAgent:
         # Ensures headline, ROI, payback, and waterfall all match.
         total_annual_value = hard_savings + revenue_uplift + risk_reduction
 
-        # ── ROI: Year 1 (includes impl+change) and run-rate ─────────
-        # Uses total_annual_value (capped), not val_mid (uncapped BV estimate)
+        # ── Adoption ramp (needed for ROI, payback, and projection) ──
+        adoption_ramp = self._select_adoption_ramp(state)
+        year1_adoption = adoption_ramp[0]  # e.g., 0.30 for complex
+
+        # ── ROI: Year 1 (adoption-adjusted) and run-rate (full) ──────
+        # Year 1 ROI reflects partial adoption + one-time costs
+        year1_adopted_value = total_annual_value * year1_adoption
         if year1_investment > 0:
-            roi_year1 = ((total_annual_value - year1_investment) / year1_investment) * 100
+            roi_year1 = ((year1_adopted_value - year1_investment) / year1_investment) * 100
         else:
             roi_year1 = 0.0
 
+        # Run-rate ROI: full value vs Azure annual (steady state)
         if azure_annual > 0:
             roi_run_rate = ((total_annual_value - azure_annual) / azure_annual) * 100
         else:
             roi_run_rate = 0.0
 
-        # Headline = Year 1 (conservative)
+        # Headline = Year 1 (conservative, adoption-adjusted)
         roi_mid = roi_year1
-        roi_low = ((val_low - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
-        roi_high = ((val_high - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        roi_low = ((val_low * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        roi_high = ((val_high * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
 
-        # Payback against Year 1 investment
-        payback_months = round((year1_investment / total_annual_value) * 12, 1) if total_annual_value > 0 else None
+        # Payback: months until cumulative adopted value covers investment
+        monthly_adopted_value = (total_annual_value * year1_adoption) / 12
+        payback_months = round(year1_investment / monthly_adopted_value, 1) if monthly_adopted_value > 0 else None
         if payback_months is not None:
             payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
             payback_months = round(payback_months, 1)
@@ -888,6 +895,7 @@ class ROIAgent:
             year1_investment=year1_investment,
             year1_total_cost=year1_total_cost,
             year2_run_rate=year2_run_rate,
+            adoption_ramp=adoption_ramp,
             bv_drivers=bv_drivers,
             is_estimated=is_estimated,
             sa_annual_spend=sa_annual_spend,
@@ -984,6 +992,7 @@ class ROIAgent:
         year1_investment: float,
         year1_total_cost: float,
         year2_run_rate: float,
+        adoption_ramp: list[float],
         bv_drivers: list[dict],
         is_estimated: bool,
         sa_annual_spend: float | None,
@@ -1048,12 +1057,14 @@ class ROIAgent:
             "totalAnnualValue": total_annual_value,
         }
 
-        # ── investment ───────────────────────────────────────────────
+        # ── investment (adoption-ramped to match cumulative chart) ────
+        year1_adopted_value = round(total_annual_value * adoption_ramp[0])
+        year2_adopted_value = round(total_annual_value * adoption_ramp[1]) if len(adoption_ramp) > 1 else total_annual_value
         investment = {
             "year1Total": year1_investment,
             "year2Total": year2_run_rate,
-            "year1NetValue": round(total_annual_value - year1_investment),
-            "year2NetValue": round(total_annual_value - year2_run_rate),
+            "year1NetValue": round(year1_adopted_value - year1_investment),
+            "year2NetValue": round(year2_adopted_value - year2_run_rate),
         }
 
         # ── sensitivity ──────────────────────────────────────────────
