@@ -446,73 +446,43 @@ class ROIAgent:
         costs_used_fallback: bool = False,
         bv_used_fallback: bool = False,
     ) -> tuple[str, list[str]]:
-        """Run all plausibility checks.  Returns (adjusted_confidence, warnings)."""
+        """Run plausibility checks.  Returns (adjusted_confidence, warnings).
+
+        Only surfaces warnings that are ACTIONABLE for the user — not
+        internal reconciliation diagnostics.
+        """
         warnings = list(bv_warnings)
 
-        # 1. Value-to-Azure-cost ratio
-        if annual_cost > 0:
-            ratio = val_mid / annual_cost
-            if ratio > 50:
+        # Fallback data — user should know the data quality is degraded
+        if costs_used_fallback or bv_used_fallback:
+            warnings.append("One or more agents used fallback data due to errors. Consider re-running.")
+            bv_confidence = "low"
+
+        # Cost-reduction-only: Azure costs more than current — project doesn't save money
+        if revenue_uplift == 0 and not is_estimated and current_annual > 0:
+            if azure_annual > current_annual:
                 warnings.append(
-                    f"Value (${val_mid:,.0f}) is {ratio:.0f}\u00d7 Azure cost. Unusually high."
+                    f"Azure cost (${azure_annual:,.0f}/yr) exceeds current cost "
+                    f"(${current_annual:,.0f}/yr) with no revenue uplift modeled."
                 )
                 bv_confidence = "low"
-            elif ratio > 20:
-                warnings.append(f"Value-to-cost ratio is {ratio:.0f}\u00d7. On the high end.")
 
-        # 2. Hard savings cap transparency
-        if savings_were_capped:
-            warnings.append(
-                f"Cost savings reduced by {savings_cap_pct:.0f}% to not exceed "
-                f"the current baseline. Original driver estimates were higher."
-            )
-
-        # 3. Revenue uplift vs stated revenue
+        # Revenue uplift exceeds stated revenue — questionable
         if monthly_revenue and monthly_revenue > 0:
             annual_revenue = monthly_revenue * 12
             if revenue_uplift > annual_revenue * 0.5:
                 warnings.append(
-                    f"Revenue uplift (${revenue_uplift:,.0f}) is "
-                    f">{revenue_uplift / annual_revenue * 100:.0f}% of stated revenue."
+                    f"Revenue uplift (${revenue_uplift:,.0f}) exceeds 50% of stated revenue."
                 )
 
-        # 4. Accounting identity: components should sum to ~midpoint
-        component_sum = hard_savings + revenue_uplift
-        if val_mid > 0 and abs(component_sum - val_mid) > val_mid * 0.15:
-            warnings.append(
-                f"Driver sum (${component_sum:,.0f}) differs from impact midpoint "
-                f"(${val_mid:,.0f}) by {abs(component_sum - val_mid) / val_mid * 100:.0f}%."
-            )
-
-        # 5. Cost-reduction-only: Azure shouldn't exceed current
-        if revenue_uplift == 0 and not is_estimated and current_annual > 0:
-            if azure_annual > current_annual:
-                warnings.append(
-                    f"Azure cost (${azure_annual:,.0f}/yr) > current cost "
-                    f"(${current_annual:,.0f}/yr) with no revenue uplift."
-                )
-
-        # 6. Fallback data detection (FRD-008)
-        if costs_used_fallback or bv_used_fallback:
-            warnings.append("One or more agents used fallback data due to errors.")
+        # Log internal diagnostics (not user-facing)
+        if annual_cost > 0 and val_mid / annual_cost > 50:
             bv_confidence = "low"
+            logger.warning("Value-to-cost ratio %.0f× — unusually high", val_mid / annual_cost)
+        if savings_were_capped:
+            logger.info("Savings capped by %.0f%% to not exceed baseline", savings_cap_pct)
 
-        # 7. BV annual value vs actual operating cost savings
-        if monthly_savings_annualized > 0 and val_mid > monthly_savings_annualized * 2:
-            warnings.append(
-                f"Modeled annual value (${val_mid:,.0f}) is "
-                f"{val_mid / monthly_savings_annualized:.1f}\u00d7 the actual operating cost "
-                f"reduction (${monthly_savings_annualized:,.0f}/yr). "
-                "Value drivers may include productivity gains not reflected in direct cost savings."
-            )
-
-        # 8. Hard savings vs current baseline ratio
-        if current_annual > 0 and hard_savings > current_annual * 0.60:
-            warnings.append(
-                f"Operational efficiency value (${hard_savings:,.0f}) = "
-                f"{hard_savings / current_annual * 100:.0f}% of current baseline "
-                f"(${current_annual:,.0f}). Values above 60% require strong justification."
-            )
+        return bv_confidence, warnings
 
         # Adjust confidence
         if warnings and bv_confidence != "low":

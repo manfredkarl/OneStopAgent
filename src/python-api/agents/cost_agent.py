@@ -325,15 +325,15 @@ CONTEXT:
 
 RULES:
 - For each component, select the most appropriate Azure service and a specific SKU/tier
-- RIGHT-SIZE the SKU: use the SMALLEST tier that handles the workload
-  - < 500 users: use Basic/Standard tiers (B1, S1)
-  - 500-5000 users: use Standard tiers (S2, S3)
-  - > 5000 users: consider Premium only if needed (P1v3, P2v3)
-- Use real Azure SKU names (e.g., "B1", "S1", "P2v3" for App Service; "Standard S0" for Azure OpenAI)
+- RIGHT-SIZE the SKU for the stated workload — not the cheapest, but production-appropriate:
+  - < 500 users: Standard tiers are appropriate (S1, S2)
+  - 500-5000 users: Standard or Premium tiers (S2, S3, P1v3)
+  - > 5000 users: Premium tiers (P1v3, P2v3) or dedicated instances
+- Pick SKUs that a production workload would actually use — avoid dev/test tiers (B1, F1, Free)
+- Use real Azure SKU names (e.g., "S1", "P1v3" for App Service; "Standard S0" for Azure OpenAI)
 - Include 3-5 key capabilities for each service
 - For each service, write a short 'reason' explaining WHY this service fits THIS use case (1 sentence)
 - Do NOT add Azure Monitor / Application Insights unless the user asked for observability
-- Avoid Premium SKUs unless compliance or scale requires them
 
 Return ONLY valid JSON (no markdown fences) as an array:
 [
@@ -351,8 +351,8 @@ Return ONLY valid JSON (no markdown fences) as an array:
             response = llm.invoke([
                 {"role": "system", "content": (
                     "You are an Azure infrastructure specialist. "
-                    "Map architecture components to specific Azure services with COST-EFFICIENT, right-sized SKUs. "
-                    "Prefer Standard/Basic tiers over Premium unless the use case demands it. "
+                    "Map architecture components to specific Azure services with PRODUCTION-APPROPRIATE SKUs. "
+                    "Avoid dev/test tiers (B1, Free, F1) — pick what an enterprise would actually deploy. "
                     "Use official Azure service names and SKU identifiers. Return ONLY valid JSON."
                 )},
                 {"role": "user", "content": prompt},
