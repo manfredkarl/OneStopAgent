@@ -425,29 +425,39 @@ class MAFOrchestrator:
 
                     if etype == "agent_start":
                         msg_id = data.get("msg_id", str(uuid.uuid4()))
+                        # Normalize step name for frontend (underscores → hyphens)
+                        agent_id = step.replace("_", "-")
                         plan_text = pm.format_plan(self.get_state(project_id))
                         yield ChatMessage(
                             project_id=project_id, role="agent", agent_id="pm",
                             content=plan_text,
                             metadata={"type": "plan_update", "step": step, "status": "running"},
                         )
+                        # Signal sidebar to highlight this agent
+                        yield ChatMessage(
+                            project_id=project_id, role="agent", agent_id=agent_id,
+                            content="",
+                            metadata={"type": "agent_start", "agent": agent_id, "step": step},
+                        )
 
                     elif etype == "agent_result":
+                        agent_id = step.replace("_", "-")
                         content = data.get("content", "")
-                        metadata: dict = {"type": "agent_result", "step": step}
+                        metadata: dict = {"type": "agent_result", "agent": agent_id, "step": step}
                         if "dashboard" in data and data["dashboard"]:
                             metadata["type"] = "roi_dashboard"
                             metadata["dashboard"] = data["dashboard"]
                         yield ChatMessage(
                             project_id=project_id, role="agent",
-                            agent_id=step, content=content, metadata=metadata,
+                            agent_id=agent_id, content=content, metadata=metadata,
                         )
 
                     elif etype == "agent_error":
+                        agent_id_err = step.replace("_", "-")
                         yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id=step,
-                            content=f"⚠️ {step} failed: {data.get('error', 'unknown')}",
-                            metadata={"type": "agent_error", "step": step},
+                            project_id=project_id, role="agent", agent_id=agent_id_err,
+                            content=f"\u26a0\ufe0f {step} failed: {data.get('error', 'unknown')}",
+                            metadata={"type": "agent_error", "agent": agent_id_err, "step": step},
                         )
 
                     elif etype == "assumptions_input":
