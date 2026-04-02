@@ -194,7 +194,7 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
         labor_rate = typed.hourly_labor_rate
 
         ceiling_block = ""
-        if spend_ceiling:
+        if spend_ceiling and spend_ceiling > 0:
             ceiling_block = f"""
 HARD CONSTRAINTS — violating these invalidates your output:
 - Current annual spend: ${spend_ceiling:,.0f}. Cost-reduction drivers CANNOT exceed this total.

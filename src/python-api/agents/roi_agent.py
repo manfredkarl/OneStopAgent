@@ -106,6 +106,8 @@ class ROIAgent:
             monthly_ceiling = sa_annual_spend / 12
             sa_labor_rate = state.sa.hourly_labor_rate
             sa_employees = state.sa.affected_employees
+            if sa_employees is None and state.sa.total_users and state.sa.total_users < 10000:
+                sa_employees = state.sa.total_users  # Small enough to be staff, not platform users
 
             if sa_employees and sa_labor_rate:
                 hours = assumptions_dict.get("manual_hours", 20)

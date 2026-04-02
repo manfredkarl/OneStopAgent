@@ -574,6 +574,18 @@ Return ONLY valid JSON (no markdown fences) as an array:
             return unit_price * monthly_minutes
         elif "10k" in unit_lower or "10,000" in unit_lower:
             return unit_price * 1
+        elif any(kw in unit_lower for kw in ("transaction", "message", "event", "operation")):
+            volume = 100_000  # default: 100K/month
+            if usage_dict:
+                for key in ("monthly_transactions", "monthly_messages", "monthly_events",
+                             "monthly_operations", "requests_per_day"):
+                    if usage_dict.get(key):
+                        val = float(usage_dict[key])
+                        if "day" in key:
+                            val = val * 30
+                        volume = val
+                        break
+            return unit_price * volume
         else:
             # Unknown unit: treat as monthly (safer than hourly × 730)
             logger.warning("Unknown pricing unit '%s' for %s — treating as monthly", unit, service_name)

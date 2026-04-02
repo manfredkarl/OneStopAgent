@@ -100,19 +100,19 @@ ESTIMATED_PRICES: dict[str, dict] = {
     },
     # Azure OpenAI uses per-token pricing not in the retail API.
     "Azure OpenAI Service": {
-        "price": per_request_cost(),
+        "price": None,  # lazy — computed at query time
         "source": "calculated",
         "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
         "unit": "1/Request",
     },
     "Azure OpenAI": {
-        "price": per_request_cost(),
+        "price": None,  # lazy — computed at query time
         "source": "calculated",
         "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
         "unit": "1/Request",
     },
     "Azure AI Foundry": {
-        "price": per_request_cost(),
+        "price": None,  # lazy — computed at query time
         "source": "calculated",
         "note": "AI Foundry uses Azure OpenAI pricing, computed from AI_MODEL_PRICING config",
         "unit": "1/Request",
@@ -204,9 +204,11 @@ def query_azure_pricing_sync(
 
         # Return a known estimate for services not in the Retail Prices API
         if service_name in ESTIMATED_PRICES:
-            est = ESTIMATED_PRICES[service_name]
-            span.set_attribute("pricing.source", "estimated")
-            return dict(est)  # return a copy
+            est = dict(ESTIMATED_PRICES[service_name])
+            if est["price"] is None:
+                est["price"] = per_request_cost()
+            span.set_attribute("pricing.source", est.get("source", "estimated"))
+            return est
 
         # Translate service name for API
         api_name = SERVICE_NAME_MAP.get(service_name, service_name)
