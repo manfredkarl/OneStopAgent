@@ -451,7 +451,7 @@ class ROIAgent:
         Only surfaces warnings that are ACTIONABLE for the user — not
         internal reconciliation diagnostics.
         """
-        warnings = list(bv_warnings)
+        warnings: list[str] = []
 
         # Fallback data — user should know the data quality is degraded
         if costs_used_fallback or bv_used_fallback:
