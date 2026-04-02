@@ -328,10 +328,10 @@ class MAFOrchestrator:
                     "Return ONLY a JSON array with 4 items:\n"
                     '{"id": "snake_case", "label": "Question", "unit": "count" or "$", "default": number, "hint": "Why it matters"}\n\n'
                     "The 4 questions MUST cover:\n"
-                    "1. USERS: How many people will use or benefit from the solution\n"
+                    "1. AFFECTED STAFF: How many employees or staff members are directly affected by or will work with this solution (do NOT count end-users or customers)\n"
                     "2. CURRENT SPEND: Current annual spend on equivalent tools/processes ($)\n"
                     "3. LABOR RATE: Fully loaded hourly cost for affected staff ($/hr)\n"
-                    "4. CONCURRENT SCALE: Peak concurrent users or transactions\n\n"
+                    "4. PLATFORM SCALE: Peak concurrent users or transactions on the platform\n\n"
                     "Use realistic enterprise defaults. Be specific to the industry. "
                     "Unit for labor rate must be '$/hr' not 'hours'."
                 )},
@@ -348,10 +348,10 @@ class MAFOrchestrator:
 
         # Fallback defaults — lean and essential
         return [
-            {"id": "total_users", "label": "Total users who will use the platform", "unit": "count", "default": 500, "hint": "Drives architecture scale and licensing"},
+            {"id": "affected_employees", "label": "Employees directly affected by the solution", "unit": "count", "default": 50, "hint": "Drives labor savings and change-management scope"},
             {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI and value calculation"},
             {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$/hr", "default": 85, "hint": "Used to monetize time savings"},
-            {"id": "concurrent_users", "label": "Peak concurrent users", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
+            {"id": "concurrent_users", "label": "Peak concurrent users on the platform", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
         ]
 
     # ── MAF Workflow execution ──────────────────────────────────────

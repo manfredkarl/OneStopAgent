@@ -24,12 +24,20 @@ _FIELD_MATCHERS: list[tuple[str, list[list[str]]]] = [
         ["hourly", "rate"],
         ["loaded", "rate"],
     ]),
+    ("affected_employees", [
+        ["employee"],
+        ["headcount"],
+        ["fte"],
+        ["staff", "count"],
+        ["staff", "size"],
+        ["team", "size"],
+        ["affected", "staff"],
+    ]),
     ("total_users", [
         ["total", "user"],
         ["user"],
-        ["engineer"],
-        ["employee"],
-        ["headcount"],
+        ["shopper"],
+        ["customer"],
     ]),
     ("concurrent_users", [
         ["concurrent"],
@@ -64,6 +72,7 @@ class SharedAssumptions:
 
     current_annual_spend: float | None = None
     hourly_labor_rate: float | None = None
+    affected_employees: float | None = None
     total_users: float | None = None
     concurrent_users: float | None = None
     data_volume_gb: float | None = None
@@ -122,6 +131,7 @@ class SharedAssumptions:
         return cls(
             current_annual_spend=resolved.get("current_annual_spend"),
             hourly_labor_rate=resolved.get("hourly_labor_rate"),
+            affected_employees=resolved.get("affected_employees"),
             total_users=resolved.get("total_users"),
             concurrent_users=resolved.get("concurrent_users"),
             data_volume_gb=resolved.get("data_volume_gb"),
