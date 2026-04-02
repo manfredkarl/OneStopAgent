@@ -369,12 +369,26 @@ class ROIAgent:
     @staticmethod
     def _compute_risk_reduction(current_annual: float, hard_savings: float,
                                 revenue_uplift: float,
-                                components: list[dict] | None = None) -> tuple[float, str]:
+                                components: list[dict] | None = None,
+                                bv_drivers: list[dict] | None = None) -> tuple[float, str]:
         """Return (risk_reduction_amount, methodology_note).
 
         Risk factor scales based on security/compliance/HA components (2-7%).
         Only includes risk reduction when it's material (>5% of other value).
+
+        If the business-value agent already assessed risk drivers, respect its
+        verdict to avoid phantom risk values or double-counting.
         """
+        # ── Respect BV agent's risk assessment ────────────────────────
+        if bv_drivers:
+            risk_drivers = [d for d in bv_drivers if d.get("category") == "risk_reduction"]
+            if risk_drivers:
+                # Check if ALL risk drivers were excluded by BV
+                all_excluded = all(d.get("excluded", False) for d in risk_drivers)
+                if all_excluded:
+                    return (0, "Risk reduction excluded by value analysis (insufficient baseline data).")
+                # BV quantified risk and it's already in the waterfall — don't double-count
+                return (0, "Risk reduction quantified via business value drivers.")
         has_security = any(
             any(kw in str(c).lower() for kw in ("security", "sentinel", "defender", "ddos", "firewall", "waf"))
             for c in (components or [])
@@ -593,7 +607,8 @@ class ROIAgent:
 
         risk_reduction, risk_note = self._compute_risk_reduction(
             current_annual, hard_savings, revenue_uplift,
-            components=state.architecture.get("components"))
+            components=state.architecture.get("components"),
+            bv_drivers=drivers)
 
         # ── Reconciled value = sum of capped waterfall items ─────────
         # This is what we're actually claiming — NOT the raw BV estimate.

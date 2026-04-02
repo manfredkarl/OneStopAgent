@@ -233,7 +233,9 @@ Return ONLY valid JSON (no markdown fences):
       "description": "One sentence explaining the mechanism",
       "category": "cost_reduction" or "revenue_uplift",
       "source_name": "Calculated from user assumptions" or "Labor rate analysis" or "Spend optimization model",
-      "source_url": "" or "https://..." (empty string when no real URL exists)
+      "source_url": "" or "https://..." (empty string when no real URL exists),
+      "excluded": false (set to true if the driver cannot be dollarized due to missing baseline data),
+      "excluded_reason": "" (explain why, e.g. "No baseline outage data provided")
     }}
   ],
   "annual_impact_range": {{ "low": 500000, "high": 1200000 }} or null,
@@ -281,6 +283,8 @@ IMPORTANT FIELD RULES:
                 d.setdefault("source_url", "")
                 d.setdefault("impact_pct_low", None)
                 d.setdefault("impact_pct_high", None)
+                d.setdefault("excluded", False)
+                d.setdefault("excluded_reason", "")
 
             # Validate impact range and verify driver arithmetic
             validated_range, bv_warnings = self._validate_and_verify(result, state)
