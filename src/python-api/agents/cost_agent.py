@@ -10,6 +10,7 @@ Populates both `state.services` and `state.costs` in one pass.
 import json
 import logging
 import re
+from threading import Lock
 
 from agents.llm import llm
 from agents.state import AgentState
@@ -218,7 +219,13 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
 
         if len(regions) > 1:
             # Multi-region overhead based on HA pattern (FRD-006 Fix M)
-            ha_pattern = selections[0].get("haPattern", "default") if selections else "default"
+            # Extract HA pattern from user text (LLM does not generate haPattern)
+            ha_pattern = "default"
+            text_lower = full_text.lower()
+            if "active-active" in text_lower or "active/active" in text_lower:
+                ha_pattern = "active-active"
+            elif "active-passive" in text_lower or "active/passive" in text_lower:
+                ha_pattern = "active-passive"
             overhead_pct = MULTI_REGION_OVERHEAD.get(ha_pattern, 0.40)
             overhead = sum(item.get("monthlyCost", 0) for item in items) * overhead_pct
             overhead = round(overhead, 2)
@@ -418,6 +425,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
         ]
         source_counts: dict[str, int] = {}
         price_cache: dict[tuple, dict] = {}
+        cache_lock = Lock()
 
         def _price_one(sel: dict) -> tuple[dict, dict] | None:
             service_name = sel.get("serviceName", "")
@@ -426,10 +434,12 @@ Return ONLY valid JSON (no markdown fences) as an array:
             if service_name == "Multi-region overhead":
                 return None
             cache_key = (service_name, sku, region)
-            if cache_key in price_cache:
-                return (sel, price_cache[cache_key])
+            with cache_lock:
+                if cache_key in price_cache:
+                    return (sel, price_cache[cache_key])
             result = query_azure_pricing_sync(service_name, sku, region)
-            price_cache[cache_key] = result
+            with cache_lock:
+                price_cache[cache_key] = result
             return (sel, result)
 
         # Parallel pricing with max 5 concurrent API calls

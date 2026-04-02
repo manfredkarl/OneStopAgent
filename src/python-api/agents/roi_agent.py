@@ -482,9 +482,7 @@ class ROIAgent:
         if savings_were_capped:
             logger.info("Savings capped by %.0f%% to not exceed baseline", savings_cap_pct)
 
-        return bv_confidence, warnings
-
-        # Adjust confidence
+        # Adjust confidence based on warning count
         if warnings and bv_confidence != "low":
             bv_confidence = "low" if len(warnings) >= 2 else "moderate"
 
@@ -611,12 +609,14 @@ class ROIAgent:
                     ("risk_reduction", risk_reduction),
                     key=lambda x: x[1],
                 )
+                largest_value = largest[1]
+                reduction = min(largest_value, overshoot)
                 if largest[0] == "hard_savings":
-                    hard_savings -= overshoot
+                    hard_savings -= reduction
                 elif largest[0] == "revenue_uplift":
-                    revenue_uplift -= overshoot
+                    revenue_uplift -= reduction
                 else:
-                    risk_reduction -= overshoot
+                    risk_reduction -= reduction
                 total_annual_value = hard_savings + revenue_uplift + risk_reduction
             logger.info(
                 "Total value ($%s) clamped to BV range high ($%s), scale=%.2f",
@@ -992,7 +992,7 @@ class ROIAgent:
             "roiRunRate": roi_run_rate,
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
-            "roiRunRateText": roi_display_text,
+            "roiRunRateText": roi_steady_text,
             "roiSubtitle": f"Year 1 ROI ({yr1_pct}% adoption, incl. setup)",
             "roiDescription": roi_description,
             "roiYear1Text": roi_display_text,

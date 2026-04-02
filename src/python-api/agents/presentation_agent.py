@@ -83,12 +83,19 @@ class PresentationAgent:
             # Compute confidence from pricing source breakdown
             source_str = est.get("pricingSource", "")
             if "live" in source_str:
+                def _safe_leading_int(text: str) -> int:
+                    """Extract leading integer from a string like '5 live', return 0 on failure."""
+                    try:
+                        return int(text.split()[0])
+                    except (ValueError, IndexError):
+                        return 0
+
                 parts = [p.strip() for p in source_str.split(",") if p.strip()]
                 live_count = sum(
-                    int(p.split()[0]) for p in parts
+                    _safe_leading_int(p) for p in parts
                     if "live" in p and "fallback" not in p
                 )
-                total_items = sum(int(p.split()[0]) for p in parts)
+                total_items = sum(_safe_leading_int(p) for p in parts)
                 confidence = "High" if live_count / max(total_items, 1) > 0.7 else "Moderate"
             else:
                 confidence = "Estimated"
@@ -204,5 +211,8 @@ Azure solution proposal presentation.
         # Strip markdown fences if present
         if script.startswith("```"):
             script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+        if "pptxgenjs" not in script.lower() or "writefile" not in script.lower():
+            raise ValueError("Generated script missing required PptxGenJS structure")
 
         return script

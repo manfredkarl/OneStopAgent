@@ -500,8 +500,7 @@ class MAFOrchestrator:
         except Exception as e:
             logger.exception("Workflow execution failed for project %s", project_id)
             self.phases[project_id] = "done"
-            self.pending_requests.pop(project_id, None)
-            self.workflows.pop(project_id, None)
+            self._cleanup_project(project_id)
             yield ChatMessage(
                 project_id=project_id, role="agent", agent_id="pm",
                 content=f"⚠️ An error occurred during execution: {str(e)}\n\nYou can try again or start fresh.",

@@ -1,9 +1,23 @@
 """Project Manager — plans and orchestrates the agent pipeline."""
 import json
+import logging
 import re
 from enum import Enum
 from agents.llm import llm
 from agents.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_count(s: str) -> int:
+    """Parse leading integer from a pricing-source token like '3 live'.
+
+    Returns 0 if the token is malformed or empty.
+    """
+    try:
+        return int(s.strip().split()[0])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _extract_response_field_partial(partial_json: str) -> str:
@@ -159,8 +173,9 @@ class ProjectManager:
           - industry: str
           - scenarios: list[dict]  (structured scenario data)
         """
-        response = llm.invoke([
-            {"role": "system", "content": """You are an Azure solution project manager. Be CONCISE.
+        try:
+            response = llm.invoke([
+                {"role": "system", "content": """You are an Azure solution project manager. Be CONCISE.
 The user described a project idea. Respond with ONLY a JSON object (no markdown fences):
 
 {
@@ -182,8 +197,17 @@ RULES:
 - 2-3 scenarios max, 1 sentence each
 - 2-3 questions max
 - Be specific about Azure services"""},
-            {"role": "user", "content": user_input}
-        ])
+                {"role": "user", "content": user_input}
+            ])
+        except Exception as e:
+            logger.error("Brainstorm LLM call failed: %s", e, exc_info=True)
+            return {
+                "response": "I'd be happy to help design your Azure solution. Could you tell me more about your requirements?",
+                "azure_fit": "unclear",
+                "azure_fit_explanation": "",
+                "industry": "Cross-Industry",
+                "scenarios": [],
+            }
 
         try:
             text = response.content.strip()
@@ -362,7 +386,7 @@ RULES:
             roi_pct = state.roi.get("roi_percent_display") or state.roi.get("roi_percent")
             payback = state.roi.get("payback_months")
             needs_info = state.roi.get("needs_info")
-            if roi_pct is not None:
+            if roi_pct is not None and roi_pct != 0:
                 range_text = f"{(roi_pct / 100 + 1):.1f}x"
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 summary = f"ROI calculated: **{range_text}** with {payback_str} payback."
@@ -506,12 +530,12 @@ RULES:
 
             # Confidence based on proportion of services with live pricing
             _live_count = sum(
-                int(p.split()[0])
+                _safe_count(p)
                 for p in source.split(", ")
                 if any(p.endswith(s) for s in ("live", "live-fallback"))
             ) if isinstance(source, str) else 0
             _total_count = sum(
-                int(p.split()[0]) for p in source.split(", ")
+                _safe_count(p) for p in source.split(", ")
             ) if isinstance(source, str) else 1
             _live_pct = _live_count / max(_total_count, 1)
             confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"
@@ -605,7 +629,7 @@ RULES:
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 roi_display = roi.get("roi_percent_display") or roi.get("roi_percent", 0) or 0
-                roi_text = f"{(roi_display / 100 + 1):.1f}x"
+                roi_text = f"{(roi_display / 100 + 1):.1f}x" if roi_display else "1.0x"
                 payback = roi.get('payback_months')
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 parts.append(f"**ROI: {roi_text}** | Payback: **{payback_str}**\n")

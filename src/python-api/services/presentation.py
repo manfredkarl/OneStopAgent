@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -25,6 +26,9 @@ def execute_pptxgenjs(script: str, customer_name: str = "Customer") -> str:
     argument to ``pres.writeFile()``. This function replaces it with the
     real output path before execution.
     """
+    if not shutil.which("node"):
+        raise RuntimeError("Node.js is not installed or not in PATH. Cannot generate PPTX.")
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in customer_name).strip().replace(" ", "_")

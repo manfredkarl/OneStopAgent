@@ -652,6 +652,7 @@ class PresentationExecutor(PipelineExecutor):
                 "type": "agent_result", "step": self.step_name,
                 "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
             })
+        await ctx.send_message(msg)
         await ctx.yield_output({
             "type": "pipeline_done",
             "content": "Pipeline complete.",
