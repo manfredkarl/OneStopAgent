@@ -262,9 +262,15 @@ export default function ROIDashboard({ data }: Props) {
           <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
             Modeled Annual Value
           </p>
-          <p className="text-2xl font-bold text-[var(--text-primary)]">
-            ${fmt(annualImpact)}
-          </p>
+          {data.confidenceLevel === 'low' && hardSavings > 0 ? (
+            <p className="text-2xl font-bold text-[var(--text-primary)]">
+              ${fmt(Math.round(annualImpact * 0.5))}–${fmt(annualImpact)}
+            </p>
+          ) : (
+            <p className="text-2xl font-bold text-[var(--text-primary)]">
+              ${fmt(annualImpact)}
+            </p>
+          )}
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
             {hardSavings > 0 && revenueUplift > 0
               ? 'cost savings + modeled uplift'
@@ -482,15 +488,21 @@ export default function ROIDashboard({ data }: Props) {
 
             {/* Future State */}
             <div className="border border-[var(--border)] rounded-lg p-4">
-              <h4 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-2">Future State (Azure)</h4>
+              <h4 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-2">Future State (with Azure)</h4>
               <p className="text-2xl font-bold text-[var(--text-primary)] mb-3">
-                ${fmt(businessCase.futureState.azurePlatformAnnual)}
-                <span className="text-sm font-normal text-[var(--text-muted)]">/yr run-rate</span>
+                ${fmt((data as any).futureAnnualOpex ?? businessCase.futureState.azurePlatformAnnual)}
+                <span className="text-sm font-normal text-[var(--text-muted)]">/yr total opex</span>
               </p>
               <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                 <span>Azure platform (annual)</span>
                 <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.azurePlatformAnnual)}</span>
               </div>
+              {(data as any).futureAnnualOpex && (data as any).futureAnnualOpex > businessCase.futureState.azurePlatformAnnual && (
+                <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
+                  <span>Carried labor &amp; overhead</span>
+                  <span className="text-[var(--text-secondary)]">${fmt((data as any).futureAnnualOpex - businessCase.futureState.azurePlatformAnnual)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                 <span>Implementation <span className="text-yellow-400">(one-time)</span></span>
                 <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.implementationCost)}</span>
