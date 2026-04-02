@@ -395,8 +395,10 @@ class ROIAgent:
         annual_cost: float,
         current_annual: float,
         azure_annual: float,
+        future_annual: float,
         hard_savings: float,
         revenue_uplift: float,
+        monthly_savings_annualized: float,
         is_estimated: bool,
         bv_confidence: str,
         bv_warnings: list[str],
@@ -456,6 +458,23 @@ class ROIAgent:
         if costs_used_fallback or bv_used_fallback:
             warnings.append("One or more agents used fallback data due to errors.")
             bv_confidence = "low"
+
+        # 7. BV annual value vs actual operating cost savings
+        if monthly_savings_annualized > 0 and val_mid > monthly_savings_annualized * 2:
+            warnings.append(
+                f"Modeled annual value (${val_mid:,.0f}) is "
+                f"{val_mid / monthly_savings_annualized:.1f}\u00d7 the actual operating cost "
+                f"reduction (${monthly_savings_annualized:,.0f}/yr). "
+                "Value drivers may include productivity gains not reflected in direct cost savings."
+            )
+
+        # 8. Hard savings vs current baseline ratio
+        if current_annual > 0 and hard_savings > current_annual * 0.60:
+            warnings.append(
+                f"Hard savings (${hard_savings:,.0f}) = "
+                f"{hard_savings / current_annual * 100:.0f}% of current baseline "
+                f"(${current_annual:,.0f}). Values above 60% require strong justification."
+            )
 
         # Adjust confidence
         if warnings and bv_confidence != "low":
@@ -585,8 +604,10 @@ class ROIAgent:
             annual_cost=annual_cost,
             current_annual=current_annual,
             azure_annual=azure_annual,
+            future_annual=future_annual,
             hard_savings=hard_savings,
             revenue_uplift=revenue_uplift,
+            monthly_savings_annualized=monthly_savings * 12 if monthly_savings > 0 else 0,
             is_estimated=is_estimated,
             bv_confidence=bv.get("confidence", "moderate"),
             bv_warnings=bv.get("consistency_warnings", []),
@@ -820,7 +841,7 @@ class ROIAgent:
         )
         if risk_note:
             methodology += " " + risk_note
-        methodology += f" Savings capped at {self.MAX_SAVINGS_PCT}% of current baseline to ensure realism."
+        methodology += f" Monthly operating cost savings capped at {self.MAX_SAVINGS_PCT}% for display realism."
 
         assumption_types = []
         if sa_annual_spend:
@@ -863,6 +884,19 @@ class ROIAgent:
         else:
             roi_display_text = None
 
+        # Run-rate ROI display (for tooltip / secondary display)
+        if roi_run_rate is not None and future_annual > 0:
+            roi_run_rate_text = f"{(roi_run_rate / 100 + 1):.1f}x"
+        else:
+            roi_run_rate_text = None
+
+        roi_description = (
+            "Year 1 ROI: annual value vs. total Year 1 cost "
+            "(Azure + carried labor/overhead + implementation + change management). "
+            f"Steady-state ROI: {roi_run_rate_text or 'N/A'} "
+            "(annual value vs. ongoing future operating cost, excl. one-time costs)."
+        )
+
         # ── Assemble dashboard ───────────────────────────────────────
         dashboard: dict = {
             "monthlySavings": monthly_savings,
@@ -887,6 +921,9 @@ class ROIAgent:
             "roiRunRate": roi_run_rate,
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
+            "roiRunRateText": roi_run_rate_text,
+            "roiSubtitle": "Year 1 return on total future cost",
+            "roiDescription": roi_description,
             "confidenceLevel": bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
             "futureAnnualOpex": round(future_annual),
