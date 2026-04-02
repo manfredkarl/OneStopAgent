@@ -414,7 +414,7 @@ export default function ROIDashboard({ data }: Props) {
                 <div className="flex items-center gap-2">
                   <span className="text-lg">💰</span>
                   <div>
-                    <p className="text-sm font-semibold text-[var(--text-primary)]">Hard Cost Savings</p>
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">Operational Efficiency</p>
                     <p className="text-[10px] text-[var(--text-muted)]">
                       {isEstimated ? 'estimated — based on modeled baseline' : 'based on user-provided baseline'}
                     </p>
@@ -561,7 +561,7 @@ export default function ROIDashboard({ data }: Props) {
                         : 'bg-blue-500/20 text-blue-400'
                     }`}
                   >
-                    {d.category === 'revenue_uplift' ? '📈 Modeled Uplift' : '💰 Cost Reduction'}
+                    {d.category === 'revenue_uplift' ? '📈 Modeled Uplift' : '💰 Operational Efficiency'}
                   </span>
                 )}
                 <p className="text-lg font-bold text-[var(--accent)] mb-1">
@@ -610,7 +610,7 @@ export default function ROIDashboard({ data }: Props) {
 
           {/* Column headers */}
           <div className="flex text-xs font-semibold mb-3">
-            <div className="flex-1 text-center text-blue-400">← Cost Reduction</div>
+            <div className="flex-1 text-center text-blue-400">← Operational Efficiency</div>
             <div className="w-px shrink-0" />
             <div className="flex-1 text-center text-purple-400">Revenue Uplift →</div>
           </div>
@@ -662,7 +662,7 @@ export default function ROIDashboard({ data }: Props) {
           <div className="flex justify-center gap-6 mt-3 text-xs text-[var(--text-muted)]">
             {valueWaterfall!.costReduction.length > 0 && (
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-sm bg-blue-500" /> Cost reduction (annual)
+                <span className="w-3 h-3 rounded-sm bg-blue-500" /> Operational efficiency (annual)
               </span>
             )}
             {valueWaterfall!.revenueUplift.length > 0 && (
