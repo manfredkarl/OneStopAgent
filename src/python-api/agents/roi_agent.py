@@ -100,10 +100,27 @@ class ROIAgent:
         has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
 
         # Priority 1: explicit annual spend from shared assumptions
+        # Enrich with labor pool when employees + rate are known, so the
+        # baseline reflects the FULL domain being optimized (people + tools)
         if sa_annual_spend:
-            monthly = sa_annual_spend / 12
-            return (monthly,
-                    [{"label": "Current operations (user-provided)", "amount": round(monthly)}],
+            monthly_tools = sa_annual_spend / 12
+            sa_labor_rate = state.sa.hourly_labor_rate
+            sa_users = state.sa.total_users
+
+            # If we know the labor pool, build a multi-line baseline
+            if sa_users and sa_labor_rate:
+                users = int(sa_users)
+                rate = sa_labor_rate
+                hours = assumptions_dict.get("manual_hours", 20)
+                monthly_labor = round(users * rate * hours * 4.33)
+                return (monthly_tools + monthly_labor,
+                        [{"label": "Staff labor", "amount": monthly_labor},
+                         {"label": "Tools & platform spend", "amount": round(monthly_tools)}],
+                        False)
+
+            # Otherwise use the single lump
+            return (monthly_tools,
+                    [{"label": "Current operations (user-provided)", "amount": round(monthly_tools)}],
                     False)
 
         # Priority 2: detailed user inputs (employees, rate, hours)
@@ -587,24 +604,24 @@ class ROIAgent:
         adoption_ramp = self._select_adoption_ramp(state)
         year1_adoption = adoption_ramp[0]  # e.g., 0.30 for complex
 
-        # ── ROI: Year 1 (adoption-adjusted) and run-rate (full) ──────
-        # Year 1 ROI reflects partial adoption + one-time costs
+        # ── ROI: Year 1 (adoption-adjusted) and Steady-State (full) ──
         year1_adopted_value = total_annual_value * year1_adoption
         if year1_investment > 0:
             roi_year1 = ((year1_adopted_value - year1_investment) / year1_investment) * 100
         else:
             roi_year1 = 0.0
 
-        # Run-rate ROI: full value vs Azure annual (steady state)
+        # Steady-state ROI: full value vs Azure annual run-rate
         if azure_annual > 0:
             roi_run_rate = ((total_annual_value - azure_annual) / azure_annual) * 100
         else:
             roi_run_rate = 0.0
 
-        # Headline = Year 1 (conservative, adoption-adjusted)
-        roi_mid = roi_year1
-        roi_low = ((val_low * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
-        roi_high = ((val_high * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        # Headline = Steady-State ROI (the business case anchor)
+        # Year 1 is shown separately as the "ramp-up" context
+        roi_mid = roi_run_rate
+        roi_low = ((val_low - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0.0
+        roi_high = ((val_high - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0.0
 
         # Payback: months until cumulative adopted value covers investment
         monthly_adopted_value = (total_annual_value * year1_adoption) / 12
@@ -913,18 +930,18 @@ class ROIAgent:
         else:
             roi_display_text = None
 
-        # Run-rate ROI display (for tooltip / secondary display)
-        if roi_run_rate is not None and future_annual > 0:
-            roi_run_rate_text = f"{(roi_run_rate / 100 + 1):.1f}x"
+        # Year 1 ROI display (for secondary context)
+        if year1_investment > 0:
+            roi_year1_text = f"{(roi_year1 / 100 + 1):.1f}x"
         else:
-            roi_run_rate_text = None
+            roi_year1_text = None
 
         roi_description = (
-            f"Year 1 ROI: annual value vs. Year 1 investment "
-            f"(Azure {roi_run_rate_text or ''} + implementation + change management = "
-            f"${year1_investment:,.0f}). "
-            f"Steady-state ROI: {roi_run_rate_text or 'N/A'} "
-            f"(annual value vs. Azure run-rate ${azure_annual:,.0f}/yr)."
+            f"Steady-state ROI: annual value vs. Azure run-rate "
+            f"(${azure_annual:,.0f}/yr). "
+            f"Year 1 ROI: {roi_year1_text or 'N/A'} "
+            f"(adoption-adjusted value vs. Year 1 investment ${year1_investment:,.0f}, "
+            f"incl. one-time setup)."
         )
 
         # ── Assemble dashboard ───────────────────────────────────────
@@ -951,9 +968,10 @@ class ROIAgent:
             "roiRunRate": roi_run_rate,
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
-            "roiRunRateText": roi_run_rate_text,
-            "roiSubtitle": "Year 1 return on total future cost",
+            "roiRunRateText": roi_display_text,
+            "roiSubtitle": "Steady-state return on Azure investment",
             "roiDescription": roi_description,
+            "roiYear1Text": roi_year1_text,
             "confidenceLevel": bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
             "futureAnnualOpex": round(future_annual),
