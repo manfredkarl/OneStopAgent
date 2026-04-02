@@ -600,13 +600,13 @@ class ROIAgent:
                 abs(actual_sum - val_mid) / val_mid * 100,
             )
 
-        # Hard savings cap = actual operating cost reduction from the cost model.
-        # _build_future_cost already computed the real savings; BV drivers can't
-        # claim more than the cost model proves.
-        actual_annual_savings = max(monthly_savings * 12, 0)
-
+        # Pass the BV-validated value through to the waterfall — no independent
+        # re-capping. The BV agent already validated its range (_validate_and_verify),
+        # and the BV range clamp below ensures the total stays credible.
+        # The cost model savings are shown in the monthly bar chart for context,
+        # but don't override what the BV agent determined.
         waterfall_cost, waterfall_uplift, savings_capped, savings_cap_pct = self._split_waterfall(
-            drivers, driver_amounts, actual_annual_savings)
+            drivers, driver_amounts, current_annual)
 
         hard_savings = sum(i["amount"] for i in waterfall_cost)
         revenue_uplift = sum(i["amount"] for i in waterfall_uplift)
@@ -990,8 +990,11 @@ class ROIAgent:
         else:
             roi_steady_text = None
 
+        adoption_ramp_local = self._select_adoption_ramp(state)
+        yr1_pct = int(adoption_ramp_local[0] * 100)
+
         roi_description = (
-            f"Year 1 ROI: {int(year1_adoption * 100)}% adoption-adjusted value "
+            f"Year 1 ROI: {yr1_pct}% adoption-adjusted value "
             f"vs. Year 1 investment (${year1_investment:,.0f}, incl. setup). "
             f"Steady-state: {roi_steady_text or 'N/A'} "
             f"(full value vs. Azure run-rate ${azure_annual:,.0f}/yr)."
@@ -1022,7 +1025,7 @@ class ROIAgent:
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
             "roiRunRateText": roi_display_text,
-            "roiSubtitle": f"Year 1 ROI ({int(year1_adoption * 100)}% adoption, incl. setup)",
+            "roiSubtitle": f"Year 1 ROI ({yr1_pct}% adoption, incl. setup)",
             "roiDescription": roi_description,
             "roiYear1Text": roi_display_text,
             "roiSteadyStateText": roi_steady_text,
