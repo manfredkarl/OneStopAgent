@@ -188,7 +188,22 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
                 "'Based on 20-30% engineering time savings applied to 1,600 hrs/week × $100/hr labor rate'."
             )
 
-        prompt = f"""You are a value engineer. Produce 2–4 benchmark-backed value drivers for this Azure solution (fewer for simple use cases, more for complex ones).
+        # Build ceiling context for the prompt
+        spend_ceiling = typed.current_annual_spend
+        employees = typed.affected_employees or typed.total_users
+        labor_rate = typed.hourly_labor_rate
+
+        ceiling_block = ""
+        if spend_ceiling:
+            ceiling_block = f"""
+HARD CONSTRAINTS — violating these invalidates your output:
+- Current annual spend: ${spend_ceiling:,.0f}. Cost-reduction drivers CANNOT exceed this total.
+- If you have {f'{int(employees)} affected staff at ${labor_rate}/hr' if employees and labor_rate else 'labor data'}, compute labor savings as: staff × rate × hours_saved_per_year.
+- Revenue uplift is SEPARATE from cost reduction and is NOT bounded by current spend.
+- Show your arithmetic for EVERY dollar figure. No unexplained numbers.
+"""
+
+        prompt = f"""You are a value engineer. Produce 2–4 value drivers for this Azure solution.
 
 CUSTOMER: {customer}
 INDUSTRY: {industry}
@@ -196,67 +211,51 @@ USE CASE: {description}
 {f"CLARIFICATIONS: {clarifications}" if clarifications else ""}
 {extra_context}
 
-USER-PROVIDED ASSUMPTIONS (use these real numbers, don't make up values):
+USER-PROVIDED NUMBERS (these are FACTS — use them for computation):
 {assumption_context}
-
-Use the SHARED current_annual_spend as the baseline for spend optimization calculations. Use the SHARED hourly_labor_rate for labor savings calculations. Do NOT derive your own labor rate or annual spend — the AUTHORITATIVE SHARED ASSUMPTIONS above are the single source of truth.
-
+{ceiling_block}
 {search_context}
 
-RULES — follow precisely:
-1. Return 2–4 value drivers. Fewer for simple use cases, more for complex.
-2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
-   Use the midpoint of published industry ranges — do not artificially deflate percentages.
-3. {source_instruction}
-4. Do NOT write long prose. Each description is 1 sentence max.
-5. Provide an aggregated annual_impact_range (low–high dollars) across all drivers.
-   USE THE USER-PROVIDED ASSUMPTIONS ABOVE to compute real dollar values.
-6. List every assumption behind that number explicitly (headcount, hourly rate, hours saved, etc.).
-7. If you cannot compute a dollar range without knowing something, still give the percentage drivers
-   but set annual_impact_range to null and list what's missing in assumptions.
-
-CALCULATION APPROACH:
-- Calculate each driver INDEPENDENTLY using the user-provided assumptions.
-- Use realistic percentage ranges based on published industry data (not artificially deflated).
-- For revenue uplift drivers, apply a conservative realization factor: use 25-50% of the gross revenue impact to account for adoption timing, competitive dynamics, and execution risk. Show the full gross impact AND the realized value clearly.
-- Sum the drivers directly. Do NOT apply "overlap adjustments", "double counting reductions",
-  or any cross-driver deductions.
+RULES:
+1. COMPUTE, don't estimate. Show the math for every driver:
+   - "350 engineers × $100/hr × 15% time savings × 2080 hrs/yr = $10,920,000 gross → 25-50% realization = $2.7M-$5.5M"
+   - "Current spend $3.5M × 10-15% optimization = $350K-$525K"
+2. Each driver must have a percentage range AND the dollar computation.
+3. Cost-reduction drivers: the SUM of all cost-reduction driver dollar values at the HIGH end
+   must NOT exceed the current annual spend ({f'${spend_ceiling:,.0f}' if spend_ceiling else 'not provided'}).
+4. Revenue uplift: apply 25-50% realization factor to gross impact.
+5. If you can't compute a dollar value due to missing data, set excluded=true.
+6. {source_instruction}
 
 Return ONLY valid JSON (no markdown fences):
 {{
   "drivers": [
     {{
       "name": "Short driver name",
-      "metric": "10–20% time savings" or similar specific range,
+      "metric": "10–20% time savings",
       "impact_pct_low": 10,
       "impact_pct_high": 20,
-      "description": "One sentence explaining the mechanism",
-      "category": "cost_reduction" or "revenue_uplift",
-      "source_name": "Calculated from user assumptions" or "Labor rate analysis" or "Spend optimization model",
-      "source_url": "" or "https://..." (empty string when no real URL exists),
-      "excluded": false (set to true if the driver cannot be dollarized due to missing baseline data),
-      "excluded_reason": "" (explain why, e.g. "No baseline outage data provided")
+      "description": "350 engineers × $100/hr × 15% avg savings × 2080 hrs = $10.9M gross, 37.5% realized = $4.1M",
+      "category": "cost_reduction" or "revenue_uplift" or "risk_reduction",
+      "source_name": "Calculated from user assumptions",
+      "source_url": "",
+      "excluded": false,
+      "excluded_reason": ""
     }}
   ],
-  "annual_impact_range": {{ "low": 500000, "high": 1200000 }} or null,
+  "annual_impact_range": {{ "low": 500000, "high": 1200000 }},
   "assumptions": [
-    "500 engineers at $75/hr average fully loaded cost",
-    "15% reduction in search time = 120 hrs/engineer/year"
+    "350 engineers at $100/hr fully loaded cost",
+    "15% time savings = 312 hrs/engineer/yr saved"
   ],
   "confidence": "moderate"
 }}
 
-IMPORTANT FIELD RULES:
-- "impact_pct_low" and "impact_pct_high": REQUIRED numeric fields matching the percentage
-  range in "metric". E.g. if metric says "10–20% time savings", set impact_pct_low=10,
-  impact_pct_high=20. If a single percentage, set both to the same value.
-- "category": REQUIRED. Must be one of "cost_reduction", "revenue_uplift", or "risk_reduction".
-- "cost_reduction": driver primarily reduces existing spend (labour, infra, errors, rework, licensing)
-- "revenue_uplift": driver generates NEW value (new product features, faster time-to-market,
-  improved customer retention, higher conversion, new revenue channels)
-- "risk_reduction": driver reduces risk exposure (compliance fines, security breaches, downtime costs)
-- Assign each driver to the category that best describes its primary mechanism.
-- Aim for at least one driver in each category when the use case supports both."""
+CATEGORY RULES:
+- "cost_reduction": reduces existing spend (labour, infra, errors, rework, licensing)
+- "revenue_uplift": generates NEW value (faster time-to-market, retention, new revenue)
+- "risk_reduction": reduces risk exposure (set excluded=true if no baseline data for dollarization)
+- annual_impact_range low/high = sum of all non-excluded driver dollar values at low/high end"""
 
         benchmark_available = bool(search_results)
 
@@ -356,61 +355,26 @@ IMPORTANT FIELD RULES:
         result: dict,
         state: AgentState,
     ) -> tuple[dict | None, list[str]]:
-        """Validate impact range AND verify driver arithmetic.
+        """Validate impact range structure. Light-touch — the prompt does the heavy lifting.
 
         Returns (corrected_range_or_None, warning_list).
         """
-        warnings: list[str] = []
         impact_range = result.get("annual_impact_range")
-        drivers = result.get("drivers", [])
-        current_spend = state.sa.current_annual_spend
-        azure_annual = state.costs.get("estimate", {}).get("totalAnnual", 0)
 
-        # ── Range validation ─────────────────────────────────────
         if not impact_range or not isinstance(impact_range, dict):
-            return None, ["No impact range provided by value model."]
+            return None, []
 
         try:
             low = float(impact_range.get("low", 0))
             high = float(impact_range.get("high", 0))
         except (ValueError, TypeError):
-            return None, ["Impact range contains non-numeric values."]
+            return None, []
 
         if low > high:
             low, high = high, low
         if low < 0:
             low = 0
         if high <= 0:
-            return None, ["Impact range is zero or negative."]
+            return None, []
 
-        # Extreme hallucination guard: >200× Azure cost
-        if azure_annual > 0 and high > azure_annual * 200:
-            high = azure_annual * 200
-            low = min(low, high)
-            warnings.append("Impact range capped (exceeded 200× Azure cost).")
-
-        # Economic plausibility: flag if >3× current baseline
-        if current_spend and current_spend > 0 and high > current_spend * 3:
-            warnings.append(
-                f"Impact high (${high:,.0f}) is >{high / current_spend:.1f}× current spend "
-                f"(${current_spend:,.0f}). Verify revenue uplift assumptions."
-            )
-
-        # ── Driver arithmetic verification ───────────────────────
-        if current_spend and current_spend > 0:
-            cost_reduction_implied = 0.0
-            for d in drivers:
-                if d.get("category") != "cost_reduction":
-                    continue
-                pct_low = d.get("impact_pct_low", 0) or 0
-                pct_high = d.get("impact_pct_high", 0) or 0
-                mid_pct = (pct_low + pct_high) / 2 / 100
-                cost_reduction_implied += current_spend * mid_pct
-
-            if cost_reduction_implied > current_spend:
-                warnings.append(
-                    f"Cost-reduction drivers imply ${cost_reduction_implied:,.0f}/yr "
-                    f"but current spend is ${current_spend:,.0f}/yr. Over-counting."
-                )
-
-        return {"low": round(low, 2), "high": round(high, 2)}, warnings
+        return {"low": round(low, 2), "high": round(high, 2)}, []
