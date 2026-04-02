@@ -820,13 +820,20 @@ class ROIAgent:
             or "ai" in item.get("serviceName", "").lower()
         )
 
-        # ── Driver display list (reuse amounts from caller) ─────────
+        # ── Driver display list (use waterfall-capped amounts) ────────
+        # Build a map from driver name → capped amount so display matches waterfall
+        capped_amounts: dict[str, int] = {}
+        for item in waterfall_cost:
+            capped_amounts[item["label"]] = item["amount"]
+        for item in waterfall_uplift:
+            capped_amounts[item["label"]] = item["amount"]
+
         display_drivers = [
             {
                 "name": d.get("name", ""),
                 "metric": d.get("metric", ""),
                 "category": d.get("category", "cost_reduction"),
-                "annualImpact": driver_amounts[idx],
+                "annualImpact": capped_amounts.get(d.get("name", ""), driver_amounts[idx]),
                 "methodology": d.get("description", ""),
             }
             for idx, d in enumerate(bv_drivers)
