@@ -625,14 +625,32 @@ class ROIAgent:
         # exceed what the BV agent determined was credible
         bv_range_high = float(impact_range.get("high", 0)) if impact_range else 0
         if bv_range_high > 0 and total_annual_value > bv_range_high:
+            pre_clamp_total = total_annual_value
             scale = bv_range_high / total_annual_value
             hard_savings = round(hard_savings * scale)
             revenue_uplift = round(revenue_uplift * scale)
             risk_reduction = round(risk_reduction * scale)
             total_annual_value = hard_savings + revenue_uplift + risk_reduction
+            # Rounding can push the sum back over the cap; trim the
+            # largest component so the invariant holds exactly.
+            overshoot = total_annual_value - round(bv_range_high)
+            if overshoot > 0:
+                largest = max(
+                    ("hard_savings", hard_savings),
+                    ("revenue_uplift", revenue_uplift),
+                    ("risk_reduction", risk_reduction),
+                    key=lambda x: x[1],
+                )
+                if largest[0] == "hard_savings":
+                    hard_savings -= overshoot
+                elif largest[0] == "revenue_uplift":
+                    revenue_uplift -= overshoot
+                else:
+                    risk_reduction -= overshoot
+                total_annual_value = hard_savings + revenue_uplift + risk_reduction
             logger.info(
                 "Total value ($%s) clamped to BV range high ($%s), scale=%.2f",
-                f"{(hard_savings + revenue_uplift + risk_reduction) / scale:,.0f}",
+                f"{pre_clamp_total:,.0f}",
                 f"{bv_range_high:,.0f}", scale,
             )
 
