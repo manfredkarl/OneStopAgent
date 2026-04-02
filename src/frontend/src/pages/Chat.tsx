@@ -11,12 +11,14 @@ interface Props {
   onProjectCreated?: () => void;
 }
 
-export default function Chat({ agents: _agents, onAgentsChange, onProjectCreated: _onProjectCreated }: Props) {
+export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProjectCreated }: Props) {
   const { id: projectId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const initialSent = useRef(false);
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
 
   useEffect(() => {
     if (!projectId) return;
@@ -39,7 +41,21 @@ export default function Chat({ agents: _agents, onAgentsChange, onProjectCreated
 
     try {
       await sendMessageStreaming(projectId, message, (incoming) => {
-        if (incoming.metadata?.type === 'agent_token') {
+        // ── Update sidebar agent status in real-time ──────────
+        const metaType = incoming.metadata?.type as string | undefined;
+        const metaAgent = (incoming.metadata?.agent ?? incoming.agentId) as string | undefined;
+        if (metaAgent && (metaType === 'agent_start' || metaType === 'agent_result' || metaType === 'agent_error')) {
+          const newStatus = metaType === 'agent_start' ? 'working' as const
+            : metaType === 'agent_error' ? 'error' as const : 'idle' as const;
+          onAgentsChange(
+            agentsRef.current.map(a => a.agentId === metaAgent
+              ? { ...a, status: newStatus }
+              : metaType === 'agent_start' && a.status === 'working' ? { ...a, status: 'idle' as const } : a
+            )
+          );
+        }
+
+        if (metaType === 'agent_token') {
           // In-place token append: find message by msg_id or create new streaming message
           const msgId = incoming.metadata.msg_id as string;
           const token = (incoming.metadata.token ?? incoming.content) as string;
