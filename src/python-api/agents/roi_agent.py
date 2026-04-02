@@ -472,7 +472,7 @@ class ROIAgent:
         # 8. Hard savings vs current baseline ratio
         if current_annual > 0 and hard_savings > current_annual * 0.60:
             warnings.append(
-                f"Hard savings (${hard_savings:,.0f}) = "
+                f"Operational efficiency value (${hard_savings:,.0f}) = "
                 f"{hard_savings / current_annual * 100:.0f}% of current baseline "
                 f"(${current_annual:,.0f}). Values above 60% require strong justification."
             )

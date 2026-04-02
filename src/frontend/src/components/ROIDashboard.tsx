@@ -273,9 +273,9 @@ export default function ROIDashboard({ data }: Props) {
           )}
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
             {hardSavings > 0 && revenueUplift > 0
-              ? 'cost savings + modeled uplift'
+              ? 'operational efficiency + modeled uplift'
               : hardSavings > 0
-                ? 'cost savings'
+                ? 'operational efficiency'
                 : 'modeled uplift'}
           </p>
           {isEstimated && <div className="mt-1"><BaselineBadge estimated /></div>}
