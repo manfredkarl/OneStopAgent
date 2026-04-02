@@ -542,33 +542,35 @@ class ROIAgent:
 
         monthly_savings = round(current_monthly - future_monthly)
 
-        # ── Investment ───────────────────────────────────────────────
+        # ── Investment = NET NEW spending ────────────────────────────
+        # ROI denominator is the incremental cost the customer decides to
+        # spend (Azure + implementation + change management).  Carried
+        # labor/overhead is a sunk cost — it exists with or without Azure.
         azure_annual = azure_monthly * 12
         timeline_months = state.sa.timeline_months or 0
         impl_cost = round(azure_monthly * timeline_months) if timeline_months > 0 else round(azure_annual * 0.5)
         change_cost = round(impl_cost * 0.10)
-        year1_total_cost = round(future_annual + impl_cost + change_cost)
+        year1_investment = round(azure_annual + impl_cost + change_cost)
         year2_run_rate = round(azure_annual)
-        year1_investment = year1_total_cost  # alias for backward compat
 
         # ── ROI: Year 1 (includes impl+change) and run-rate ─────────
-        if year1_total_cost > 0:
-            roi_year1 = ((val_mid - year1_total_cost) / year1_total_cost) * 100
+        if year1_investment > 0:
+            roi_year1 = ((val_mid - year1_investment) / year1_investment) * 100
         else:
             roi_year1 = 0.0
 
-        if future_annual > 0:
-            roi_run_rate = ((val_mid - future_annual) / future_annual) * 100
+        if azure_annual > 0:
+            roi_run_rate = ((val_mid - azure_annual) / azure_annual) * 100
         else:
             roi_run_rate = 0.0
 
         # Headline = Year 1 (conservative)
         roi_mid = roi_year1
-        roi_low = ((val_low - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0.0
-        roi_high = ((val_high - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0.0
+        roi_low = ((val_low - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        roi_high = ((val_high - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
 
-        # Payback against full Year 1 cost
-        payback_months = round((year1_total_cost / val_mid) * 12, 1) if val_mid > 0 else None
+        # Payback against Year 1 investment (net new costs only)
+        payback_months = round((year1_investment / val_mid) * 12, 1) if val_mid > 0 else None
         if payback_months is not None:
             payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
             payback_months = round(payback_months, 1)
@@ -642,7 +644,7 @@ class ROIAgent:
             risk_reduction=risk_reduction,
             risk_note=risk_note,
             year1_investment=year1_investment,
-            year1_total_cost=year1_total_cost,
+            year1_total_cost=year1_investment,
             year2_run_rate=year2_run_rate,
             impl_cost=impl_cost,
             change_cost=change_cost,
@@ -666,7 +668,7 @@ class ROIAgent:
             "revenue_uplift": round(revenue_uplift),
             "risk_reduction": round(risk_reduction),
             "year1_investment": year1_investment,
-            "year1_total_cost": year1_total_cost,
+            "year1_total_cost": year1_investment,
             "year2_run_rate": year2_run_rate,
             "future_annual_opex": round(future_annual),
             "roi_percent": round(roi_mid, 1),
@@ -1042,10 +1044,10 @@ class ROIAgent:
         sensitivity = []
         for pct, label in [(0.5, "50%"), (0.75, "75%"), (1.0, "100%")]:
             adj_value = total_annual_value * pct
-            # Year 1 ROI uses year1_total_cost (includes impl + change)
+            # Year 1 ROI: value vs net new investment (Azure + impl + change)
             adj_roi_y1 = ((adj_value - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0
-            # Run-rate ROI uses future_annual (ongoing opex only)
-            adj_roi_rr = ((adj_value - future_annual) / future_annual * 100) if future_annual > 0 else 0
+            # Run-rate ROI: value vs Azure annual (ongoing new cost)
+            adj_roi_rr = ((adj_value - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0
             adj_payback = round(year1_total_cost / adj_value * 12, 1) if adj_value > 0 else None
             if adj_payback is not None and adj_payback > self.MAX_PAYBACK_MONTHS:
                 adj_payback = self.MAX_PAYBACK_MONTHS

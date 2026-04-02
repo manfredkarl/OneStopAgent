@@ -445,17 +445,6 @@ export default function ROIDashboard({ data }: Props) {
                 <p className="text-xl font-bold text-teal-400">${fmt(riskReduction)}<span className="text-xs font-normal">/yr</span></p>
               </div>
             )}
-
-            {/* Total — visually separated, labeled correctly */}
-            <div className="pt-3 border-t border-[var(--border)] flex items-center justify-between">
-              <div>
-                <span className="text-sm font-semibold text-[var(--text-primary)]">Total Modeled Annual Value</span>
-                <p className="text-[10px] text-[var(--text-muted)]">
-                  not all categories are equally certain — see labels above
-                </p>
-              </div>
-              <span className="text-sm font-bold text-[var(--text-primary)]">${fmt(businessCase.valueBridge.totalAnnualValue)}/yr</span>
-            </div>
           </div>
         </div>
       )}
@@ -744,6 +733,26 @@ export default function ROIDashboard({ data }: Props) {
         </div>
       )}
 
+      {/* ── Sensitivity Analysis ──────────────────────────────── */}
+      {businessCase && businessCase.sensitivity.length > 0 && (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-5">
+          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3">
+            Sensitivity — What If Adoption Varies?
+          </h3>
+          <div className="grid grid-cols-3 gap-3">
+            {businessCase.sensitivity.map((s, i) => (
+              <div key={i} className="text-center p-3 bg-[var(--bg-secondary)] rounded-lg">
+                <p className="text-xs text-[var(--text-muted)] uppercase mb-1">{s.adoption} adoption</p>
+                <p className="text-sm font-bold text-[var(--text-primary)]">${fmt(s.annualValue)}/yr</p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {s.roi > 0 ? `${s.roi.toFixed(0)}% ROI` : 'negative ROI'}
+                  {s.paybackMonths != null && ` · ${s.paybackMonths > 36 ? '>3 yr' : `${s.paybackMonths.toFixed(0)} mo`}`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Methodology ───────────────────────────────────────── */}
       {methodology && (
