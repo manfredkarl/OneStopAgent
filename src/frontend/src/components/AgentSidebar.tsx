@@ -74,7 +74,9 @@ export default function AgentSidebar({ projectId, agents, onAgentsChange }: Prop
                 role="button"
                 onClick={() => (reg?.required || isComingSoon) ? undefined : handleToggle(agent.agentId, agent.active)}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-all duration-150 select-none ${
-                  isComingSoon
+                  isWorking
+                    ? 'bg-blue-500/10 ring-1 ring-blue-500/30'
+                    : isComingSoon
                     ? 'opacity-40 cursor-default'
                     : agent.active
                     ? 'hover:bg-[var(--bg-hover)] cursor-pointer'
