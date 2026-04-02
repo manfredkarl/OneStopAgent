@@ -766,6 +766,16 @@ export default function ROIDashboard({ data }: Props) {
         </div>
       )}
 
+      {/* ── Plausibility Warnings ──────────────────────────────── */}
+      {(data as any).plausibilityWarnings && (data as any).plausibilityWarnings.length > 0 && (
+        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 space-y-1">
+          <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">⚠ Reconciliation Notes</h3>
+          {(data as any).plausibilityWarnings.map((w: string, i: number) => (
+            <p key={i} className="text-xs text-[var(--text-muted)]">• {w}</p>
+          ))}
+        </div>
+      )}
+
       {/* ── Methodology ───────────────────────────────────────── */}
       {methodology && (
         <div className="text-xs text-[var(--text-muted)] space-y-1 border-t border-[var(--border)] pt-4">
