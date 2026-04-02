@@ -79,10 +79,10 @@ ESTIMATED_PRICES: dict[str, dict] = {
     # Communication Services is pure consumption (per SMS/minute/message);
     # no retail price entries exist.
     "Azure Communication Services": {
-        "price": 500.0,
+        "price": 0.004,
         "source": "estimated",
-        "note": "Estimated ~$500/month for moderate usage (SMS, voice, chat). Actual cost varies with volume.",
-        "unit": "1/Month",
+        "note": "Blended per-minute rate for mixed voice/chat (voice ~$0.05/min, chat messages ~$0.001/msg, weighted average for typical retail mix).",
+        "unit": "1/Minute",
     },
     # CycleCloud is a free orchestration layer; compute cost comes from underlying VMs.
     "Azure CycleCloud": {

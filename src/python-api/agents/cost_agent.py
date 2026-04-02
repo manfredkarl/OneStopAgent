@@ -546,6 +546,22 @@ Return ONLY valid JSON (no markdown fences) as an array:
                         gb_volume = int(usage_dict[key])
                         break
             return unit_price * gb_volume
+        elif "minute" in unit_lower:
+            monthly_minutes = 0
+            if usage_dict:
+                for key in ("monthly_voice_chat_minutes", "monthly_chat_voice_hours",
+                             "voice_chat_minutes", "monthly_minutes",
+                             "monthly_voice_chat_hours", "chat_voice_hours"):
+                    if usage_dict.get(key):
+                        val = float(usage_dict[key])
+                        if "hour" in key:
+                            val = val * 60  # convert hours to minutes
+                        monthly_minutes = val
+                        break
+            if monthly_minutes == 0:
+                monthly_minutes = 100_000  # sensible default: 100K minutes/mo
+                logger.info("No voice/chat minutes in usage_dict, using default %d", monthly_minutes)
+            return unit_price * monthly_minutes
         elif "10k" in unit_lower or "10,000" in unit_lower:
             return unit_price * 1
         else:
