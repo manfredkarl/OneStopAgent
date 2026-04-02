@@ -235,9 +235,9 @@ export default function ROIDashboard({ data }: Props) {
               {paybackMonths < 1 ? "<1 mo" : paybackMonths > 36 ? ">3 yr" : `${paybackMonths.toFixed(0)} mo`} payback
             </p>
           )}
-          {(data as any).roiYear1Text && (
+          {(data as any).roiSteadyStateText && (
             <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-              Year 1: {(data as any).roiYear1Text} (incl. setup)
+              Steady-state: {(data as any).roiSteadyStateText}
             </p>
           )}
         </div>

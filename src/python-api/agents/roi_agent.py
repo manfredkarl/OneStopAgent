@@ -671,11 +671,11 @@ class ROIAgent:
         else:
             roi_run_rate = 0.0
 
-        # Headline = Steady-State ROI (the business case anchor)
-        # Year 1 is shown separately as the "ramp-up" context
-        roi_mid = roi_run_rate
-        roi_low = ((val_low - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0.0
-        roi_high = ((val_high - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0.0
+        # Headline = Year 1 ROI (adoption-adjusted, includes setup costs)
+        # Steady-state shown as secondary context
+        roi_mid = roi_year1
+        roi_low = ((val_low * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        roi_high = ((val_high * year1_adoption - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
 
         # Payback: months until cumulative adopted value covers investment
         monthly_adopted_value = (total_annual_value * year1_adoption) / 12
@@ -984,18 +984,17 @@ class ROIAgent:
         else:
             roi_display_text = None
 
-        # Year 1 ROI display (for secondary context)
-        if year1_investment > 0:
-            roi_year1_text = f"{(roi_year1 / 100 + 1):.1f}x"
+        # Steady-state ROI display (for secondary context)
+        if azure_annual > 0:
+            roi_steady_text = f"{(roi_run_rate / 100 + 1):.1f}x"
         else:
-            roi_year1_text = None
+            roi_steady_text = None
 
         roi_description = (
-            f"Steady-state ROI: annual value vs. Azure run-rate "
-            f"(${azure_annual:,.0f}/yr). "
-            f"Year 1 ROI: {roi_year1_text or 'N/A'} "
-            f"(adoption-adjusted value vs. Year 1 investment ${year1_investment:,.0f}, "
-            f"incl. one-time setup)."
+            f"Year 1 ROI: {int(year1_adoption * 100)}% adoption-adjusted value "
+            f"vs. Year 1 investment (${year1_investment:,.0f}, incl. setup). "
+            f"Steady-state: {roi_steady_text or 'N/A'} "
+            f"(full value vs. Azure run-rate ${azure_annual:,.0f}/yr)."
         )
 
         # ── Assemble dashboard ───────────────────────────────────────
@@ -1023,9 +1022,10 @@ class ROIAgent:
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
             "roiRunRateText": roi_display_text,
-            "roiSubtitle": "Steady-state return on Azure investment",
+            "roiSubtitle": f"Year 1 ROI ({int(year1_adoption * 100)}% adoption, incl. setup)",
             "roiDescription": roi_description,
-            "roiYear1Text": roi_year1_text,
+            "roiYear1Text": roi_display_text,
+            "roiSteadyStateText": roi_steady_text,
             "confidenceLevel": bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
             "futureAnnualOpex": round(future_annual),
