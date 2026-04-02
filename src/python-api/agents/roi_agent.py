@@ -316,11 +316,12 @@ class ROIAgent:
 
     # ── Waterfall split ──────────────────────────────────────────────
     def _split_waterfall(self, bv_drivers: list[dict], driver_amounts: list[float],
-                         current_annual: float) -> tuple[list[dict], list[dict], bool, float]:
+                         max_hard_savings: float) -> tuple[list[dict], list[dict], bool, float]:
         """Split driver amounts into cost-reduction and revenue-uplift waterfalls.
 
-        Hard savings (cost reduction) are capped at MAX_SAVINGS_PCT (60%) of the
-        current annual baseline — nobody eliminates their entire operational cost.
+        Hard savings (cost reduction) are capped at max_hard_savings — typically
+        the actual operating cost reduction from _build_future_cost(), so BV
+        drivers can't claim more savings than the cost model proves.
 
         Returns (cost_items, uplift_items, savings_capped, savings_cap_pct).
         """
@@ -334,13 +335,12 @@ class ROIAgent:
             else:
                 cost_items.append(item)
 
-        # Guard: hard savings capped at 60% of baseline (not 100%)
+        # Cap hard savings at the provable operating cost reduction
         savings_capped = False
         savings_cap_pct = 0.0
-        max_hard = current_annual * (self.MAX_SAVINGS_PCT / 100) if current_annual > 0 else float("inf")
         raw_hard = sum(i["amount"] for i in cost_items)
-        if raw_hard > max_hard:
-            scale = max_hard / raw_hard
+        if max_hard_savings > 0 and raw_hard > max_hard_savings:
+            scale = max_hard_savings / raw_hard
             cost_items = [{"label": i["label"], "amount": round(i["amount"] * scale)}
                           for i in cost_items]
             savings_capped = True
@@ -563,8 +563,13 @@ class ROIAgent:
                 abs(actual_sum - val_mid) / val_mid * 100,
             )
 
+        # Hard savings cap = actual operating cost reduction from the cost model.
+        # _build_future_cost already computed the real savings; BV drivers can't
+        # claim more than the cost model proves.
+        actual_annual_savings = max(monthly_savings * 12, 0)
+
         waterfall_cost, waterfall_uplift, savings_capped, savings_cap_pct = self._split_waterfall(
-            drivers, driver_amounts, current_annual)
+            drivers, driver_amounts, actual_annual_savings)
 
         hard_savings = sum(i["amount"] for i in waterfall_cost)
         revenue_uplift = sum(i["amount"] for i in waterfall_uplift)
