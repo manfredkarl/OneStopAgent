@@ -57,8 +57,8 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
 
         if (metaType === 'agent_token') {
           // In-place token append: find message by msg_id or create new streaming message
-          const msgId = incoming.metadata.msg_id as string;
-          const token = (incoming.metadata.token ?? incoming.content) as string;
+          const msgId = incoming.metadata!.msg_id as string;
+          const token = (incoming.metadata!.token ?? incoming.content) as string;
           setMessages(prev => {
             const idx = prev.findIndex(m => m.id === msgId);
             if (idx >= 0) {
