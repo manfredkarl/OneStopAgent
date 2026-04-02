@@ -693,7 +693,11 @@ class ROIAgent:
             "roi_run_rate": round(roi_run_rate, 1),
             "roi_percent_display": round(roi_display, 1),
             "roi_capped": roi_capped,
-            "roi_range": f"{roi_low:.0f}\u2013{roi_high:.0f}%",
+            "roi_range": (
+                f">{self.MAX_DISPLAY_ROI // 100}x"
+                if min(roi_low, roi_high) > self.MAX_DISPLAY_ROI
+                else f"{(roi_low / 100 + 1):.1f}x\u2013{(roi_high / 100 + 1):.1f}x"
+            ),
             "payback_months": payback_months,
             "is_estimated": is_estimated,
             "monetized_drivers": [
