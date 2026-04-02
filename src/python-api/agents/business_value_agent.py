@@ -7,6 +7,7 @@ import json
 import logging
 from agents.llm import llm
 from agents.state import AgentState
+from agents.assumption_catalog import filter_already_answered
 from services.web_search import search_industry_benchmarks
 
 logger = logging.getLogger(__name__)
@@ -22,18 +23,14 @@ class BusinessValueAgent:
         description = state.user_input
 
         # Build shared-assumption context so the LLM doesn't re-ask known values
-        sa = state.shared_assumptions
+        typed = state.sa
         shared_lines: list[str] = []
-        if sa:
-            if sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend"):
-                spend = sa.get("current_annual_engineering_toolchain_spend") or sa.get("current_annual_spend")
-                shared_lines.append(f"Current annual spend: ${spend:,.0f} (ALREADY PROVIDED)")
-            if sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate"):
-                rate = sa.get("fully_loaded_engineering_labor_rate") or sa.get("hourly_labor_rate")
-                shared_lines.append(f"Hourly labor rate: ${rate}/hr (ALREADY PROVIDED)")
-            if sa.get("active_rd_engineering_users") or sa.get("total_users"):
-                users = sa.get("active_rd_engineering_users") or sa.get("total_users")
-                shared_lines.append(f"Total users: {users} (ALREADY PROVIDED)")
+        if typed.current_annual_spend:
+            shared_lines.append(f"Current annual spend: ${typed.current_annual_spend:,.0f} (ALREADY PROVIDED)")
+        if typed.hourly_labor_rate:
+            shared_lines.append(f"Hourly labor rate: ${typed.hourly_labor_rate}/hr (ALREADY PROVIDED)")
+        if typed.total_users:
+            shared_lines.append(f"Total users: {int(typed.total_users)} (ALREADY PROVIDED)")
 
         shared_context_block = ""
         if shared_lines:
@@ -73,32 +70,21 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
 
             assumptions = json.loads(text)
             if isinstance(assumptions, list) and len(assumptions) > 0:
-                return assumptions[:5]
+                return filter_already_answered(assumptions[:5], state)
         except Exception as e:
             logger.warning("Phase 1 assumption generation failed: %s", e)
 
-        # Fallback generic assumptions — realistic enterprise defaults
-        # Use shared assumptions to inform defaults if available
-        sa = getattr(state, 'shared_assumptions', None) or {}
-        default_employees = 100
-        default_spend = 50000
-        for k, v in sa.items():
-            kl = k.lower()
-            try:
-                fv = float(v)
-            except (ValueError, TypeError):
-                continue
-            if ("user" in kl or "engineer" in kl) and fv > 1:
-                default_employees = int(fv)
-            elif ("spend" in kl or "cost" in kl) and fv > 1000:
-                default_spend = int(fv / 12)  # Convert annual to monthly
+        # Fallback generic assumptions — use typed shared assumptions for defaults
+        default_employees = int(typed.total_users) if typed.total_users else 100
+        default_spend = int(typed.current_annual_spend / 12) if typed.current_annual_spend else 50000
 
-        return [
+        fallback = [
             {"id": "employees", "label": "Number of employees affected", "unit": "count", "default": default_employees, "hint": "How many people will use or benefit from this solution"},
             {"id": "monthly_it_spend", "label": "Current monthly IT spend", "unit": "$", "default": default_spend, "hint": "Approximate monthly infrastructure/operations cost"},
             {"id": "manual_hours", "label": "Hours spent on manual processes per week", "unit": "hours", "default": 40, "hint": "Time that could be automated or reduced"},
             {"id": "revenue_impact_area", "label": "Monthly revenue from affected area", "unit": "$", "default": 250000, "hint": "Revenue from the business area this solution touches"},
         ]
+        return filter_already_answered(fallback, state)
 
     def run(self, state: AgentState) -> AgentState:
         """Two-phase value driver generation.
@@ -130,23 +116,15 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
             for a in user_assumptions
         ])
 
-        # Prepend shared assumptions as baseline (fuzzy key matching)
-        sa = state.shared_assumptions or {}
+        # Prepend shared assumptions as baseline (typed via state.sa)
+        typed = state.sa
         shared_lines = []
-        for k, v in sa.items():
-            if k.startswith("_"):
-                continue
-            kl = k.lower()
-            try:
-                fv = float(v)
-            except (ValueError, TypeError):
-                continue
-            if ("spend" in kl or "cost" in kl) and "annual" in kl and fv > 1000:
-                shared_lines.append(f"- Current annual spend: ${fv:,.0f}")
-            elif ("labor" in kl or "hourly" in kl) and "rate" in kl and 10 < fv < 500:
-                shared_lines.append(f"- Hourly labor rate: ${fv}/hr")
-            elif ("user" in kl or "engineer" in kl) and fv > 1:
-                shared_lines.append(f"- Platform users: {int(fv)}")
+        if typed.current_annual_spend:
+            shared_lines.append(f"- Current annual spend: ${typed.current_annual_spend:,.0f}")
+        if typed.hourly_labor_rate:
+            shared_lines.append(f"- Hourly labor rate: ${typed.hourly_labor_rate}/hr")
+        if typed.total_users:
+            shared_lines.append(f"- Platform users: {int(typed.total_users)}")
 
         if shared_lines:
             assumption_context = "SHARED BASELINE:\n" + "\n".join(shared_lines) + "\n\nUSER INPUTS:\n" + assumption_context
@@ -210,7 +188,7 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
                 "'Based on 20-30% engineering time savings applied to 1,600 hrs/week × $100/hr labor rate'."
             )
 
-        prompt = f"""You are a value engineer. Produce EXACTLY 3 benchmark-backed value drivers for this Azure solution.
+        prompt = f"""You are a value engineer. Produce 2–4 benchmark-backed value drivers for this Azure solution (fewer for simple use cases, more for complex ones).
 
 CUSTOMER: {customer}
 INDUSTRY: {industry}
@@ -226,12 +204,12 @@ Use the SHARED current_annual_spend as the baseline for spend optimization calcu
 {search_context}
 
 RULES — follow precisely:
-1. Return EXACTLY 3 value drivers. No more, no fewer.
+1. Return 2–4 value drivers. Fewer for simple use cases, more for complex.
 2. Each driver must have a SPECIFIC percentage or metric range (e.g. "10–20% time savings").
    Use the midpoint of published industry ranges — do not artificially deflate percentages.
 3. {source_instruction}
 4. Do NOT write long prose. Each description is 1 sentence max.
-5. Provide an aggregated annual_impact_range (low–high dollars) across all 3 drivers.
+5. Provide an aggregated annual_impact_range (low–high dollars) across all drivers.
    USE THE USER-PROVIDED ASSUMPTIONS ABOVE to compute real dollar values.
 6. List every assumption behind that number explicitly (headcount, hourly rate, hours saved, etc.).
 7. If you cannot compute a dollar range without knowing something, still give the percentage drivers
@@ -250,6 +228,8 @@ Return ONLY valid JSON (no markdown fences):
     {{
       "name": "Short driver name",
       "metric": "10–20% time savings" or similar specific range,
+      "impact_pct_low": 10,
+      "impact_pct_high": 20,
       "description": "One sentence explaining the mechanism",
       "category": "cost_reduction" or "revenue_uplift",
       "source_name": "Calculated from user assumptions" or "Labor rate analysis" or "Spend optimization model",
@@ -264,12 +244,19 @@ Return ONLY valid JSON (no markdown fences):
   "confidence": "moderate"
 }}
 
-CATEGORY RULES:
+IMPORTANT FIELD RULES:
+- "impact_pct_low" and "impact_pct_high": REQUIRED numeric fields matching the percentage
+  range in "metric". E.g. if metric says "10–20% time savings", set impact_pct_low=10,
+  impact_pct_high=20. If a single percentage, set both to the same value.
+- "category": REQUIRED. Must be one of "cost_reduction", "revenue_uplift", or "risk_reduction".
 - "cost_reduction": driver primarily reduces existing spend (labour, infra, errors, rework, licensing)
 - "revenue_uplift": driver generates NEW value (new product features, faster time-to-market,
   improved customer retention, higher conversion, new revenue channels)
+- "risk_reduction": driver reduces risk exposure (compliance fines, security breaches, downtime costs)
 - Assign each driver to the category that best describes its primary mechanism.
 - Aim for at least one driver in each category when the use case supports both."""
+
+        benchmark_available = bool(search_results)
 
         try:
             response = llm.invoke([
@@ -283,8 +270,8 @@ CATEGORY RULES:
 
             result = json.loads(text)
 
-            # Validate exactly 3 drivers
-            drivers = result.get("drivers", [])[:3]
+            # Safety cap at 5 drivers (prompt asks for 2-4)
+            drivers = result.get("drivers", [])[:5]
             for d in drivers:
                 d.setdefault("name", "")
                 d.setdefault("metric", "")
@@ -292,12 +279,29 @@ CATEGORY RULES:
                 d.setdefault("category", "cost_reduction")
                 d.setdefault("source_name", "")
                 d.setdefault("source_url", "")
+                d.setdefault("impact_pct_low", None)
+                d.setdefault("impact_pct_high", None)
+
+            # Validate impact range and verify driver arithmetic
+            validated_range, bv_warnings = self._validate_and_verify(result, state)
+
+            confidence = result.get("confidence", "moderate")
+            if bv_warnings:
+                confidence = "low"
+                for w in bv_warnings:
+                    logger.warning("BV validation: %s", w)
+
+            # Downgrade confidence when no industry benchmarks available
+            if not benchmark_available:
+                if confidence == "high":
+                    confidence = "moderate"
 
             state.business_value = {
                 "drivers": drivers,
-                "annual_impact_range": result.get("annual_impact_range"),
+                "annual_impact_range": validated_range,
                 "assumptions": result.get("assumptions", []),
-                "confidence": result.get("confidence", "moderate"),
+                "confidence": confidence,
+                "consistency_warnings": bv_warnings,
                 "sources": [
                     {"title": r.get("title", ""), "url": r.get("url", "")}
                     for r in search_results[:5]
@@ -305,16 +309,104 @@ CATEGORY RULES:
                 "user_assumptions": user_assumptions,
             }
 
+            if not benchmark_available:
+                state.business_value["methodology_note"] = (
+                    "Value drivers computed from user-provided assumptions. "
+                    "No external industry benchmarks were available for validation."
+                )
+
+        except json.JSONDecodeError as e:
+            logger.error("BV LLM returned invalid JSON: %s", e, exc_info=True)
+            state.business_value = {
+                "drivers": [],
+                "annual_impact_range": None,
+                "assumptions": ["Value calculation failed \u2014 AI model returned unexpected format."],
+                "confidence": "low",
+                "sources": [],
+                "user_assumptions": user_assumptions,
+                "_used_fallback": True,
+                "error_type": "json_parse",
+                "error": "The AI model returned an unexpected format. Results may be incomplete.",
+            }
+
         except Exception as e:
             logger.error("BV LLM call failed: %s", e, exc_info=True)
             state.business_value = {
                 "drivers": [],
                 "annual_impact_range": None,
-                "assumptions": ["Value calculation failed — please try again or provide more details about the use case."],
+                "assumptions": ["Value calculation failed \u2014 please try again or provide more details about the use case."],
                 "confidence": "low",
                 "sources": [],
                 "user_assumptions": user_assumptions,
+                "_used_fallback": True,
+                "error_type": "unknown",
                 "error": "Could not generate value drivers. Please retry or refine the use case description.",
             }
 
         return state
+
+    # ── Validation ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_and_verify(
+        result: dict,
+        state: AgentState,
+    ) -> tuple[dict | None, list[str]]:
+        """Validate impact range AND verify driver arithmetic.
+
+        Returns (corrected_range_or_None, warning_list).
+        """
+        warnings: list[str] = []
+        impact_range = result.get("annual_impact_range")
+        drivers = result.get("drivers", [])
+        current_spend = state.sa.current_annual_spend
+        azure_annual = state.costs.get("estimate", {}).get("totalAnnual", 0)
+
+        # ── Range validation ─────────────────────────────────────
+        if not impact_range or not isinstance(impact_range, dict):
+            return None, ["No impact range provided by value model."]
+
+        try:
+            low = float(impact_range.get("low", 0))
+            high = float(impact_range.get("high", 0))
+        except (ValueError, TypeError):
+            return None, ["Impact range contains non-numeric values."]
+
+        if low > high:
+            low, high = high, low
+        if low < 0:
+            low = 0
+        if high <= 0:
+            return None, ["Impact range is zero or negative."]
+
+        # Extreme hallucination guard: >200× Azure cost
+        if azure_annual > 0 and high > azure_annual * 200:
+            high = azure_annual * 200
+            low = min(low, high)
+            warnings.append("Impact range capped (exceeded 200× Azure cost).")
+
+        # Economic plausibility: flag if >3× current baseline
+        if current_spend and current_spend > 0 and high > current_spend * 3:
+            warnings.append(
+                f"Impact high (${high:,.0f}) is >{high / current_spend:.1f}× current spend "
+                f"(${current_spend:,.0f}). Verify revenue uplift assumptions."
+            )
+
+        # ── Driver arithmetic verification ───────────────────────
+        if current_spend and current_spend > 0:
+            cost_reduction_implied = 0.0
+            for d in drivers:
+                if d.get("category") != "cost_reduction":
+                    continue
+                pct_low = d.get("impact_pct_low", 0) or 0
+                pct_high = d.get("impact_pct_high", 0) or 0
+                mid_pct = (pct_low + pct_high) / 2 / 100
+                cost_reduction_implied += current_spend * mid_pct
+
+            if cost_reduction_implied > current_spend:
+                warnings.append(
+                    f"Cost-reduction drivers imply ${cost_reduction_implied:,.0f}/yr "
+                    f"but current spend is ${current_spend:,.0f}/yr. Over-counting."
+                )
+
+        return {"low": round(low, 2), "high": round(high, 2)}, warnings

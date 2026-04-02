@@ -4,6 +4,7 @@ Queries the public Azure Retail Prices REST API. Uses service name mapping
 to handle naming differences between LLM output and the API.
 """
 
+import datetime
 import logging
 
 import httpx
@@ -35,8 +36,32 @@ SERVICE_NAME_MAP: dict[str, str] = {
     "Azure AI Foundry": "Azure Machine Learning",
 }
 
+# ── Configurable AI model pricing (FRD-006 Fix N) ────────────────────
+AI_MODEL_PRICING: dict[str, dict] = {
+    "gpt-4o": {
+        "input_per_1m": 2.50,
+        "output_per_1m": 10.00,
+        "avg_input_tokens": 800,
+        "avg_output_tokens": 400,
+        "last_updated": "2026-01-15",
+    },
+}
+
+
+def per_request_cost(model: str = "gpt-4o") -> float:
+    """Compute per-request cost from token pricing config.
+
+    Logs a warning if pricing data is >90 days old.
+    """
+    m = AI_MODEL_PRICING[model]
+    age = (datetime.date.today() - datetime.date.fromisoformat(m["last_updated"])).days
+    if age > 90:
+        logger.warning("AI pricing for %s is %d days old — verify current rates", model, age)
+    return (m["avg_input_tokens"] / 1_000_000 * m["input_per_1m"]
+            + m["avg_output_tokens"] / 1_000_000 * m["output_per_1m"])
+
+
 # Services that have NO entries in the Retail Prices API.
-# These use per-user licensing or pure consumption billing not listed in retail prices.
 ESTIMATED_PRICES: dict[str, dict] = {
     # Entra ID is licensed per-user/month via Microsoft 365; not in the retail API.
     "Microsoft Entra ID": {
@@ -74,26 +99,22 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "unit": "1/Month",
     },
     # Azure OpenAI uses per-token pricing not in the retail API.
-    # GPT-4o: $2.50/1M input tokens, $10/1M output tokens.
-    # Estimate assumes ~800 input + 400 output tokens per request.
-    # Formula: requests × (800/1M × $2.50 + 400/1M × $10.00)
-    # For reference: 100K req/mo ≈ $600, 200K ≈ $1,200, 500K ≈ $3,000
     "Azure OpenAI Service": {
-        "price": 0.006,  # per-request cost (used by cost agent to multiply by volume)
+        "price": per_request_cost(),
         "source": "calculated",
-        "note": "GPT-4o: $2.50/1M input + $10/1M output tokens (~800 in + 400 out per request = $0.006/req)",
+        "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
         "unit": "1/Request",
     },
     "Azure OpenAI": {
-        "price": 0.006,
+        "price": per_request_cost(),
         "source": "calculated",
-        "note": "GPT-4o: $2.50/1M input + $10/1M output tokens (~800 in + 400 out per request = $0.006/req)",
+        "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
         "unit": "1/Request",
     },
     "Azure AI Foundry": {
-        "price": 0.006,
+        "price": per_request_cost(),
         "source": "calculated",
-        "note": "AI Foundry uses Azure OpenAI pricing. GPT-4o: ~$0.006/request (~800 in + 400 out tokens)",
+        "note": "AI Foundry uses Azure OpenAI pricing, computed from AI_MODEL_PRICING config",
         "unit": "1/Request",
     },
 }
@@ -113,6 +134,22 @@ def _query_api(service_name: str, region: str) -> list[dict]:
     except Exception as e:
         logger.warning("Pricing API request failed for %s: %s", service_name, e)
     return []
+
+
+# ── Tier-proximity scoring for SKU fallback (FRD-006 Fix J) ──────────
+TIER_ORDER = ["free", "shared", "basic", "b", "standard", "s", "premium", "p", "isolated", "i"]
+
+
+def _tier_distance(requested: str, candidate: str) -> int:
+    """Compute distance between two SKU tier names in the tier hierarchy.
+
+    PaaS-focused. VM families (D/E/F/L/M/N) default to index 5 (Standard).
+    """
+    req_lower = requested.lower()
+    cand_lower = candidate.lower()
+    req_idx = next((i for i, t in enumerate(TIER_ORDER) if t in req_lower), 5)
+    cand_idx = next((i for i, t in enumerate(TIER_ORDER) if t in cand_lower), 5)
+    return abs(req_idx - cand_idx)
 
 
 def _find_best_match(items: list[dict], sku: str) -> dict | None:
@@ -139,7 +176,7 @@ def _find_best_match(items: list[dict], sku: str) -> dict | None:
             if item.get("retailPrice", 0) > 0:
                 return item
 
-    # 3. Median-priced non-zero item (exclude Low Priority / Spot)
+    # 3. Nearest-tier match (replaces median fallback — FRD-006 Fix J)
     non_zero = [
         i for i in items
         if i.get("retailPrice", 0) > 0
@@ -147,8 +184,8 @@ def _find_best_match(items: list[dict], sku: str) -> dict | None:
         and "spot" not in (i.get("skuName") or "").lower()
     ]
     if non_zero:
-        non_zero.sort(key=lambda i: i["retailPrice"])
-        return non_zero[len(non_zero) // 2]
+        non_zero.sort(key=lambda i: _tier_distance(sku, i.get("skuName", "")))
+        return non_zero[0]
 
     return None
 

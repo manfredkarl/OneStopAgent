@@ -24,8 +24,11 @@ Output schema (state.roi):
   needs_info            – None or list of questions when data is insufficient
   dashboard             – frontend-ready blob matching ROIDashboardData
 """
+import logging
 import re
 from agents.state import AgentState
+
+logger = logging.getLogger(__name__)
 
 
 class ROIAgent:
@@ -37,85 +40,41 @@ class ROIAgent:
     MAX_SAVINGS_PCT = 60          # cap monthly savings display
     MIN_PAYBACK_MONTHS = 0.5
     MAX_PAYBACK_MONTHS = 120.0
-    ADOPTION_RAMP = [0.50, 0.85, 1.00]
-    # When no current-state baseline is available, use this multiplier
-    # on Azure cost as a *clearly-labeled* estimate.  Single value
-    # everywhere so dashboard and business case never disagree.
-    ESTIMATED_BASELINE_MULTIPLIER = 1.5
+    ADOPTION_RAMP = [0.50, 0.85, 1.00]  # default; overridden by _select_adoption_ramp
 
-    # Key name variants the LLM may generate for shared assumptions
-    _CURRENT_SPEND_KEYS = [
-        "current_annual_spend",
-        "current_annual_engineering_toolchain_spend",
-        "current_annual_engineering_spend",
-        "current_annual_toolchain_spend",
-        "current_annual_operational_spend",
-        "current_annual_platform_spend",
-    ]
-    _LABOR_RATE_KEYS = [
-        "hourly_labor_rate",
-        "fully_loaded_engineering_labor_rate",
-        "fully_loaded_hourly_rate",
-        "hourly_rate",
-        "loaded_labor_rate",
-    ]
+    ADOPTION_RAMPS: dict[str, list[float]] = {
+        "simple":  [0.70, 0.95, 1.00],
+        "medium":  [0.50, 0.85, 1.00],
+        "complex": [0.30, 0.65, 0.90],
+    }
+
+    @classmethod
+    def _select_adoption_ramp(cls, state: AgentState) -> list[float]:
+        """Select adoption ramp based on architecture complexity."""
+        n = len(state.architecture.get("components", []))
+        if n <= 3:
+            return cls.ADOPTION_RAMPS["simple"]
+        elif n <= 8:
+            return cls.ADOPTION_RAMPS["medium"]
+        else:
+            return cls.ADOPTION_RAMPS["complex"]
+    # When no current-state baseline is available, use a complexity-based
+    # multiplier on Azure cost as a *clearly-labeled* estimate.
+    ESTIMATED_BASELINE_MULTIPLIER = 1.5  # default; overridden by _estimate_baseline_multiplier
+
+    @staticmethod
+    def _estimate_baseline_multiplier(state: AgentState) -> float:
+        """Variable multiplier based on architecture complexity."""
+        component_count = len(state.architecture.get("components", []))
+        if component_count <= 3:
+            return 1.2
+        elif component_count <= 7:
+            return 1.5
+        else:
+            return 2.0
 
     _PERCENTAGE_RANGE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*[–\-−]\s*(\d+(?:\.\d+)?)\s*%')
     _PERCENTAGE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*%')
-
-    # ── Shared-assumption resolver ───────────────────────────────────
-    @staticmethod
-    def _resolve_sa(sa: dict, candidates: list[str]) -> float | None:
-        """Return the first truthy numeric value from *sa* matching any candidate key.
-
-        Tries exact match first, then fuzzy substring match to handle
-        LLM-generated dynamic key names like 'hourly_engineering_labor_rate'.
-        """
-        if not sa:
-            return None
-        # 1. Exact match
-        for key in candidates:
-            raw = sa.get(key)
-            if raw:
-                try:
-                    val = float(raw)
-                    if val > 0:
-                        return val
-                except (ValueError, TypeError):
-                    continue
-        # 2. Fuzzy: check if any sa key contains a candidate substring or vice versa
-        for sa_key, raw in sa.items():
-            if sa_key.startswith("_"):
-                continue
-            sk = sa_key.lower()
-            for cand in candidates:
-                if cand in sk or sk in cand:
-                    try:
-                        val = float(raw)
-                        if val > 0:
-                            return val
-                    except (ValueError, TypeError):
-                        continue
-        # 3. Keyword match: find spend-like or rate-like keys
-        for sa_key, raw in sa.items():
-            if sa_key.startswith("_"):
-                continue
-            sk = sa_key.lower()
-            if ("labor" in sk or "hourly" in sk) and "rate" in sk:
-                if any("labor" in c or "rate" in c for c in candidates):
-                    try:
-                        return float(raw)
-                    except (ValueError, TypeError):
-                        pass
-            if "spend" in sk or ("cost" in sk and "current" in sk):
-                if any("spend" in c or "cost" in c for c in candidates):
-                    try:
-                        val = float(raw)
-                        if val > 1000:
-                            return val
-                    except (ValueError, TypeError):
-                        pass
-        return None
 
     # ── Current-state baseline ───────────────────────────────────────
     def _resolve_current_baseline(self, state: AgentState, azure_monthly: float) -> tuple[float, list[dict], bool]:
@@ -124,8 +83,7 @@ class ROIAgent:
         Returns (monthly_total, breakdown_items, is_estimated).
         *is_estimated* is True when the baseline is a rough proxy, not user data.
         """
-        sa = state.shared_assumptions or {}
-        sa_annual_spend = self._resolve_sa(sa, self._CURRENT_SPEND_KEYS)
+        sa_annual_spend = state.sa.current_annual_spend
 
         # ── Merge user assumptions from Cost + BV agents ─────────────
         assumptions_dict: dict = {}
@@ -149,7 +107,7 @@ class ROIAgent:
                     False)
 
         # Priority 2: detailed user inputs (employees, rate, hours)
-        sa_labor_rate = self._resolve_sa(sa, self._LABOR_RATE_KEYS)
+        sa_labor_rate = state.sa.hourly_labor_rate
         if sa_labor_rate and not hourly_rate:
             hourly_rate = sa_labor_rate
             has_any_input = True
@@ -182,61 +140,141 @@ class ROIAgent:
             return (total, breakdown, False)
 
         # Priority 3: estimated fallback — clearly labeled
-        estimated = round(azure_monthly * self.ESTIMATED_BASELINE_MULTIPLIER)
+        multiplier = self._estimate_baseline_multiplier(state)
+        estimated = round(azure_monthly * multiplier)
         return (estimated,
                 [{"label": "Operations (estimated)", "amount": round(estimated * 0.75)},
                  {"label": "Overhead (estimated)", "amount": round(estimated * 0.25)}],
                 True)
 
-    # ── Future-state (AI-assisted) monthly cost ──────────────────────
+    # ── Future-state cost model (pool-based reductions) ────────────────
+
+    # Keywords that identify which cost pool a driver targets
+    POOL_KEYWORDS: dict[str, list[str]] = {
+        "labor":   ["staff", "fte", "headcount", "personnel", "operations",
+                    "labor", "labour", "engineer", "developer", "productivity",
+                    "time saving", "manual", "automation"],
+        "tooling": ["tool", "license", "software", "saas", "subscription",
+                    "platform", "infra"],
+        "error":   ["error", "rework", "defect", "incident", "downtime",
+                    "outage", "failure", "bug", "quality"],
+    }
+
+    MAX_PER_ITEM_REDUCTION = 0.80  # no line item reduced by more than 80%
+
+    @classmethod
+    def _classify_driver_pool(cls, driver: dict) -> str | None:
+        """Classify a BV driver into a cost pool based on its name and metric."""
+        text = (str(driver.get("name", "")) + " " + str(driver.get("metric", ""))).lower()
+        for pool, keywords in cls.POOL_KEYWORDS.items():
+            if any(kw in text for kw in keywords):
+                return pool
+        return None  # general / blended — applies to all items
+
+    @classmethod
+    def _matches_pool(cls, label: str, pool: str | None) -> bool:
+        """Check if a breakdown item label matches a cost pool."""
+        if pool is None:
+            return True  # general pool matches everything
+        label_lower = label.lower()
+        keywords = cls.POOL_KEYWORDS.get(pool, [])
+        return any(kw in label_lower for kw in keywords)
+
     def _build_future_cost(self, azure_monthly: float,
                            current_breakdown: list[dict],
                            bv_drivers: list[dict],
                            assumptions_dict: dict) -> tuple[float, list[dict]]:
         """Build the monthly operating cost WITH the Azure solution.
 
+        Derives reductions from BV driver percentages (not hardcoded).
+        Applies reductions per cost pool with multiplicative accumulation
+        and an 80% per-item cap.
+
         Returns (monthly_total, breakdown_items).
         """
         ai_breakdown: list[dict] = [{"label": "Azure platform", "amount": azure_monthly}]
 
-        ai_coverage = self._extract_coverage_from_drivers(bv_drivers) or 0.25
+        # ── Accumulate per-pool reductions from cost_reduction drivers ─
+        pool_reductions: dict[str | None, float] = {}  # pool → cumulative reduction fraction
+        for d in bv_drivers:
+            if d.get("category") != "cost_reduction":
+                continue
+            low = d.get("impact_pct_low")
+            high = d.get("impact_pct_high")
+            if low is None or high is None:
+                continue
+            try:
+                mid_pct = (float(low) + float(high)) / 2 / 100
+            except (ValueError, TypeError):
+                continue
+            if mid_pct <= 0:
+                continue
 
+            pool = self._classify_driver_pool(d)
+            # Multiplicative: 1 - (1 - existing) * (1 - new)
+            existing = pool_reductions.get(pool, 0.0)
+            combined = 1 - (1 - existing) * (1 - mid_pct)
+            pool_reductions[pool] = min(combined, self.MAX_PER_ITEM_REDUCTION)
+
+        # ── Apply reductions to each breakdown item ───────────────────
         for item in current_breakdown:
-            label_lower = item["label"].lower()
-            if "labor" in label_lower or "operations" in label_lower:
-                reduced = round(item["amount"] * (1 - ai_coverage))
-                ai_breakdown.append({"label": "Staff labor (reduced)", "amount": reduced})
-            elif "error" in label_lower or "rework" in label_lower:
-                error_reduction = max(0, min(1, assumptions_dict.get("error_reduction", 50) / 100))
-                reduced = round(item["amount"] * (1 - error_reduction))
-                if reduced > 0:
-                    ai_breakdown.append({"label": "Errors & rework (reduced)", "amount": reduced})
-            elif "overhead" in label_lower or "it spend" in label_lower or "tool" in label_lower:
-                reduced = round(item["amount"] * 0.9)
-                ai_breakdown.append({"label": item["label"], "amount": reduced})
-            elif "user-provided" in label_lower:
-                labor_share = round(item["amount"] * 0.6 * (1 - ai_coverage))
-                overhead_share = round(item["amount"] * 0.4 * 0.9)
-                ai_breakdown.append({"label": "Staff labor (reduced)", "amount": labor_share})
-                ai_breakdown.append({"label": "Tools & overhead", "amount": overhead_share})
+            label = item["label"]
+
+            # Find the best matching pool reduction (specific > general)
+            reduction = 0.0
+            found_specific = False
+            for pool, pct in pool_reductions.items():
+                if pool is not None and self._matches_pool(label, pool):
+                    # Multiplicative combine if multiple specific pools match
+                    if not found_specific:
+                        reduction = pct
+                        found_specific = True
+                    else:
+                        reduction = 1 - (1 - reduction) * (1 - pct)
+
+            # Fall back to general pool if no specific match
+            if not found_specific and None in pool_reductions:
+                reduction = pool_reductions[None]
+
+            # Cap per-item reduction
+            reduction = min(reduction, self.MAX_PER_ITEM_REDUCTION)
+
+            if reduction > 0:
+                reduced = round(item["amount"] * (1 - reduction))
+                suffix = " (reduced)" if "reduced" not in label.lower() else ""
+                ai_breakdown.append({"label": f"{label}{suffix}", "amount": reduced})
+            else:
+                # No reduction — carry forward as-is
+                ai_breakdown.append({"label": label, "amount": item["amount"]})
 
         total = sum(i["amount"] for i in ai_breakdown)
         return (total, ai_breakdown)
 
     # ── Per-driver amount allocation ─────────────────────────────────
     def _compute_per_driver_amounts(self, drivers: list[dict], annual_value: float) -> list[float]:
-        """Distribute annual_value across drivers proportional to metric percentages."""
+        """Distribute annual_value across drivers proportional to impact percentages.
+
+        Uses structured impact_pct_low/high fields when available,
+        falls back to regex on metric string for backward compatibility.
+        """
         if not drivers:
             return []
 
         percentages: list[float] = []
         for d in drivers:
+            low = d.get("impact_pct_low")
+            high = d.get("impact_pct_high")
+            if low is not None and high is not None:
+                try:
+                    percentages.append((float(low) + float(high)) / 2)
+                    continue
+                except (ValueError, TypeError):
+                    pass
+            # Fallback: regex on metric string
             metric = d.get("metric", "")
             range_match = self._PERCENTAGE_RANGE_RE.search(metric)
             if range_match:
-                low = float(range_match.group(1))
-                high = float(range_match.group(2))
-                percentages.append((low + high) / 2)
+                percentages.append((float(range_match.group(1)) + float(range_match.group(2))) / 2)
             else:
                 single = self._PERCENTAGE_RE.search(metric)
                 percentages.append(float(single.group(1)) if single else 0.0)
@@ -253,14 +291,24 @@ class ROIAgent:
         return [equal] * len(drivers)
 
     def _extract_coverage_from_drivers(self, drivers: list[dict]) -> float | None:
-        """Extract an AI coverage percentage from BV driver metrics."""
+        """Extract an AI coverage percentage from BV driver metrics.
+
+        Uses structured impact_pct_low/high fields when available,
+        falls back to regex on metric string for backward compatibility.
+        """
         for driver in drivers:
+            low = driver.get("impact_pct_low")
+            high = driver.get("impact_pct_high")
+            if low is not None and high is not None:
+                try:
+                    return (float(low) + float(high)) / 2 / 100
+                except (ValueError, TypeError):
+                    continue
+            # Fallback: regex on metric string
             metric = driver.get("metric", "")
             range_match = self._PERCENTAGE_RANGE_RE.search(metric)
             if range_match:
-                low = float(range_match.group(1))
-                high = float(range_match.group(2))
-                return (low + high) / 2 / 100
+                return (float(range_match.group(1)) + float(range_match.group(2))) / 2 / 100
             single_match = self._PERCENTAGE_RE.search(metric)
             if single_match:
                 return float(single_match.group(1)) / 100
@@ -268,11 +316,13 @@ class ROIAgent:
 
     # ── Waterfall split ──────────────────────────────────────────────
     def _split_waterfall(self, bv_drivers: list[dict], driver_amounts: list[float],
-                         current_annual: float) -> tuple[list[dict], list[dict]]:
+                         current_annual: float) -> tuple[list[dict], list[dict], bool, float]:
         """Split driver amounts into cost-reduction and revenue-uplift waterfalls.
 
         Hard savings (cost reduction) are capped at the current annual baseline
         to prevent reporting savings that exceed the actual spend being displaced.
+
+        Returns (cost_items, uplift_items, savings_capped, savings_cap_pct).
         """
         cost_items: list[dict] = []
         uplift_items: list[dict] = []
@@ -285,29 +335,133 @@ class ROIAgent:
                 cost_items.append(item)
 
         # Guard: hard savings cannot exceed the current-state baseline
+        savings_capped = False
+        savings_cap_pct = 0.0
         raw_hard = sum(i["amount"] for i in cost_items)
         if current_annual > 0 and raw_hard > current_annual:
             scale = current_annual / raw_hard
             cost_items = [{"label": i["label"], "amount": round(i["amount"] * scale)}
                           for i in cost_items]
+            savings_capped = True
+            savings_cap_pct = round((1 - scale) * 100)
 
-        return cost_items, uplift_items
+        return cost_items, uplift_items, savings_capped, savings_cap_pct
 
     # ── Risk reduction ───────────────────────────────────────────────
     @staticmethod
     def _compute_risk_reduction(current_annual: float, hard_savings: float,
-                                revenue_uplift: float) -> tuple[float, str]:
+                                revenue_uplift: float,
+                                components: list[dict] | None = None) -> tuple[float, str]:
         """Return (risk_reduction_amount, methodology_note).
 
+        Risk factor scales based on security/compliance/HA components (2-7%).
         Only includes risk reduction when it's material (>5% of other value).
         """
-        risk_raw = round(current_annual * 0.03) if current_annual else 0
+        has_security = any(
+            any(kw in str(c).lower() for kw in ("security", "sentinel", "defender", "ddos", "firewall", "waf"))
+            for c in (components or [])
+        )
+        has_compliance = any(
+            any(kw in str(c).lower() for kw in ("compliance", "policy", "purview", "governance"))
+            for c in (components or [])
+        )
+        has_ha = any(
+            any(kw in str(c).lower() for kw in ("availability", "disaster", "recovery", "backup", "redundan"))
+            for c in (components or [])
+        )
+
+        risk_factor = 0.02
+        if has_security:
+            risk_factor += 0.02
+        if has_compliance:
+            risk_factor += 0.02
+        if has_ha:
+            risk_factor += 0.01
+        risk_factor = min(risk_factor, 0.07)
+
+        risk_raw = round(current_annual * risk_factor) if current_annual else 0
         preliminary = hard_savings + revenue_uplift
         if preliminary > 0 and risk_raw < preliminary * 0.05:
-            return (0, f"Risk reduction ({risk_raw:,.0f}) excluded as immaterial (<5% of total value).")
+            return (0, f"Risk reduction (${risk_raw:,}) excluded as immaterial (<5% of total value).")
         if risk_raw > 0:
-            return (risk_raw, "Risk reduction estimated at 3% of current annual spend.")
+            return (risk_raw, f"Risk reduction at {risk_factor * 100:.0f}% of current annual spend.")
         return (0, "")
+
+    # ── Cross-agent reconciliation (FRD-004 Fix H) ───────────────────
+    @staticmethod
+    def _validate_and_reconcile(
+        *,
+        val_mid: float,
+        annual_cost: float,
+        current_annual: float,
+        azure_annual: float,
+        hard_savings: float,
+        revenue_uplift: float,
+        is_estimated: bool,
+        bv_confidence: str,
+        bv_warnings: list[str],
+        savings_were_capped: bool,
+        savings_cap_pct: float,
+        monthly_revenue: float | None,
+        costs_used_fallback: bool = False,
+        bv_used_fallback: bool = False,
+    ) -> tuple[str, list[str]]:
+        """Run all plausibility checks.  Returns (adjusted_confidence, warnings)."""
+        warnings = list(bv_warnings)
+
+        # 1. Value-to-Azure-cost ratio
+        if annual_cost > 0:
+            ratio = val_mid / annual_cost
+            if ratio > 50:
+                warnings.append(
+                    f"Value (${val_mid:,.0f}) is {ratio:.0f}\u00d7 Azure cost. Unusually high."
+                )
+                bv_confidence = "low"
+            elif ratio > 20:
+                warnings.append(f"Value-to-cost ratio is {ratio:.0f}\u00d7. On the high end.")
+
+        # 2. Hard savings cap transparency
+        if savings_were_capped:
+            warnings.append(
+                f"Cost savings reduced by {savings_cap_pct:.0f}% to not exceed "
+                f"the current baseline. Original driver estimates were higher."
+            )
+
+        # 3. Revenue uplift vs stated revenue
+        if monthly_revenue and monthly_revenue > 0:
+            annual_revenue = monthly_revenue * 12
+            if revenue_uplift > annual_revenue * 0.5:
+                warnings.append(
+                    f"Revenue uplift (${revenue_uplift:,.0f}) is "
+                    f">{revenue_uplift / annual_revenue * 100:.0f}% of stated revenue."
+                )
+
+        # 4. Accounting identity: components should sum to ~midpoint
+        component_sum = hard_savings + revenue_uplift
+        if val_mid > 0 and abs(component_sum - val_mid) > val_mid * 0.15:
+            warnings.append(
+                f"Driver sum (${component_sum:,.0f}) differs from impact midpoint "
+                f"(${val_mid:,.0f}) by {abs(component_sum - val_mid) / val_mid * 100:.0f}%."
+            )
+
+        # 5. Cost-reduction-only: Azure shouldn't exceed current
+        if revenue_uplift == 0 and not is_estimated and current_annual > 0:
+            if azure_annual > current_annual:
+                warnings.append(
+                    f"Azure cost (${azure_annual:,.0f}/yr) > current cost "
+                    f"(${current_annual:,.0f}/yr) with no revenue uplift."
+                )
+
+        # 6. Fallback data detection (FRD-008)
+        if costs_used_fallback or bv_used_fallback:
+            warnings.append("One or more agents used fallback data due to errors.")
+            bv_confidence = "low"
+
+        # Adjust confidence
+        if warnings and bv_confidence != "low":
+            bv_confidence = "low" if len(warnings) >= 2 else "moderate"
+
+        return bv_confidence, warnings
 
     # ── Main entry point ─────────────────────────────────────────────
     def run(self, state: AgentState) -> AgentState:
@@ -348,17 +502,6 @@ class ROIAgent:
 
         # ── Core ROI math ────────────────────────────────────────────
         val_mid = (val_low + val_high) / 2
-        roi_low = ((val_low - annual_cost) / annual_cost) * 100
-        roi_high = ((val_high - annual_cost) / annual_cost) * 100
-        roi_mid = ((val_mid - annual_cost) / annual_cost) * 100
-
-        payback_months = round((annual_cost * 12 / val_mid), 1) if val_mid > 0 else None
-        if payback_months is not None:
-            payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
-            payback_months = round(payback_months, 1)
-
-        roi_capped = roi_mid > self.MAX_DISPLAY_ROI
-        roi_display = min(roi_mid, self.MAX_DISPLAY_ROI)
 
         # ── Resolve current-state baseline ───────────────────────────
         azure_monthly = round(state.costs.get("estimate", {}).get("totalMonthly", 0))
@@ -373,31 +516,86 @@ class ROIAgent:
                 if isinstance(a, dict) and "id" in a:
                     assumptions_dict[a["id"]] = a["value"]
 
-        # ── Future-state monthly cost ────────────────────────────────
+        # ── Future-state monthly cost (must run before ROI formula) ──
         future_monthly, ai_breakdown = self._build_future_cost(
             azure_monthly, current_breakdown, drivers, assumptions_dict)
+        future_annual = future_monthly * 12
 
         monthly_savings = round(current_monthly - future_monthly)
 
+        # ── Investment ───────────────────────────────────────────────
+        azure_annual = azure_monthly * 12
+        timeline_months = state.sa.timeline_months or 0
+        impl_cost = round(azure_monthly * timeline_months) if timeline_months > 0 else round(azure_annual * 0.5)
+        change_cost = round(impl_cost * 0.10)
+        year1_total_cost = round(future_annual + impl_cost + change_cost)
+        year2_run_rate = round(azure_annual)
+        year1_investment = year1_total_cost  # alias for backward compat
+
+        # ── ROI: Year 1 (includes impl+change) and run-rate ─────────
+        if year1_total_cost > 0:
+            roi_year1 = ((val_mid - year1_total_cost) / year1_total_cost) * 100
+        else:
+            roi_year1 = 0.0
+
+        if future_annual > 0:
+            roi_run_rate = ((val_mid - future_annual) / future_annual) * 100
+        else:
+            roi_run_rate = 0.0
+
+        # Headline = Year 1 (conservative)
+        roi_mid = roi_year1
+        roi_low = ((val_low - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0.0
+        roi_high = ((val_high - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0.0
+
+        # Payback against full Year 1 cost
+        payback_months = round((year1_total_cost / val_mid) * 12, 1) if val_mid > 0 else None
+        if payback_months is not None:
+            payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
+            payback_months = round(payback_months, 1)
+
+        roi_capped = roi_mid > self.MAX_DISPLAY_ROI
+        roi_display = min(roi_mid, self.MAX_DISPLAY_ROI)
+
         # ── Driver amounts & waterfall ───────────────────────────────
         driver_amounts = self._compute_per_driver_amounts(drivers, val_mid)
-        waterfall_cost, waterfall_uplift = self._split_waterfall(
+
+        # Verify driver amounts sum ≈ midpoint (FRD-003 FR-003-004)
+        actual_sum = sum(driver_amounts)
+        if val_mid > 0 and abs(actual_sum - val_mid) > val_mid * 0.1:
+            logger.warning(
+                "Driver amounts sum ($%s) diverges from midpoint ($%s) by %.0f%%",
+                f"{actual_sum:,.0f}", f"{val_mid:,.0f}",
+                abs(actual_sum - val_mid) / val_mid * 100,
+            )
+
+        waterfall_cost, waterfall_uplift, savings_capped, savings_cap_pct = self._split_waterfall(
             drivers, driver_amounts, current_annual)
 
         hard_savings = sum(i["amount"] for i in waterfall_cost)
         revenue_uplift = sum(i["amount"] for i in waterfall_uplift)
 
         risk_reduction, risk_note = self._compute_risk_reduction(
-            current_annual, hard_savings, revenue_uplift)
+            current_annual, hard_savings, revenue_uplift,
+            components=state.architecture.get("components"))
 
-        # ── Investment ───────────────────────────────────────────────
-        azure_annual = azure_monthly * 12
-        sa = state.shared_assumptions or {}
-        timeline_months = sa.get("timeline_months", 0)
-        impl_cost = round(azure_monthly * timeline_months) if timeline_months is not None and timeline_months > 0 else round(azure_annual * 0.5)
-        change_cost = round(impl_cost * 0.10)
-        year1_investment = round(azure_annual + impl_cost + change_cost)
-        year2_run_rate = round(azure_annual)
+        # ── Cross-agent reconciliation (FRD-004) ─────────────────────
+        adjusted_confidence, plausibility_warnings = self._validate_and_reconcile(
+            val_mid=val_mid,
+            annual_cost=annual_cost,
+            current_annual=current_annual,
+            azure_annual=azure_annual,
+            hard_savings=hard_savings,
+            revenue_uplift=revenue_uplift,
+            is_estimated=is_estimated,
+            bv_confidence=bv.get("confidence", "moderate"),
+            bv_warnings=bv.get("consistency_warnings", []),
+            savings_were_capped=savings_capped,
+            savings_cap_pct=savings_cap_pct,
+            monthly_revenue=state.sa.monthly_revenue,
+            costs_used_fallback=state.costs.get("_used_fallback", False),
+            bv_used_fallback=bv.get("_used_fallback", False),
+        )
 
         # ── Build dashboard (the frontend contract) ──────────────────
         dashboard = self._build_dashboard(
@@ -405,12 +603,15 @@ class ROIAgent:
             annual_cost=annual_cost,
             annual_value=val_mid,
             roi_percent=round(roi_mid, 1),
+            roi_year1=round(roi_year1, 1),
+            roi_run_rate=round(roi_run_rate, 1),
             payback_months=payback_months,
             roi_capped=roi_capped,
             is_estimated=is_estimated,
             current_monthly=current_monthly,
             current_breakdown=current_breakdown,
             future_monthly=future_monthly,
+            future_annual=future_annual,
             ai_breakdown=ai_breakdown,
             monthly_savings=monthly_savings,
             waterfall_cost=waterfall_cost,
@@ -420,11 +621,15 @@ class ROIAgent:
             risk_reduction=risk_reduction,
             risk_note=risk_note,
             year1_investment=year1_investment,
+            year1_total_cost=year1_total_cost,
             year2_run_rate=year2_run_rate,
             impl_cost=impl_cost,
             change_cost=change_cost,
             assumptions_dict=assumptions_dict,
             driver_amounts=driver_amounts,
+            adjusted_confidence=adjusted_confidence,
+            plausibility_warnings=plausibility_warnings,
+            savings_capped=savings_capped,
         )
 
         state.roi = {
@@ -440,8 +645,12 @@ class ROIAgent:
             "revenue_uplift": round(revenue_uplift),
             "risk_reduction": round(risk_reduction),
             "year1_investment": year1_investment,
+            "year1_total_cost": year1_total_cost,
             "year2_run_rate": year2_run_rate,
+            "future_annual_opex": round(future_annual),
             "roi_percent": round(roi_mid, 1),
+            "roi_year1": round(roi_year1, 1),
+            "roi_run_rate": round(roi_run_rate, 1),
             "roi_percent_display": round(roi_display, 1),
             "roi_capped": roi_capped,
             "roi_range": f"{roi_low:.0f}\u2013{roi_high:.0f}%",
@@ -465,12 +674,15 @@ class ROIAgent:
         annual_cost: float,
         annual_value: float,
         roi_percent: float | None,
+        roi_year1: float | None,
+        roi_run_rate: float | None,
         payback_months: float | None,
         roi_capped: bool,
         is_estimated: bool,
         current_monthly: float,
         current_breakdown: list[dict],
         future_monthly: float,
+        future_annual: float,
         ai_breakdown: list[dict],
         monthly_savings: int,
         waterfall_cost: list[dict],
@@ -480,11 +692,15 @@ class ROIAgent:
         risk_reduction: float,
         risk_note: str,
         year1_investment: float,
+        year1_total_cost: float,
         year2_run_rate: float,
         impl_cost: float,
         change_cost: float,
         assumptions_dict: dict,
         driver_amounts: list[float],
+        adjusted_confidence: str,
+        plausibility_warnings: list[str],
+        savings_capped: bool,
     ) -> dict:
         """Build the frontend ROIDashboardData blob.
 
@@ -537,10 +753,11 @@ class ROIAgent:
 
         # ── 3-year projection ────────────────────────────────────────
         annual_total_value = hard_savings + revenue_uplift + risk_reduction
+        adoption_ramp = self._select_adoption_ramp(state)
 
         projection = {
             "years": [1, 2, 3],
-            "adoptionRamp": [f"{int(r * 100)}%" for r in self.ADOPTION_RAMP],
+            "adoptionRamp": [f"{int(r * 100)}%" for r in adoption_ramp],
             "annualAzureCost": round(azure_annual),
             "annualCostReduction": round(hard_savings),
             "annualRevenueUplift": round(revenue_uplift),
@@ -548,11 +765,11 @@ class ROIAgent:
             "cumulative": [
                 {
                     "year": yr + 1,
-                    "adoption": f"{int(self.ADOPTION_RAMP[yr] * 100)}%",
+                    "adoption": f"{int(adoption_ramp[yr] * 100)}%",
                     "azureCost": round(azure_annual * (yr + 1)),
-                    "totalValue": round(annual_total_value * sum(self.ADOPTION_RAMP[:yr + 1])),
+                    "totalValue": round(annual_total_value * sum(adoption_ramp[:yr + 1])),
                     "netValue": round(
-                        annual_total_value * sum(self.ADOPTION_RAMP[:yr + 1])
+                        annual_total_value * sum(adoption_ramp[:yr + 1])
                         - azure_annual * (yr + 1)
                     ),
                 }
@@ -580,7 +797,7 @@ class ROIAgent:
         )
 
         methodology = f"Azure costs based on {service_count} services ({cost_source} pricing). "
-        sa_annual_spend = self._resolve_sa(state.shared_assumptions or {}, self._CURRENT_SPEND_KEYS)
+        sa_annual_spend = state.sa.current_annual_spend
         if sa_annual_spend:
             methodology += (
                 f"Current operational cost from user-provided baseline "
@@ -597,9 +814,9 @@ class ROIAgent:
             methodology += f"Current operational costs derived from {assumption_note}. "
         methodology += (
             driver_note
-            + "Projection assumes 50/85/100% adoption ramp over 3 years. "
-            + "One-time implementation costs excluded from monthly comparison. "
-            + "ROI = (Annual Value \u2212 Annual Cost) \u00f7 Annual Cost \u00d7 100."
+            + f"Projection assumes {'/'.join(f'{int(r*100)}' for r in adoption_ramp)}% adoption ramp over 3 years. "
+            + "Year 1 ROI includes implementation and change management costs. "
+            + "Run-rate ROI = (Annual Value \u2212 Total Future Opex) \u00f7 Total Future Opex \u00d7 100."
         )
         if risk_note:
             methodology += " " + risk_note
@@ -624,12 +841,14 @@ class ROIAgent:
         business_case = self._build_business_case(
             current_annual=current_annual,
             azure_annual=azure_annual,
+            future_annual=future_annual,
             hard_savings=hard_savings,
             revenue_uplift=revenue_uplift,
             risk_reduction=risk_reduction,
             impl_cost=impl_cost,
             change_cost=change_cost,
             year1_investment=year1_investment,
+            year1_total_cost=year1_total_cost,
             year2_run_rate=year2_run_rate,
             bv_drivers=bv_drivers,
             is_estimated=is_estimated,
@@ -664,10 +883,13 @@ class ROIAgent:
                 "breakdown": ai_breakdown,
             },
             "roiPercent": roi_percent,
+            "roiYear1": roi_year1,
+            "roiRunRate": roi_run_rate,
             "roiCapped": roi_capped,
             "roiDisplayText": roi_display_text,
             "confidenceLevel": bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
+            "futureAnnualOpex": round(future_annual),
             "drivers": display_drivers,
             "valueWaterfall": value_waterfall,
             "projection": projection,
@@ -680,6 +902,15 @@ class ROIAgent:
             dashboard["warning"] = (
                 "Current cost estimated \u2014 provide actual figures for accurate ROI"
             )
+            # Suppress cost comparison when baseline is estimated (FRD-002)
+            dashboard["monthlySavings"] = None
+            dashboard["savingsPercentage"] = None
+
+        # ── Reconciliation results (FRD-004) ─────────────────────────
+        dashboard["confidenceLevel"] = adjusted_confidence
+        dashboard["plausibilityWarnings"] = plausibility_warnings
+        if savings_capped:
+            dashboard["savingsCapped"] = True
 
         return dashboard
 
@@ -689,12 +920,14 @@ class ROIAgent:
         *,
         current_annual: float,
         azure_annual: float,
+        future_annual: float,
         hard_savings: float,
         revenue_uplift: float,
         risk_reduction: float,
         impl_cost: float,
         change_cost: float,
         year1_investment: float,
+        year1_total_cost: float,
         year2_run_rate: float,
         bv_drivers: list[dict],
         is_estimated: bool,
@@ -747,6 +980,7 @@ class ROIAgent:
             "azurePlatformAnnual": round(azure_annual),
             "implementationCost": impl_cost,
             "changeCost": change_cost,
+            "futureAnnualOpex": round(future_annual),
         }
 
         # ── valueBridge ──────────────────────────────────────────────
@@ -754,7 +988,6 @@ class ROIAgent:
 
         value_bridge = {
             "hardSavings": round(hard_savings),
-            "productivityGains": 0,  # folded into hard_savings to avoid double-counting
             "revenueUplift": round(revenue_uplift),
             "riskReduction": round(risk_reduction),
             "totalAnnualValue": total_annual_value,
@@ -772,14 +1005,19 @@ class ROIAgent:
         sensitivity = []
         for pct, label in [(0.5, "50%"), (0.75, "75%"), (1.0, "100%")]:
             adj_value = total_annual_value * pct
-            adj_roi = ((adj_value - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0
-            adj_payback = round(azure_annual * 12 / adj_value, 1) if adj_value > 0 else None
+            # Year 1 ROI uses year1_total_cost (includes impl + change)
+            adj_roi_y1 = ((adj_value - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0
+            # Run-rate ROI uses future_annual (ongoing opex only)
+            adj_roi_rr = ((adj_value - future_annual) / future_annual * 100) if future_annual > 0 else 0
+            adj_payback = round(year1_total_cost / adj_value * 12, 1) if adj_value > 0 else None
             if adj_payback is not None and adj_payback > self.MAX_PAYBACK_MONTHS:
                 adj_payback = self.MAX_PAYBACK_MONTHS
             sensitivity.append({
                 "adoption": label,
                 "annualValue": round(adj_value),
-                "roi": round(adj_roi, 1),
+                "roi": round(adj_roi_y1, 1),
+                "roiYear1": round(adj_roi_y1, 1),
+                "roiRunRate": round(adj_roi_rr, 1),
                 "paybackMonths": adj_payback,
             })
 

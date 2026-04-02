@@ -13,6 +13,7 @@ import re
 
 from agents.llm import llm
 from agents.state import AgentState
+from agents.assumption_catalog import filter_already_answered
 from services.pricing import query_azure_pricing_sync
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,13 @@ HOURLY_SERVICES = {
     "Azure Cache for Redis",
     "Azure Container Apps",
     "Azure Kubernetes Service",
+}
+
+# ── Multi-region overhead by HA pattern (FRD-006 Fix M) ──────────────
+MULTI_REGION_OVERHEAD: dict[str, float] = {
+    "active-active": 0.50,
+    "active-passive": 0.30,
+    "default": 0.40,
 }
 
 
@@ -145,17 +153,18 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
 
             assumptions = json.loads(text)
             if isinstance(assumptions, list) and len(assumptions) > 0:
-                return assumptions[:5]
+                return filter_already_answered(assumptions[:5], state)
         except Exception:
             pass
 
         # Fallback generic usage questions
-        return [
+        fallback = [
             {"id": "concurrent_users", "label": "Expected concurrent users", "unit": "count", "default": 500, "hint": "Drives compute and scaling tier selection"},
             {"id": "requests_per_day", "label": "API requests per day", "unit": "count", "default": 10000, "hint": "Affects API Management, Functions, and App Service costs"},
             {"id": "data_storage_gb", "label": "Total data storage needed", "unit": "GB", "default": 100, "hint": "Drives storage, database, and backup costs"},
             {"id": "ai_calls_per_day", "label": "AI/ML inference calls per day", "unit": "count", "default": 5000, "hint": "Affects Azure OpenAI, Cognitive Services costs"},
         ]
+        return filter_already_answered(fallback, state)
 
     def run(self, state: AgentState) -> AgentState:
         """Two-phase cost estimation.
@@ -183,22 +192,22 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         usage_dict = {a.get("id", ""): a.get("value", 0) for a in user_assumptions if a.get("id")}
 
         # Use shared assumptions as authoritative baseline
-        sa = state.shared_assumptions
-        if sa:
-            if not usage_dict.get("concurrent_users") and sa.get("concurrent_users"):
-                usage_dict["concurrent_users"] = sa["concurrent_users"]
-            if not usage_dict.get("total_users") and sa.get("total_users"):
-                usage_dict["total_users"] = sa["total_users"]
-            if not usage_dict.get("data_storage_gb") and sa.get("data_volume_gb"):
-                usage_dict["data_storage_gb"] = sa["data_volume_gb"]
+        typed = state.sa
+        if typed.concurrent_users and not usage_dict.get("concurrent_users"):
+            usage_dict["concurrent_users"] = typed.concurrent_users
+        if typed.total_users and not usage_dict.get("total_users"):
+            usage_dict["total_users"] = typed.total_users
+        if typed.data_volume_gb and not usage_dict.get("data_storage_gb"):
+            usage_dict["data_storage_gb"] = typed.data_volume_gb
 
         users = usage_dict.get("concurrent_users",
-            sa.get("concurrent_users", sa.get("total_users", _extract_users(full_text))) if sa else _extract_users(full_text))
+            typed.concurrent_users or typed.total_users or _extract_users(full_text))
         regions = _extract_regions(full_text)
         primary_region = regions[0]
         industry = state.brainstorming.get("industry", "Cross-Industry")
 
         # ── Step 1: LLM maps components → Azure services + SKUs ──────
+        self._last_mapping_fallback = False
         selections = self._llm_map_services(components, users, primary_region, industry, state, usage_dict)
 
         # ── Step 2: Pricing API — validate SKUs + get prices ─────────
@@ -208,19 +217,21 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         selections = _handle_multi_region(selections, regions)
 
         if len(regions) > 1:
-            # Multi-region overhead: 40% accounts for data replication, cross-region networking,
-            # and secondary region compute. Adjust via user assumptions for specific scenarios.
-            overhead = sum(item.get("monthlyCost", 0) for item in items) * 0.4
+            # Multi-region overhead based on HA pattern (FRD-006 Fix M)
+            ha_pattern = selections[0].get("haPattern", "default") if selections else "default"
+            overhead_pct = MULTI_REGION_OVERHEAD.get(ha_pattern, 0.40)
+            overhead = sum(item.get("monthlyCost", 0) for item in items) * overhead_pct
             overhead = round(overhead, 2)
             items.append({
                 "serviceName": "Multi-region replication overhead",
                 "sku": "Estimated",
                 "region": f"{regions[0]} + {regions[1]}",
                 "monthlyCost": overhead,
-                "pricingNote": "Estimated 30-50% uplift for multi-region deployment",
+                "pricingNote": f"Estimated {overhead_pct * 100:.0f}% uplift for {ha_pattern} deployment",
             })
             assumptions.append(
-                "Multi-region overhead estimated at 40% (replication + networking + secondary compute)"
+                f"Multi-region overhead estimated at {overhead_pct * 100:.0f}% "
+                f"({ha_pattern} pattern: replication + networking + secondary compute)"
             )
 
         # Add user-provided usage context to assumptions
@@ -258,6 +269,26 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
             },
             "user_assumptions": user_assumptions,
         }
+
+        # Flag fallback usage for downstream detection (FRD-008)
+        if self._last_mapping_fallback:
+            state.costs["_used_fallback"] = True
+
+        # ── Plausibility check vs current baseline (FRD-004 Fix G) ───
+        current_spend = state.sa.current_annual_spend
+        if current_spend and current_spend > 0 and total_annual > 0:
+            ratio = total_annual / current_spend
+            if ratio > 2.0:
+                assumptions.append(
+                    f"\u26a0\ufe0f Azure estimate (${total_annual:,.0f}/yr) exceeds current spend "
+                    f"(${current_spend:,.0f}/yr) by {ratio:.1f}\u00d7. Verify sizing."
+                )
+            elif ratio < 0.03:
+                assumptions.append(
+                    f"\u2139\ufe0f Azure estimate (${total_annual:,.0f}/yr) is {ratio * 100:.1f}% of "
+                    f"current spend (${current_spend:,.0f}/yr). Confirm scope replacement."
+                )
+
         return state
 
     # ── LLM Service Mapping ──────────────────────────────────────────
@@ -335,15 +366,30 @@ Return ONLY valid JSON (no markdown fences) as an array:
             if not isinstance(selections, list):
                 raise ValueError("Expected JSON array")
 
-        except Exception:
-            logger.exception("LLM-based SKU mapping failed — using component pass-through")
+        except json.JSONDecodeError as e:
+            logger.error("LLM returned invalid JSON for SKU mapping: %s", e, exc_info=True)
+            self._last_mapping_fallback = True
             selections = [
                 {
                     "componentName": c.get("name", "Unknown"),
                     "serviceName": c.get("azureService", c.get("name", "Unknown")),
                     "sku": "Standard",
                     "capabilities": ["Managed service", "High availability"],
-                    "skuNote": "⚠️ LLM mapping failed — using default SKU",
+                    "skuNote": "\u26a0\ufe0f LLM returned invalid JSON \u2014 using default SKU",
+                }
+                for c in components
+            ]
+
+        except Exception as e:
+            logger.error("LLM-based SKU mapping failed: %s", e, exc_info=True)
+            self._last_mapping_fallback = True
+            selections = [
+                {
+                    "componentName": c.get("name", "Unknown"),
+                    "serviceName": c.get("azureService", c.get("name", "Unknown")),
+                    "sku": "Standard",
+                    "capabilities": ["Managed service", "High availability"],
+                    "skuNote": "\u26a0\ufe0f LLM mapping failed \u2014 using default SKU",
                 }
                 for c in components
             ]
@@ -359,48 +405,73 @@ Return ONLY valid JSON (no markdown fences) as an array:
     def _price_selections(
         self, selections: list[dict], users: int, usage_dict: dict | None = None,
     ) -> tuple[list[dict], str, list[str]]:
-        """Query pricing API for each selection, compute monthly cost."""
+        """Query pricing API for each selection, compute monthly cost.
+
+        Uses parallel pricing with session cache (FRD-006 Fix K).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         items: list[dict] = []
         assumptions = [
             "Based on 730 hours/month for hourly-priced services",
             "Pay-as-you-go pricing (no reservations or savings plans)",
         ]
         source_counts: dict[str, int] = {}
-        source_priority = {"live": 0, "live-fallback": 1, "estimated": 2, "unavailable": 3}
+        price_cache: dict[tuple, dict] = {}
 
-        # TODO: Parallelize pricing lookups with concurrent.futures.ThreadPoolExecutor
-        # Current: sequential calls, ~10s timeout each → 100s worst case for 10 services
-        # Improvement: concurrent calls → ~10s worst case for 10 services
-        for sel in selections:
+        def _price_one(sel: dict) -> tuple[dict, dict] | None:
             service_name = sel.get("serviceName", "")
             sku = sel.get("sku", "")
             region = sel.get("region", "eastus")
-
             if service_name == "Multi-region overhead":
-                continue
-
+                return None
+            cache_key = (service_name, sku, region)
+            if cache_key in price_cache:
+                return (sel, price_cache[cache_key])
             result = query_azure_pricing_sync(service_name, sku, region)
+            price_cache[cache_key] = result
+            return (sel, result)
+
+        # Parallel pricing with max 5 concurrent API calls
+        results_list: list[tuple[dict, dict]] = []
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = {pool.submit(_price_one, sel): sel for sel in selections}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        results_list.append(result)
+                except Exception as e:
+                    sel = futures[future]
+                    logger.warning("Pricing failed for %s: %s", sel.get("serviceName"), e)
+
+        # Process results (maintain original ordering)
+        sel_order = {id(sel): idx for idx, sel in enumerate(selections)}
+        results_list.sort(key=lambda r: sel_order.get(id(r[0]), 0))
+
+        for sel, result in results_list:
+            service_name = sel.get("serviceName", "")
+            sku = sel.get("sku", "")
+            region = sel.get("region", "eastus")
             price = result["price"]
             source = result["source"]
             note = result.get("note")
             unit = result.get("unit", "1 Hour")
 
-            # Attach validation warning to the selection if SKU wasn't live-confirmed
             if source not in ("live", "live-fallback"):
                 existing_note = sel.get("skuNote") or ""
-                warning = note or f"⚠️ Could not validate SKU for {service_name}"
+                warning = note or f"\u26a0\ufe0f Could not validate SKU for {service_name}"
                 sel["skuNote"] = f"{existing_note}. {warning}".strip(". ") if existing_note else warning
 
             monthly = self._calculate_monthly(price, unit, service_name, users, usage_dict)
             monthly = self._apply_instance_count(monthly, sku)
 
-            # Tag $0 items so downstream rendering explains the zero
             cost_note = note
             if monthly == 0:
-                cost_note = "Usage-dependent — placeholder estimate (actual cost varies with consumption)"
+                cost_note = "Usage-dependent \u2014 placeholder estimate (actual cost varies with consumption)"
                 consumption = CONSUMPTION_ASSUMPTIONS.get(service_name)
                 if consumption:
-                    cost_note = f"Usage-dependent ({consumption}) — placeholder estimate"
+                    cost_note = f"Usage-dependent ({consumption}) \u2014 placeholder estimate"
 
             items.append({
                 "serviceName": service_name,
@@ -478,7 +549,9 @@ Return ONLY valid JSON (no markdown fences) as an array:
         elif "10k" in unit_lower or "10,000" in unit_lower:
             return unit_price * 1
         else:
-            return unit_price * 730
+            # Unknown unit: treat as monthly (safer than hourly × 730)
+            logger.warning("Unknown pricing unit '%s' for %s — treating as monthly", unit, service_name)
+            return unit_price
 
     def _apply_instance_count(self, monthly_cost: float, sku: str) -> float:
         """Multiply cost by instance count if SKU specifies nodes."""
