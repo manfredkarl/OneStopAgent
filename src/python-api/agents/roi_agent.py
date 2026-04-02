@@ -100,27 +100,33 @@ class ROIAgent:
         has_any_input = bool(employees or hourly_rate or manual_hours or monthly_it_spend)
 
         # Priority 1: explicit annual spend from shared assumptions
-        # Enrich with labor pool when employees + rate are known, so the
-        # baseline reflects the FULL domain being optimized (people + tools)
+        # User-stated spend is the CEILING — total baseline never exceeds it.
+        # Use affected_employees (not total_users) for labor math.
         if sa_annual_spend:
-            monthly_tools = sa_annual_spend / 12
+            monthly_ceiling = sa_annual_spend / 12
             sa_labor_rate = state.sa.hourly_labor_rate
-            sa_users = state.sa.total_users
+            sa_employees = state.sa.affected_employees
 
-            # If we know the labor pool, build a multi-line baseline
-            if sa_users and sa_labor_rate:
-                users = int(sa_users)
-                rate = sa_labor_rate
+            if sa_employees and sa_labor_rate:
                 hours = assumptions_dict.get("manual_hours", 20)
-                monthly_labor = round(users * rate * hours * 4.33)
-                return (monthly_tools + monthly_labor,
-                        [{"label": "Staff labor", "amount": monthly_labor},
-                         {"label": "Tools & platform spend", "amount": round(monthly_tools)}],
+                monthly_labor = round(sa_employees * sa_labor_rate * hours * 4.33)
+                # Labor is one component — tools/platform is the remainder.
+                # But total can never exceed the user's stated spend.
+                if monthly_labor >= monthly_ceiling:
+                    # Labor alone exceeds stated spend — apportion proportionally
+                    labor_share = round(monthly_ceiling * 0.7)
+                    tools_share = round(monthly_ceiling * 0.3)
+                else:
+                    labor_share = monthly_labor
+                    tools_share = round(monthly_ceiling - monthly_labor)
+                return (monthly_ceiling,
+                        [{"label": "Staff labor", "amount": labor_share},
+                         {"label": "Tools & platform spend", "amount": tools_share}],
                         False)
 
-            # Otherwise use the single lump
-            return (monthly_tools,
-                    [{"label": "Current operations (user-provided)", "amount": round(monthly_tools)}],
+            # No labor data — use single lump
+            return (monthly_ceiling,
+                    [{"label": "Current operations (user-provided)", "amount": round(monthly_ceiling)}],
                     False)
 
         # Priority 2: detailed user inputs (employees, rate, hours)
@@ -614,6 +620,21 @@ class ROIAgent:
         # This is what we're actually claiming — NOT the raw BV estimate.
         # Ensures headline, ROI, payback, and waterfall all match.
         total_annual_value = hard_savings + revenue_uplift + risk_reduction
+
+        # Clamp to BV's validated range — the waterfall components can't
+        # exceed what the BV agent determined was credible
+        bv_range_high = float(impact_range.get("high", 0)) if impact_range else 0
+        if bv_range_high > 0 and total_annual_value > bv_range_high:
+            scale = bv_range_high / total_annual_value
+            hard_savings = round(hard_savings * scale)
+            revenue_uplift = round(revenue_uplift * scale)
+            risk_reduction = round(risk_reduction * scale)
+            total_annual_value = hard_savings + revenue_uplift + risk_reduction
+            logger.info(
+                "Total value ($%s) clamped to BV range high ($%s), scale=%.2f",
+                f"{(hard_savings + revenue_uplift + risk_reduction) / scale:,.0f}",
+                f"{bv_range_high:,.0f}", scale,
+            )
 
         # ── Adoption ramp (needed for ROI, payback, and projection) ──
         adoption_ramp = self._select_adoption_ramp(state)
