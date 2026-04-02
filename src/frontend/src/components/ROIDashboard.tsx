@@ -89,7 +89,7 @@ interface Props {
 /* ── Helpers ─────────────────────────────────────────────────── */
 
 function fmt(n: number): string {
-  return n.toLocaleString();
+  return n.toLocaleString('en-US');
 }
 
 function ConfidenceBadge({ level }: { level: 'high' | 'moderate' | 'low' }) {

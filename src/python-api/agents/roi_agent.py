@@ -835,6 +835,8 @@ class ROIAgent:
                 "category": d.get("category", "cost_reduction"),
                 "annualImpact": capped_amounts.get(d.get("name", ""), driver_amounts[idx]),
                 "methodology": d.get("description", ""),
+                "source_name": d.get("source_name", ""),
+                "source_url": d.get("source_url", ""),
             }
             for idx, d in enumerate(bv_drivers)
         ]
