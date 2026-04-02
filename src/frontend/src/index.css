@@ -135,6 +135,41 @@ body {
   margin: 1rem 0;
 }
 
+/* ── Collapsible sections ──────────────────────────────── */
+.collapsible-section {
+  border: 1px solid var(--border-light);
+  border-radius: 0.75rem;
+  margin: 0.75rem 0;
+  overflow: hidden;
+}
+.collapsible-summary {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.collapsible-summary::before {
+  content: '▸';
+  font-size: 0.75rem;
+  transition: transform 0.15s ease;
+  color: var(--text-muted);
+}
+.collapsible-section[open] .collapsible-summary::before {
+  transform: rotate(90deg);
+}
+.collapsible-summary::-webkit-details-marker { display: none; }
+.collapsible-body {
+  padding: 0.5rem 0.75rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
 /* ── Transitions ────────────────────────────────────────── */
 .transition-default { transition: all var(--transition); }
 

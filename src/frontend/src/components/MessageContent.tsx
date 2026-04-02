@@ -9,6 +9,27 @@ interface Props {
 // Configure marked for safe rendering
 marked.setOptions({ breaks: true, gfm: true });
 
+// Sections that should be collapsible — matched by heading text
+const COLLAPSIBLE_HEADINGS = [
+  'assumptions', 'assumption', 'value drivers contributing',
+  'methodology', 'sources', 'references',
+];
+
+function wrapCollapsibleSections(html: string): string {
+  // Find h3 headings that match collapsible patterns and wrap their content
+  // in <details><summary> until the next heading of equal or higher level
+  return html.replace(
+    /(<h[23][^>]*>)(.*?)(<\/h[23]>)([\s\S]*?)(?=<h[1-3]|$)/gi,
+    (_match, openTag, headingText, closeTag, content) => {
+      const text = headingText.replace(/<[^>]*>/g, '').trim().toLowerCase();
+      if (COLLAPSIBLE_HEADINGS.some(h => text.includes(h)) && content.trim().length > 50) {
+        return `<details class="collapsible-section"><summary class="collapsible-summary">${headingText}</summary><div class="collapsible-body">${content}</div></details>`;
+      }
+      return `${openTag}${headingText}${closeTag}${content}`;
+    }
+  );
+}
+
 export default function MessageContent({ content }: Props) {
   const rendered = useMemo(() => {
     // Split out mermaid blocks before markdown processing
@@ -50,7 +71,7 @@ export default function MessageContent({ content }: Props) {
           <div
             key={i}
             className="prose-content"
-            dangerouslySetInnerHTML={{ __html: marked.parse(part.value) as string }}
+            dangerouslySetInnerHTML={{ __html: wrapCollapsibleSections(marked.parse(part.value) as string) }}
           />
         )
       )}
