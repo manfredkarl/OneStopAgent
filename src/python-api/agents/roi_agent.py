@@ -319,8 +319,8 @@ class ROIAgent:
                          current_annual: float) -> tuple[list[dict], list[dict], bool, float]:
         """Split driver amounts into cost-reduction and revenue-uplift waterfalls.
 
-        Hard savings (cost reduction) are capped at the current annual baseline
-        to prevent reporting savings that exceed the actual spend being displaced.
+        Hard savings (cost reduction) are capped at MAX_SAVINGS_PCT (60%) of the
+        current annual baseline — nobody eliminates their entire operational cost.
 
         Returns (cost_items, uplift_items, savings_capped, savings_cap_pct).
         """
@@ -334,12 +334,13 @@ class ROIAgent:
             else:
                 cost_items.append(item)
 
-        # Guard: hard savings cannot exceed the current-state baseline
+        # Guard: hard savings capped at 60% of baseline (not 100%)
         savings_capped = False
         savings_cap_pct = 0.0
+        max_hard = current_annual * (self.MAX_SAVINGS_PCT / 100) if current_annual > 0 else float("inf")
         raw_hard = sum(i["amount"] for i in cost_items)
-        if current_annual > 0 and raw_hard > current_annual:
-            scale = current_annual / raw_hard
+        if raw_hard > max_hard:
+            scale = max_hard / raw_hard
             cost_items = [{"label": i["label"], "amount": round(i["amount"] * scale)}
                           for i in cost_items]
             savings_capped = True
@@ -543,9 +544,6 @@ class ROIAgent:
         monthly_savings = round(current_monthly - future_monthly)
 
         # ── Investment = NET NEW spending ────────────────────────────
-        # ROI denominator is the incremental cost the customer decides to
-        # spend (Azure + implementation + change management).  Carried
-        # labor/overhead is a sunk cost — it exists with or without Azure.
         azure_annual = azure_monthly * 12
         timeline_months = state.sa.timeline_months or 0
         impl_cost = round(azure_monthly * timeline_months) if timeline_months > 0 else round(azure_annual * 0.5)
@@ -553,32 +551,7 @@ class ROIAgent:
         year1_investment = round(azure_annual + impl_cost + change_cost)
         year2_run_rate = round(azure_annual)
 
-        # ── ROI: Year 1 (includes impl+change) and run-rate ─────────
-        if year1_investment > 0:
-            roi_year1 = ((val_mid - year1_investment) / year1_investment) * 100
-        else:
-            roi_year1 = 0.0
-
-        if azure_annual > 0:
-            roi_run_rate = ((val_mid - azure_annual) / azure_annual) * 100
-        else:
-            roi_run_rate = 0.0
-
-        # Headline = Year 1 (conservative)
-        roi_mid = roi_year1
-        roi_low = ((val_low - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
-        roi_high = ((val_high - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
-
-        # Payback against Year 1 investment (net new costs only)
-        payback_months = round((year1_investment / val_mid) * 12, 1) if val_mid > 0 else None
-        if payback_months is not None:
-            payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
-            payback_months = round(payback_months, 1)
-
-        roi_capped = roi_mid > self.MAX_DISPLAY_ROI
-        roi_display = min(roi_mid, self.MAX_DISPLAY_ROI)
-
-        # ── Driver amounts & waterfall ───────────────────────────────
+        # ── Driver amounts & waterfall (caps applied here) ───────────
         driver_amounts = self._compute_per_driver_amounts(drivers, val_mid)
 
         # Verify driver amounts sum ≈ midpoint (FRD-003 FR-003-004)
@@ -599,6 +572,37 @@ class ROIAgent:
         risk_reduction, risk_note = self._compute_risk_reduction(
             current_annual, hard_savings, revenue_uplift,
             components=state.architecture.get("components"))
+
+        # ── Reconciled value = sum of capped waterfall items ─────────
+        # This is what we're actually claiming — NOT the raw BV estimate.
+        # Ensures headline, ROI, payback, and waterfall all match.
+        total_annual_value = hard_savings + revenue_uplift + risk_reduction
+
+        # ── ROI: Year 1 (includes impl+change) and run-rate ─────────
+        # Uses total_annual_value (capped), not val_mid (uncapped BV estimate)
+        if year1_investment > 0:
+            roi_year1 = ((total_annual_value - year1_investment) / year1_investment) * 100
+        else:
+            roi_year1 = 0.0
+
+        if azure_annual > 0:
+            roi_run_rate = ((total_annual_value - azure_annual) / azure_annual) * 100
+        else:
+            roi_run_rate = 0.0
+
+        # Headline = Year 1 (conservative)
+        roi_mid = roi_year1
+        roi_low = ((val_low - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+        roi_high = ((val_high - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0.0
+
+        # Payback against Year 1 investment
+        payback_months = round((year1_investment / total_annual_value) * 12, 1) if total_annual_value > 0 else None
+        if payback_months is not None:
+            payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
+            payback_months = round(payback_months, 1)
+
+        roi_capped = roi_mid > self.MAX_DISPLAY_ROI
+        roi_display = min(roi_mid, self.MAX_DISPLAY_ROI)
 
         # ── Cross-agent reconciliation (FRD-004) ─────────────────────
         adjusted_confidence, plausibility_warnings = self._validate_and_reconcile(
@@ -624,7 +628,7 @@ class ROIAgent:
         dashboard = self._build_dashboard(
             state=state,
             annual_cost=annual_cost,
-            annual_value=val_mid,
+            annual_value=total_annual_value,
             roi_percent=round(roi_mid, 1),
             roi_year1=round(roi_year1, 1),
             roi_run_rate=round(roi_run_rate, 1),
@@ -658,7 +662,8 @@ class ROIAgent:
         state.roi = {
             # ── Canonical output schema ──────────────────────────────
             "annual_cost": round(annual_cost, 2),
-            "annual_value": round(val_mid, 2),
+            "annual_value": round(total_annual_value, 2),
+            "annual_value_bv_estimate": round(val_mid, 2),
             "annual_value_low": round(val_low, 2),
             "annual_value_high": round(val_high, 2),
             "monthly_current_cost": round(current_monthly) if not is_estimated else None,
