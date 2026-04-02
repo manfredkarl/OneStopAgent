@@ -386,7 +386,7 @@ RULES:
             roi_pct = state.roi.get("roi_percent_display") or state.roi.get("roi_percent")
             payback = state.roi.get("payback_months")
             needs_info = state.roi.get("needs_info")
-            if roi_pct is not None and roi_pct != 0:
+            if roi_pct is not None:
                 range_text = f"{(roi_pct / 100 + 1):.1f}x"
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 summary = f"ROI calculated: **{range_text}** with {payback_str} payback."
@@ -629,7 +629,7 @@ RULES:
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 roi_display = roi.get("roi_percent_display") or roi.get("roi_percent", 0) or 0
-                roi_text = f"{(roi_display / 100 + 1):.1f}x" if roi_display else "1.0x"
+                roi_text = f"{(roi_display / 100 + 1):.1f}x"
                 payback = roi.get('payback_months')
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 parts.append(f"**ROI: {roi_text}** | Payback: **{payback_str}**\n")
