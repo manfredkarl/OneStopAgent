@@ -261,7 +261,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
                   {industry.useCases.map((uc, i) => (
                     <button
                       key={i}
-                      onClick={() => handleCreate(uc.prompt)}
+                      onClick={() => { setDescription(uc.prompt); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                       disabled={loading}
                       className="text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer disabled:opacity-50 group"
                     >
@@ -282,7 +282,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
                 return (
                   <button
                     key={ind.name}
-                    onClick={() => handleCreate(uc.prompt)}
+                    onClick={() => { setDescription(uc.prompt); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                     disabled={loading}
                     className="text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer disabled:opacity-50 group"
                   >
