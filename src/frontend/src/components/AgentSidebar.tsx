@@ -6,7 +6,7 @@ import { toggleAgent } from '../api';
 interface Props {
   projectId: string;
   agents: AgentStatus[];
-  onAgentsChange: (agents: AgentStatus[]) => void;
+  onAgentsChange: React.Dispatch<React.SetStateAction<AgentStatus[]>>;
 }
 
 const EMOJIS: Record<string, string> = {
