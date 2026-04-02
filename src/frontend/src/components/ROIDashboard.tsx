@@ -225,7 +225,7 @@ export default function ROIDashboard({ data }: Props) {
             {roiDisplay}
           </p>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            annual value vs. Azure run-rate
+            {(data as any).roiSubtitle || "Year 1 return on total investment"}
           </p>
           {data.confidenceLevel && (
             <div className="mt-1.5"><ConfidenceBadge level={data.confidenceLevel} /></div>
@@ -250,7 +250,7 @@ export default function ROIDashboard({ data }: Props) {
           </p>
           {oneTimeCosts > 0 && (
             <p className="text-[10px] text-[var(--text-muted)]">
-              + ${fmt(oneTimeCosts)} one-time (excl. from ROI)
+              + ${fmt(oneTimeCosts)} one-time (incl. in Year 1 ROI)
             </p>
           )}
         </div>
@@ -745,7 +745,7 @@ export default function ROIDashboard({ data }: Props) {
                 <p className="text-xs text-[var(--text-muted)] uppercase mb-1">{s.adoption} adoption</p>
                 <p className="text-sm font-bold text-[var(--text-primary)]">${fmt(s.annualValue)}/yr</p>
                 <p className="text-xs text-[var(--text-muted)]">
-                  {s.roi > 0 ? `${s.roi.toFixed(0)}% ROI` : 'negative ROI'}
+                  {s.roi > 0 ? `${(s.roi / 100 + 1).toFixed(1)}x ROI` : 'negative ROI'}
                   {s.paybackMonths != null && ` · ${s.paybackMonths > 36 ? '>3 yr' : `${s.paybackMonths.toFixed(0)} mo`}`}
                 </p>
               </div>

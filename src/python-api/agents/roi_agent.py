@@ -903,10 +903,11 @@ class ROIAgent:
             roi_run_rate_text = None
 
         roi_description = (
-            "Year 1 ROI: annual value vs. total Year 1 cost "
-            "(Azure + carried labor/overhead + implementation + change management). "
+            f"Year 1 ROI: annual value vs. Year 1 investment "
+            f"(Azure {roi_run_rate_text or ''} + implementation + change management = "
+            f"${year1_investment:,.0f}). "
             f"Steady-state ROI: {roi_run_rate_text or 'N/A'} "
-            "(annual value vs. ongoing future operating cost, excl. one-time costs)."
+            f"(annual value vs. Azure run-rate ${azure_annual:,.0f}/yr)."
         )
 
         # ── Assemble dashboard ───────────────────────────────────────
