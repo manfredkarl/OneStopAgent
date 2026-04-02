@@ -360,14 +360,10 @@ RULES:
 
         elif step == "roi":
             roi_pct = state.roi.get("roi_percent_display") or state.roi.get("roi_percent")
-            roi_capped = state.roi.get("roi_capped", False)
             payback = state.roi.get("payback_months")
             needs_info = state.roi.get("needs_info")
             if roi_pct is not None:
-                if roi_capped:
-                    range_text = f">{self.MAX_DISPLAY_ROI // 100 if hasattr(self, 'MAX_DISPLAY_ROI') else 10}x"
-                else:
-                    range_text = f"{(roi_pct / 100 + 1):.1f}x"
+                range_text = f"{(roi_pct / 100 + 1):.1f}x"
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 summary = f"ROI calculated: **{range_text}** with {payback_str} payback."
                 if needs_info:
@@ -609,11 +605,7 @@ RULES:
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 roi_display = roi.get("roi_percent_display") or roi.get("roi_percent", 0) or 0
-                roi_capped = roi.get("roi_capped", False)
-                if roi_capped:
-                    roi_text = ">10x"
-                else:
-                    roi_text = f"{(roi_display / 100 + 1):.1f}x"
+                roi_text = f"{(roi_display / 100 + 1):.1f}x"
                 payback = roi.get('payback_months')
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 parts.append(f"**ROI: {roi_text}** | Payback: **{payback_str}**\n")

@@ -654,8 +654,8 @@ class ROIAgent:
             payback_months = max(min(payback_months, self.MAX_PAYBACK_MONTHS), self.MIN_PAYBACK_MONTHS)
             payback_months = round(payback_months, 1)
 
-        roi_capped = roi_mid > self.MAX_DISPLAY_ROI
-        roi_display = min(roi_mid, self.MAX_DISPLAY_ROI)
+        roi_capped = False
+        roi_display = roi_mid
 
         # ── Cross-agent reconciliation (FRD-004) ─────────────────────
         adjusted_confidence, plausibility_warnings = self._validate_and_reconcile(
@@ -947,9 +947,7 @@ class ROIAgent:
         )
 
         # ── ROI display text ─────────────────────────────────────────
-        if roi_capped:
-            roi_display_text = f">{self.MAX_DISPLAY_ROI // 100}x"
-        elif roi_percent is not None:
+        if roi_percent is not None:
             roi_display_text = f"{(roi_percent / 100 + 1):.1f}x"
         else:
             roi_display_text = None
