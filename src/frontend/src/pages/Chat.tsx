@@ -47,6 +47,7 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
         if (metaAgent && (metaType === 'agent_start' || metaType === 'agent_result' || metaType === 'agent_error')) {
           const newStatus = metaType === 'agent_start' ? 'working' as const
             : metaType === 'agent_error' ? 'error' as const : 'idle' as const;
+          console.log(`[sidebar] ${metaAgent}: ${metaType} → ${newStatus}`);
           onAgentsChange(
             agentsRef.current.map(a => a.agentId === metaAgent
               ? { ...a, status: newStatus }

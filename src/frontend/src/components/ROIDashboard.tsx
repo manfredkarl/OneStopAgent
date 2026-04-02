@@ -628,9 +628,9 @@ export default function ROIDashboard({ data }: Props) {
                 <div className="flex-1 flex flex-col items-end gap-1 min-w-0">
                   {row.cost ? (
                     <>
-                      <span className="text-[11px] text-[var(--text-muted)] text-right w-full">{row.cost.label}</span>
+                      <span className="text-[11px] text-[var(--text-muted)] text-right w-full truncate">{row.cost.label}</span>
                       <div className="flex items-center gap-1.5 w-full justify-end">
-                        <span className="text-xs font-bold text-blue-400 shrink-0">${fmt(row.cost.amount)}</span>
+                        <span className="text-[10px] font-bold text-blue-400 shrink-0 whitespace-nowrap">${fmt(row.cost.amount)}</span>
                         <div
                           style={{ width: `${Math.min((row.cost.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT)}%`, minWidth: 8 }}
                           className="bg-blue-500 h-6 rounded-l-md shrink-0"
@@ -647,14 +647,14 @@ export default function ROIDashboard({ data }: Props) {
                 <div className="flex-1 flex flex-col items-start gap-1 min-w-0">
                   {row.uplift ? (
                     <>
-                      <span className="text-[11px] text-[var(--text-muted)] text-left w-full">{row.uplift.label}</span>
+                      <span className="text-[11px] text-[var(--text-muted)] text-left w-full truncate">{row.uplift.label}</span>
                       <div className="flex items-center gap-1.5 w-full justify-start">
                         <div
                           style={{ width: `${Math.min((row.uplift.amount / maxWaterfallAmount) * WATERFALL_MAX_BAR_PCT, WATERFALL_MAX_BAR_PCT)}%`, minWidth: 8 }}
                           className="bg-purple-500 h-6 rounded-r-md shrink-0"
                           title={`$${fmt(row.uplift.amount)}/yr modeled uplift`}
                         />
-                        <span className="text-xs font-bold text-purple-400 shrink-0">${fmt(row.uplift.amount)}</span>
+                        <span className="text-[10px] font-bold text-purple-400 shrink-0 whitespace-nowrap">${fmt(row.uplift.amount)}</span>
                       </div>
                     </>
                   ) : <div className="flex-1" />}
@@ -713,18 +713,18 @@ export default function ROIDashboard({ data }: Props) {
                     <div className="text-center">
                       <div
                         style={{ height: costH, width: 40 }}
-                        className="bg-blue-500 rounded-t-md"
+                        className="bg-blue-500 rounded-t-md mx-auto"
                         title={`Cumulative Azure cost: $${fmt(yr.azureCost)}`}
                       />
-                      <p className="text-[10px] text-blue-400 mt-1">${fmt(yr.azureCost)}</p>
+                      <p className="text-[9px] text-blue-400 mt-1 whitespace-nowrap">${fmt(yr.azureCost)}</p>
                     </div>
                     <div className="text-center">
                       <div
                         style={{ height: valueH, width: 40 }}
-                        className={`rounded-t-md ${isEstimated ? 'bg-green-500/60' : 'bg-green-500'}`}
+                        className={`rounded-t-md mx-auto ${isEstimated ? 'bg-green-500/60' : 'bg-green-500'}`}
                         title={`Cumulative value: $${fmt(yr.totalValue)}`}
                       />
-                      <p className="text-[10px] text-green-400 mt-1">${fmt(yr.totalValue)}</p>
+                      <p className="text-[9px] text-green-400 mt-1 whitespace-nowrap">${fmt(yr.totalValue)}</p>
                     </div>
                   </div>
                   <p className={`text-sm font-bold ${netPositive ? 'text-green-500' : 'text-red-500'}`}>
