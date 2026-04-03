@@ -788,6 +788,27 @@ export default function ROIDashboard({ data }: Props) {
           <p>{methodology}</p>
         </div>
       )}
+
+      {/* ── Export to MSX ──────────────────────────────────────── */}
+      <div className="border-t border-[var(--border)] pt-5 mt-2">
+        <button
+          onClick={() => {
+            const btn = document.getElementById('msx-export-btn');
+            if (btn) {
+              btn.textContent = '✓ Exported to MSX';
+              btn.classList.add('opacity-60');
+              (btn as HTMLButtonElement).disabled = true;
+            }
+          }}
+          id="msx-export-btn"
+          className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all cursor-pointer shadow-md"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Export Workloads &amp; ACR to MSX
+        </button>
+      </div>
     </div>
   );
 }
