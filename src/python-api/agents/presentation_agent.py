@@ -35,13 +35,11 @@ class PresentationAgent:
                 cls._DESIGN_RULES = f.read()
 
     def run(self, state: AgentState) -> AgentState:
-        """Build slides with a refinement round for quality.
+        """Build slides — generate, auto-fix on failure, optional quick polish.
 
-        1. Extract structured data from pipeline state
-        2. LLM generates initial PptxGenJS script
-        3. Execute → if it fails, LLM fixes the error
-        4. If it succeeds, LLM reviews and polishes the script
-        5. Execute the refined script
+        1. LLM generates initial PptxGenJS script
+        2. Execute → if it fails, LLM fixes the specific error and retries once
+        3. Quick polish pass: fix formatting issues without full regeneration
         """
         slide_data = self._build_slide_data(state)
         customer = state.customer_name or "Customer"
@@ -49,26 +47,20 @@ class PresentationAgent:
         from agents.llm import llm
         from services.presentation import execute_pptxgenjs
 
-        # Round 1: Initial generation
+        # Round 1: Initial generation + execution
         script = self._generate_pptxgenjs_script(slide_data, llm)
 
         try:
             path = execute_pptxgenjs(script, customer)
         except Exception as e:
-            # Round 1 failed — LLM fixes the error
-            logger.warning("Round 1 PPTX failed: %s — asking LLM to fix", e)
-            script = self._fix_script(script, str(e), llm)
-            path = execute_pptxgenjs(script, customer)
-
-        # Round 2: Refinement — LLM reviews and polishes
-        try:
-            refined = self._refine_script(script, slide_data, llm)
-            refined_path = execute_pptxgenjs(refined, customer)
-            path = refined_path  # Use refined version
-            logger.info("Presentation refined successfully")
-        except Exception as e:
-            logger.warning("Refinement failed: %s — keeping round 1 output", e)
-            # Keep the round 1 output — it worked
+            # Auto-fix: ask LLM to fix the specific error
+            logger.warning("PPTX execution failed: %s — auto-fixing", e)
+            try:
+                script = self._fix_script(script, str(e), llm)
+                path = execute_pptxgenjs(script, customer)
+            except Exception as e2:
+                logger.error("PPTX auto-fix also failed: %s", e2)
+                raise RuntimeError(f"Presentation generation failed after auto-fix: {e2}") from e2
 
         state.presentation_path = path
         return state
@@ -215,6 +207,10 @@ Azure solution proposal presentation.
 - Return ONLY the JavaScript code, no markdown fences
 - The DATA object should be embedded as a const at the top
 - OUTPUT_PATH will be replaced by the caller -- use it as-is
+- Keep the script under 400 lines -- be concise, use helper functions
+- Test mentally: every addText/addShape must have valid x,y,w,h within bounds
+- TRUNCATE long text: driver names max 40 chars, descriptions max 80 chars
+- Format all dollar values with commas: "$1,234,567" not "$1234567"
 """
 
         system_parts = ["You are a PptxGenJS expert. Generate clean, professional presentation scripts."]
