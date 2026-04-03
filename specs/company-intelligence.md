@@ -141,11 +141,90 @@ form shows: "Based on Siemens AG profile: ~32,000 affected staff (10% of
 
 | Scenario | Handling |
 |---|---|
-| Unknown company ("Acme Corp") | Show "No public data found. You'll provide details manually." |
+| Unknown company ("Acme Corp") | Show size picker (see Fallback Profiles below) |
 | Private company | Partial data (industry, maybe headcount from LinkedIn). Flag as "limited data". |
 | Subsidiary vs parent | Disambiguation popup with both options |
 | Misspelling | Fuzzy search (Levenshtein). Show "Did you mean...?" |
 | Already a customer (MSX data) | Merge: MSX opportunity data + web profile. MSX wins on conflicts. |
+
+### Fallback: Company Size Profiles
+
+When no public data is found (private company, startup, obscure name),
+the seller should NOT have to manually enter every field. Instead, show
+a simple size picker that pre-fills sensible defaults:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  We couldn't find "Acme Corp" in public sources.    │
+│  Select a company size to pre-fill assumptions:     │
+│                                                     │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│  │  Small   │  │  Mid-   │  │  Large  │            │
+│  │ <500 emp │  │ Market  │  │ Enter-  │            │
+│  │ <$50M    │  │ 500-5K  │  │ prise   │            │
+│  │ revenue  │  │ $50-500M│  │ 5K+ emp │            │
+│  └─────────┘  └─────────┘  │ $500M+  │            │
+│                             └─────────┘            │
+│                                                     │
+│  [ Skip — I'll provide details manually ]           │
+└─────────────────────────────────────────────────────┘
+```
+
+Each size maps to a complete default profile:
+
+```python
+FALLBACK_PROFILES = {
+    "small": {
+        "name": None,  # uses customer name as-is
+        "industry": None,  # auto-detected from use case later
+        "employeeCount": 200,
+        "annualRevenue": 25_000_000,
+        "itSpendRatio": 0.05,  # small companies spend more % on IT
+        "itSpendEstimate": 1_250_000,
+        "hourly_labor_rate": 65,
+        "confidence": "low",
+        "sources": ["Company size estimate (small business profile)"],
+    },
+    "mid-market": {
+        "employeeCount": 2_500,
+        "annualRevenue": 250_000_000,
+        "itSpendRatio": 0.04,
+        "itSpendEstimate": 10_000_000,
+        "hourly_labor_rate": 80,
+        "confidence": "low",
+        "sources": ["Company size estimate (mid-market profile)"],
+    },
+    "enterprise": {
+        "employeeCount": 25_000,
+        "annualRevenue": 5_000_000_000,
+        "itSpendRatio": 0.035,
+        "itSpendEstimate": 175_000_000,
+        "hourly_labor_rate": 95,
+        "confidence": "low",
+        "sources": ["Company size estimate (enterprise profile)"],
+    },
+}
+```
+
+**How it flows**:
+1. Seller types "Acme Corp" → search returns no results
+2. Frontend shows size picker (3 cards: Small / Mid-Market / Enterprise)
+3. Seller clicks "Mid-Market"
+4. Profile created with mid-market defaults + customer name = "Acme Corp"
+5. Industry auto-detected from use case description by PM agent
+6. All assumptions pre-filled: 2,500 employees, $10M IT spend, $80/hr
+7. Seller can still edit any value in the assumption form
+
+**Industry refinement**: Once the seller describes the use case, the PM
+agent detects the industry (e.g., "manufacturing"). The fallback profile
+then adjusts:
+- IT spend ratio updated (manufacturing = 3.5% instead of default 4%)
+- Labor rate adjusted for industry
+- BV benchmark search uses detected industry
+
+This means even for unknown companies, the seller never starts from zero.
+Three clicks (name + size + start) and they have a fully contextualized
+pipeline run.
 
 ---
 
