@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Landing from './pages/Landing';
 import Chat from './pages/Chat';
+import Architecture from './pages/Architecture';
 import ErrorBoundary from './components/ErrorBoundary';
 import AgentSidebar from './components/AgentSidebar';
 import { listProjects } from './api';
@@ -39,8 +40,15 @@ function AppContent() {
   return (
     <div className="h-screen flex flex-col">
       {/* Top nav — fixed */}
-      <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center px-5 shrink-0 z-10">
+      <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center justify-between px-5 shrink-0 z-10">
         <a href="/" className="text-sm font-bold text-[var(--accent)] no-underline">OneStopAgent</a>
+        <button
+          onClick={() => navigate('/architecture')}
+          className="w-7 h-7 rounded-full border border-[var(--border-light)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] flex items-center justify-center transition-colors cursor-pointer"
+          title="How it works"
+        >
+          ?
+        </button>
       </header>
 
       <div className="flex flex-1 min-h-0">
@@ -98,6 +106,7 @@ function AppContent() {
                 onProjectCreated={refreshProjects}
               />
             } />
+            <Route path="/architecture" element={<Architecture />} />
           </Routes>
         </ErrorBoundary>
       </div>
