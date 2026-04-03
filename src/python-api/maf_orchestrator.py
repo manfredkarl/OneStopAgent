@@ -281,9 +281,13 @@ class MAFOrchestrator:
                             setattr(state, field, {})
 
                 names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
+                if not names:
+                    yield self._msg(project_id, "No agents to retry.", {"type": "pm_response"})
+                    return
+                first_name = names[0]
                 yield self._msg(
                     project_id,
-                    f"Retrying {names[0]} and downstream agents ({', '.join(names)})...",
+                    f"Retrying {first_name} and downstream agents ({', '.join(names)})...",
                     {"type": "pm_response"},
                 )
                 self.phases[project_id] = "executing"

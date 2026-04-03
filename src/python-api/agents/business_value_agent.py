@@ -546,7 +546,7 @@ CATEGORY RULES:
                     headcount = float(match.group(1).replace(",", ""))
                     rate = float(match.group(2).replace(",", ""))
                     pct = float(match.group(3)) / 100
-                    hours = float(match.group(4).replace(",", "")) if match.group(4) else 1.0
+                    hours = float(match.group(4).replace(",", "")) if match.group(4) is not None else 1.0
                     claimed = float(match.group(5).replace(",", ""))
                     computed = headcount * rate * pct * hours
                     if claimed > 0:

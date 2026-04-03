@@ -276,16 +276,19 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         selections = _handle_multi_region(selections, regions, ha_pattern)
 
         if len(regions) > 1:
-            # Per-service HA overhead (QI-3): sum per-service multipliers weighted by cost
-            total_base = sum(item.get("monthlyCost", 0) for item in items)
-            overhead = 0.0
+            # Per-service HA overhead (QI-3): for each service, compute the
+            # additional cost of the HA/DR replica = base_cost × (multiplier - 1)
+            # For services with multiplier < 1 (e.g. Cosmos geo-redundancy is cheaper
+            # per-region), the overhead is negative — meaning it reduces effective cost.
+            # We only add a positive overhead line item when there's a net increase.
+            total_incremental = 0.0
             for item in items:
                 svc = item.get("serviceName", "")
                 mult = _ha_multiplier_for_service(svc, ha_pattern)
-                overhead += item.get("monthlyCost", 0) * mult
-            overhead = round(overhead - total_base, 2)  # incremental cost of HA
-            if overhead < 0:
-                overhead = 0.0
+                # incremental = base_cost × (mult - 1)
+                # e.g. App Service with mult=2.0 → add 100% more; Cosmos with mult=0.75 → subtract 25%
+                total_incremental += item.get("monthlyCost", 0) * (mult - 1)
+            overhead = round(max(total_incremental, 0.0), 2)
             items.append({
                 "serviceName": "Multi-region replication overhead",
                 "sku": "Estimated",

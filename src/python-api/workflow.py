@@ -114,14 +114,13 @@ class ArchitectExecutor(PipelineExecutor):
         state = msg.state
         ctx.set_state("pipeline", msg)
 
-        if "architect" not in msg.active_agents:
-            state.mark_step_skipped("architect")
-            await ctx.send_message(msg)
-            return
-
-        # AC-1: Skip if already completed by the parallel BV+Architect path
-        if "architect" in state.completed_steps:
-            logger.info("Architect already completed (parallel path) — skipping standalone run")
+        # AC-1: Skip if already completed by the parallel BV+Architect path,
+        # or if architect is not in the active agent set.
+        if "architect" not in msg.active_agents or "architect" in state.completed_steps:
+            if "architect" not in msg.active_agents:
+                state.mark_step_skipped("architect")
+            else:
+                logger.info("Architect already completed (parallel path) — skipping standalone run")
             await ctx.send_message(msg)
             return
 

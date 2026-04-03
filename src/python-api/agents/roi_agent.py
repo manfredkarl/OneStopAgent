@@ -457,12 +457,12 @@ class ROIAgent:
         warnings: list[str] = []
 
         # Normalise confidence — may be a string or a QI-5 scored dict
-        def _get_label(conf: object) -> str:
+        def _extract_confidence_label(conf: object) -> str:
             if isinstance(conf, dict):
                 return conf.get("label", "moderate")
             return str(conf) if conf else "moderate"
 
-        def _set_label(conf: object, label: str) -> object:
+        def _update_confidence_label(conf: object, label: str) -> object:
             if isinstance(conf, dict):
                 conf = dict(conf)  # copy
                 conf["label"] = label
@@ -472,7 +472,7 @@ class ROIAgent:
         # Fallback data — user should know the data quality is degraded
         if costs_used_fallback or bv_used_fallback:
             warnings.append("One or more agents used fallback data due to errors. Consider re-running.")
-            bv_confidence = _set_label(bv_confidence, "low")
+            bv_confidence = _update_confidence_label(bv_confidence, "low")
 
         # Cost-reduction-only: Azure costs more than current — project doesn't save money
         if revenue_uplift == 0 and not is_estimated and current_annual > 0:
@@ -481,7 +481,7 @@ class ROIAgent:
                     f"Azure cost (${azure_annual:,.0f}/yr) exceeds current cost "
                     f"(${current_annual:,.0f}/yr) with no revenue uplift modeled."
                 )
-                bv_confidence = _set_label(bv_confidence, "low")
+                bv_confidence = _update_confidence_label(bv_confidence, "low")
 
         # Revenue uplift exceeds stated revenue — questionable
         if monthly_revenue and monthly_revenue > 0:
@@ -493,15 +493,15 @@ class ROIAgent:
 
         # Log internal diagnostics (not user-facing)
         if annual_cost > 0 and val_mid / annual_cost > 50:
-            bv_confidence = _set_label(bv_confidence, "low")
+            bv_confidence = _update_confidence_label(bv_confidence, "low")
             logger.warning("Value-to-cost ratio %.0f× — unusually high", val_mid / annual_cost)
         if savings_were_capped:
             logger.info("Savings capped by %.0f%% to not exceed baseline", savings_cap_pct)
 
         # Adjust confidence based on warning count
-        if warnings and _get_label(bv_confidence) != "low":
+        if warnings and _extract_confidence_label(bv_confidence) != "low":
             new_label = "low" if len(warnings) >= 2 else "moderate"
-            bv_confidence = _set_label(bv_confidence, new_label)
+            bv_confidence = _update_confidence_label(bv_confidence, new_label)
 
         return bv_confidence, warnings
 

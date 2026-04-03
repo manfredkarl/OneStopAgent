@@ -384,13 +384,13 @@ RULES:
             based_on = state.architecture.get("basedOn", "custom design")
             insight = f"Based on: **{based_on}**"
             # UX-1: risk summary and decision question
-            single_region = len([
+            single_region_service_count = len([
                 c for c in comps
                 if any(kw in str(c).lower() for kw in ("app service", "sql", "cosmos", "function"))
             ])
-            if single_region > 2:
+            if single_region_service_count > 2:
                 decision_question = (
-                    f"\U0001f6a8 **Decision point**: {single_region} services are single-region. "
+                    f"\U0001f6a8 **Decision point**: {single_region_service_count} services are single-region. "
                     "Add **'high availability'** to the next message to model HA costs, "
                     "or proceed to cost estimation."
                 )
