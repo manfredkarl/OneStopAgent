@@ -166,6 +166,43 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const [customerName, setCustomerName] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
+  const [opportunities, setOpportunities] = useState<Array<{customer: string; title: string; workloads: string; prompt: string}>>([]);
+  const [loadingOpps, setLoadingOpps] = useState(false);
+  const [oppsLoaded, setOppsLoaded] = useState(false);
+
+  const fetchOpportunities = async () => {
+    setLoadingOpps(true);
+    // Simulate WorkIQ/MSX API call (~2s)
+    await new Promise(r => setTimeout(r, 2000));
+    setOpportunities([
+      {
+        customer: "Swiss Re",
+        title: "AI Transformation / Agent Factory P3",
+        workloads: "Azure AI Foundry, Agent Factory",
+        prompt: "Design an AI agent platform for a global reinsurance company. The solution should orchestrate multiple specialized agents for underwriting risk assessment, claims automation, and portfolio optimization. Build on Azure AI Foundry with enterprise-grade security and compliance for financial services.",
+      },
+      {
+        customer: "BASF",
+        title: "Multi-region AI Platform Expansion",
+        workloads: "Azure OpenAI, Cosmos DB, AI Search",
+        prompt: "Expand an existing AI platform for a global chemical company to support multi-region deployment across EU and US. Agents should handle R&D knowledge retrieval, supply chain optimization, and regulatory document processing. Use Azure OpenAI, Cosmos DB, and AI Search with Private Link networking.",
+      },
+      {
+        customer: "Associated British Foods",
+        title: "AI Transformation Offer (ATO)",
+        workloads: "Azure AI & Apps",
+        prompt: "Build an AI-powered retail and food production optimization platform for a multinational food, ingredients, and retail group. Agents should automate demand forecasting, production scheduling, and supply chain coordination across 50+ countries. Deploy on Azure with integration to existing ERP systems.",
+      },
+      {
+        customer: "HAVI",
+        title: "Partner-led AI Implementation (EY)",
+        workloads: "Azure AI Platform, Apps That Matter",
+        prompt: "Design an agentic AI platform for a global supply chain company in the food service industry. AI agents should optimize logistics routing, warehouse operations, and sustainability tracking. Partner-led implementation with EY on Azure.",
+      },
+    ]);
+    setLoadingOpps(false);
+    setOppsLoaded(true);
+  };
 
   const handleCreate = async (desc?: string) => {
     const text = desc || description.trim();
@@ -225,6 +262,55 @@ export default function Landing({ agents, onProjectCreated }: Props) {
               {loading ? 'Creating...' : 'Start'}
             </button>
           </div>
+        </div>
+
+        {/* My Opportunities */}
+        <div className="space-y-4">
+          {!oppsLoaded ? (
+            <button
+              onClick={fetchOpportunities}
+              disabled={loadingOpps}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-[var(--accent)] text-[var(--accent)] text-sm font-medium hover:bg-[var(--accent)] hover:text-white transition-all cursor-pointer disabled:opacity-60"
+            >
+              {loadingOpps ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  Fetching from MSX...
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                  </svg>
+                  Fetch my opportunities
+                </>
+              )}
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎯</span>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">My Opportunities</p>
+                <span className="text-xs text-[var(--text-muted)]">from MSX</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {opportunities.map((opp, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setDescription(opp.prompt); setCustomerName(opp.customer); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    disabled={loading}
+                    className="text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer disabled:opacity-50 group"
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-bold text-[var(--accent)] bg-[var(--accent)]/10 px-2 py-0.5 rounded-md">{opp.customer}</span>
+                    </div>
+                    <p className="text-sm font-medium text-[var(--text-primary)] mb-1 group-hover:text-[var(--accent)] transition-colors">{opp.title}</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">{opp.workloads}</p>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Industry selector */}
