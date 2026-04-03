@@ -440,25 +440,39 @@ class ROIAgent:
         revenue_uplift: float,
         monthly_savings_annualized: float,
         is_estimated: bool,
-        bv_confidence: str,
+        bv_confidence: object,
         bv_warnings: list[str],
         savings_were_capped: bool,
         savings_cap_pct: float,
         monthly_revenue: float | None,
         costs_used_fallback: bool = False,
         bv_used_fallback: bool = False,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[object, list[str]]:
         """Run plausibility checks.  Returns (adjusted_confidence, warnings).
 
+        Handles bv_confidence as either a string label or a scored object (QI-5).
         Only surfaces warnings that are ACTIONABLE for the user — not
         internal reconciliation diagnostics.
         """
         warnings: list[str] = []
 
+        # Normalise confidence — may be a string or a QI-5 scored dict
+        def _get_label(conf: object) -> str:
+            if isinstance(conf, dict):
+                return conf.get("label", "moderate")
+            return str(conf) if conf else "moderate"
+
+        def _set_label(conf: object, label: str) -> object:
+            if isinstance(conf, dict):
+                conf = dict(conf)  # copy
+                conf["label"] = label
+                return conf
+            return label
+
         # Fallback data — user should know the data quality is degraded
         if costs_used_fallback or bv_used_fallback:
             warnings.append("One or more agents used fallback data due to errors. Consider re-running.")
-            bv_confidence = "low"
+            bv_confidence = _set_label(bv_confidence, "low")
 
         # Cost-reduction-only: Azure costs more than current — project doesn't save money
         if revenue_uplift == 0 and not is_estimated and current_annual > 0:
@@ -467,7 +481,7 @@ class ROIAgent:
                     f"Azure cost (${azure_annual:,.0f}/yr) exceeds current cost "
                     f"(${current_annual:,.0f}/yr) with no revenue uplift modeled."
                 )
-                bv_confidence = "low"
+                bv_confidence = _set_label(bv_confidence, "low")
 
         # Revenue uplift exceeds stated revenue — questionable
         if monthly_revenue and monthly_revenue > 0:
@@ -479,14 +493,15 @@ class ROIAgent:
 
         # Log internal diagnostics (not user-facing)
         if annual_cost > 0 and val_mid / annual_cost > 50:
-            bv_confidence = "low"
+            bv_confidence = _set_label(bv_confidence, "low")
             logger.warning("Value-to-cost ratio %.0f× — unusually high", val_mid / annual_cost)
         if savings_were_capped:
             logger.info("Savings capped by %.0f%% to not exceed baseline", savings_cap_pct)
 
         # Adjust confidence based on warning count
-        if warnings and bv_confidence != "low":
-            bv_confidence = "low" if len(warnings) >= 2 else "moderate"
+        if warnings and _get_label(bv_confidence) != "low":
+            new_label = "low" if len(warnings) >= 2 else "moderate"
+            bv_confidence = _set_label(bv_confidence, new_label)
 
         return bv_confidence, warnings
 
@@ -1018,6 +1033,41 @@ class ROIAgent:
             "businessCase": business_case,
         }
 
+        # ── AC-3: NPV / IRR / cumulative breakeven ───────────────────
+        # Year 0 = -investment (outflow), Year 1-3 = net annual value - Azure cost
+        net_annual = annual_value - azure_annual
+        cash_flows = [-year1_investment, net_annual, net_annual, net_annual]
+        npv = self._compute_npv(cash_flows, discount_rate=0.10)
+        irr = self._compute_irr(cash_flows)
+        breakeven_month = self._compute_cumulative_breakeven(
+            annual_value=annual_value,
+            annual_cost=azure_annual,
+            setup_cost=impl_cost + change_cost,
+        )
+        dashboard["npv"] = round(npv) if npv is not None else None
+        dashboard["irr"] = irr  # percentage, e.g. 42.5
+        dashboard["breakevenMonth"] = breakeven_month
+
+        # ── QI-4: Tornado sensitivity ────────────────────────────────
+        tornado = self._compute_tornado(
+            drivers=bv_drivers,
+            driver_amounts=driver_amounts,
+            year1_investment=year1_investment,
+        )
+        dashboard["tornado"] = tornado
+
+        # ── UX-3: Conversation starters ──────────────────────────────
+        adoption_ramp_local = self._select_adoption_ramp(state)
+        conversation_starters = self._build_conversation_starters(
+            drivers=bv_drivers,
+            driver_amounts=driver_amounts,
+            payback_months=payback_months,
+            year1_investment=year1_investment,
+            annual_value=annual_value,
+            adoption_ramp=adoption_ramp_local,
+        )
+        dashboard["conversationStarters"] = conversation_starters
+
         if is_estimated:
             dashboard["costEstimated"] = True
             dashboard["warning"] = (
@@ -1195,3 +1245,159 @@ class ROIAgent:
             "qualitative_benefits": qualitative or [],
             "needs_info": questions,
         }
+
+    # ── AC-3: NPV / IRR / Cumulative cash flow ───────────────────────
+
+    @staticmethod
+    def _compute_npv(cash_flows: list[float], discount_rate: float = 0.10) -> float:
+        """AC-3: Net Present Value at given discount rate.
+
+        cash_flows[0] is Year 0 (typically negative, = investment),
+        cash_flows[1..n] are net annual cash flows.
+        """
+        return sum(cf / (1 + discount_rate) ** yr for yr, cf in enumerate(cash_flows))
+
+    @staticmethod
+    def _compute_irr(cash_flows: list[float], max_iter: int = 1000, tol: float = 1e-6) -> float | None:
+        """AC-3: Internal Rate of Return via Newton-Raphson method.
+
+        Returns None if the series has no valid IRR (e.g. all positive or no sign change).
+        """
+        # Must have at least one sign change
+        signs = [1 if cf >= 0 else -1 for cf in cash_flows]
+        if len(set(signs)) < 2:
+            return None
+
+        rate = 0.10  # initial guess
+        for _ in range(max_iter):
+            npv = sum(cf / (1 + rate) ** yr for yr, cf in enumerate(cash_flows))
+            d_npv = sum(-yr * cf / (1 + rate) ** (yr + 1) for yr, cf in enumerate(cash_flows))
+            if abs(d_npv) < tol:
+                break
+            new_rate = rate - npv / d_npv
+            # Clamp to avoid divergence
+            new_rate = max(-0.99, min(new_rate, 10.0))
+            if abs(new_rate - rate) < tol:
+                rate = new_rate
+                break
+            rate = new_rate
+
+        # Validate: NPV at computed rate should be near zero
+        final_npv = sum(cf / (1 + rate) ** yr for yr, cf in enumerate(cash_flows))
+        if abs(final_npv) > 1000:  # $1K tolerance
+            return None
+        return round(rate * 100, 1)  # as percentage
+
+    @staticmethod
+    def _compute_cumulative_breakeven(
+        annual_value: float, annual_cost: float, setup_cost: float
+    ) -> int | None:
+        """AC-3: Month when cumulative net value turns positive."""
+        if annual_value <= 0:
+            return None
+        monthly_value = annual_value / 12
+        monthly_cost = annual_cost / 12
+        month = 0
+        cumulative = -setup_cost
+        for m in range(1, 121):  # up to 10 years
+            cumulative += monthly_value - monthly_cost
+            if cumulative >= 0:
+                return m
+        return None  # doesn't break even within 10 years
+
+    # ── QI-4: Tornado sensitivity ────────────────────────────────────
+
+    def _compute_tornado(
+        self,
+        drivers: list[dict],
+        driver_amounts: list[float],
+        year1_investment: float,
+        variance_pct: float = 0.20,
+    ) -> list[dict]:
+        """QI-4: Vary each driver ±variance_pct, compute ROI range, rank by impact.
+
+        Returns list of {driver, lowROI, highROI, range} sorted by range desc.
+        """
+        if not drivers or year1_investment <= 0:
+            return []
+
+        base_total = sum(driver_amounts)
+        tornado: list[dict] = []
+
+        for idx, d in enumerate(drivers):
+            if d.get("excluded", False):
+                continue
+            base_amount = driver_amounts[idx]
+            other_total = base_total - base_amount
+
+            low_amount = base_amount * (1 - variance_pct)
+            high_amount = base_amount * (1 + variance_pct)
+
+            low_total = other_total + low_amount
+            high_total = other_total + high_amount
+
+            low_roi = ((low_total - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0
+            high_roi = ((high_total - year1_investment) / year1_investment * 100) if year1_investment > 0 else 0
+
+            tornado.append({
+                "driver": d.get("name", ""),
+                "lowROI": round(low_roi, 1),
+                "highROI": round(high_roi, 1),
+                "range": round(high_roi - low_roi, 1),
+            })
+
+        tornado.sort(key=lambda t: t["range"], reverse=True)
+        return tornado
+
+    # ── UX-3: ROI conversation starters ──────────────────────────────
+
+    def _build_conversation_starters(
+        self,
+        *,
+        drivers: list[dict],
+        driver_amounts: list[float],
+        payback_months: float | None,
+        year1_investment: float,
+        annual_value: float,
+        adoption_ramp: list[float],
+    ) -> list[str]:
+        """UX-3: Generate 2-3 contextual conversation starters for seller meetings."""
+        starters: list[str] = []
+
+        # Biggest driver prompt
+        if drivers and driver_amounts:
+            max_idx = driver_amounts.index(max(driver_amounts))
+            if max_idx < len(drivers):
+                top_driver = drivers[max_idx]
+                top_name = top_driver.get("name", "")
+                top_pct = round(driver_amounts[max_idx] / annual_value * 100) if annual_value > 0 else 0
+                starters.append(
+                    f"Your biggest value driver is '{top_name}' ({top_pct}% of total value). "
+                    "Which department or process sees this most — and do you have current baseline data?"
+                )
+
+        # Year 1 adoption prompt
+        yr1_pct = int(adoption_ramp[0] * 100)
+        if yr1_pct < 80:
+            starters.append(
+                f"The model assumes {yr1_pct}% adoption in Year 1. "
+                "What would it take to reach 80%? Better training, champion users, or executive sponsorship?"
+            )
+
+        # Implementation cost prompt
+        if year1_investment > 0:
+            starters.append(
+                f"Implementation cost is estimated at ${year1_investment:,.0f}. "
+                "How accurate is that for your organization? "
+                "Do you have an internal team or would you use a partner?"
+            )
+
+        # Payback prompt
+        if payback_months and payback_months > 12:
+            starters.append(
+                f"Break-even is at Month {payback_months:.0f}. "
+                "Is that within your capital investment horizon? "
+                "If not, which driver would have the biggest impact if we could accelerate it?"
+            )
+
+        return starters[:3]  # max 3

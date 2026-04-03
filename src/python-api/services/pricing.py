@@ -117,6 +117,148 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "note": "AI Foundry uses Azure OpenAI pricing, computed from AI_MODEL_PRICING config",
         "unit": "1/Request",
     },
+    # QW-3: Services not in the Retail Prices API — conservative estimates
+    # Azure SQL Database (General Purpose, 2 vCores, 10.2 GB RAM)
+    "Azure SQL Database": {
+        "price": 183.96,
+        "source": "estimated",
+        "note": "Azure SQL DB General Purpose 2 vCores: ~$184/mo (Microsoft pricing page, 2025)",
+        "unit": "1/Month",
+    },
+    "SQL Database": {
+        "price": 183.96,
+        "source": "estimated",
+        "note": "Azure SQL DB General Purpose 2 vCores: ~$184/mo",
+        "unit": "1/Month",
+    },
+    # Azure Database for MySQL — Flexible Server, 2 vCores
+    "Azure Database for MySQL": {
+        "price": 68.64,
+        "source": "estimated",
+        "note": "Azure DB for MySQL Flexible Server 2 vCores: ~$69/mo",
+        "unit": "1/Month",
+    },
+    "Azure Database for MySQL Flexible Server": {
+        "price": 68.64,
+        "source": "estimated",
+        "note": "Azure DB for MySQL Flexible Server 2 vCores: ~$69/mo",
+        "unit": "1/Month",
+    },
+    # Azure Database for PostgreSQL — Flexible Server, 2 vCores
+    "Azure Database for PostgreSQL": {
+        "price": 68.64,
+        "source": "estimated",
+        "note": "Azure DB for PostgreSQL Flexible Server 2 vCores: ~$69/mo",
+        "unit": "1/Month",
+    },
+    "Azure Database for PostgreSQL Flexible Server": {
+        "price": 68.64,
+        "source": "estimated",
+        "note": "Azure DB for PostgreSQL Flexible Server 2 vCores: ~$69/mo",
+        "unit": "1/Month",
+    },
+    # Azure Key Vault — Standard tier, operations-based
+    "Azure Key Vault": {
+        "price": 5.0,
+        "source": "estimated",
+        "note": "Key Vault Standard: ~$5/mo base + $0.03/10K operations (10K ops/mo assumed)",
+        "unit": "1/Month",
+    },
+    # Application Insights — based on 5 GB/mo data ingestion
+    "Application Insights": {
+        "price": 11.48,
+        "source": "estimated",
+        "note": "Application Insights: ~$2.30/GB ingested, 5 GB/mo assumed",
+        "unit": "1/Month",
+    },
+    "Azure Application Insights": {
+        "price": 11.48,
+        "source": "estimated",
+        "note": "Application Insights: ~$2.30/GB ingested, 5 GB/mo assumed",
+        "unit": "1/Month",
+    },
+    # Azure DevOps — Basic plan per user
+    "Azure DevOps": {
+        "price": 30.0,
+        "source": "estimated",
+        "note": "Azure DevOps Basic plan: $6/user/mo, 5 users assumed",
+        "unit": "1/Month",
+    },
+    # Power Automate — per-user plan
+    "Power Automate": {
+        "price": 75.0,
+        "source": "estimated",
+        "note": "Power Automate per-user plan: $15/user/mo, 5 users assumed",
+        "unit": "1/Month",
+    },
+    # Power Apps — per-user plan
+    "Power Apps": {
+        "price": 100.0,
+        "source": "estimated",
+        "note": "Power Apps per-user plan: $20/user/mo, 5 users assumed",
+        "unit": "1/Month",
+    },
+    # Azure Spring Apps — Standard tier (2 vCPU, 4 GB)
+    "Azure Spring Apps": {
+        "price": 98.15,
+        "source": "estimated",
+        "note": "Azure Spring Apps Standard: ~$98/mo per instance (2 vCPU, 4 GB)",
+        "unit": "1/Month",
+    },
+    "Azure Spring Cloud": {
+        "price": 98.15,
+        "source": "estimated",
+        "note": "Azure Spring Apps Standard: ~$98/mo per instance",
+        "unit": "1/Month",
+    },
+    # Azure Synapse Analytics — 100 DWU
+    "Azure Synapse Analytics": {
+        "price": 115.0,
+        "source": "estimated",
+        "note": "Synapse Analytics DW100c: ~$1.51/hr = ~$115/mo at 76 compute hrs/mo",
+        "unit": "1/Month",
+    },
+    "Synapse Analytics": {
+        "price": 115.0,
+        "source": "estimated",
+        "note": "Synapse Analytics DW100c: ~$115/mo",
+        "unit": "1/Month",
+    },
+    # Azure Bastion — Standard tier
+    "Azure Bastion": {
+        "price": 218.0,
+        "source": "estimated",
+        "note": "Azure Bastion Standard: ~$0.30/hr = ~$218/mo (730 hrs)",
+        "unit": "1/Month",
+    },
+    # Azure Firewall — Standard tier
+    "Azure Firewall": {
+        "price": 912.0,
+        "source": "estimated",
+        "note": "Azure Firewall Standard: ~$1.25/hr = ~$912/mo (730 hrs)",
+        "unit": "1/Month",
+    },
+    # Azure DDoS Protection — Network Protection plan
+    "Azure DDoS Protection": {
+        "price": 2944.0,
+        "source": "estimated",
+        "note": "Azure DDoS Network Protection: ~$2,944/mo (per-VNet plan)",
+        "unit": "1/Month",
+    },
+    # Azure Policy — free service (no cost entry in retail API)
+    "Azure Policy": {
+        "price": 0.0,
+        "source": "estimated",
+        "note": "Azure Policy is free to use",
+        "unit": "1/Month",
+    },
+    # Microsoft Defender for Cloud — Standard tier per server
+    "Microsoft Defender for Cloud": {
+        "price": 15.0,
+        "source": "estimated",
+        "note": "Defender for Cloud Servers P1: ~$5/server/mo, 3 servers assumed",
+        "unit": "1/Month",
+    },
 }
 
 

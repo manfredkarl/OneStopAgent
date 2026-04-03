@@ -172,18 +172,19 @@ Azure solution proposal presentation.
 {data_json}
 ```
 
-## SLIDE STRUCTURE (11 slides):
+## SLIDE STRUCTURE (12 slides):
 1. Title (dark bg) -- customer name, "Azure Solution Proposal", tagline, date
-2. Executive Summary -- problem statement + key highlight bullets
-3. Use Cases -- 2-3 scenario cards side-by-side with colored top borders
-4. Business Value -- value driver cards with big metric numbers
-5. Cost Summary -- stat callout cards (monthly, annual, confidence) + bar chart
-6. Architecture -- narrative text + "Based on" reference
-7. Business Case -- value bridge cards + sensitivity table
-8. Next Steps (dark bg) -- numbered action items
-9. Thank You (dark bg) -- customer name, "Powered by OneStopAgent"
-10. Appendix: Solution Architecture -- component table
-11. Appendix: Azure Services -- services + SKU + cost table
+2. Why Now? -- urgency/market shift: 2-3 bullets on the problem, industry trend, cost of inaction
+3. Proposed Solution -- architecture visual (narrative + "Based on" reference)
+4. Business Impact -- ROI, value drivers with big numbers (payback period, ROI %, annual value)
+5. Use Cases -- 2-3 scenario cards side-by-side with colored top borders
+6. 3-Year Total Cost -- monthly, annual, confidence; stat callout cards + bar chart
+7. Implementation Roadmap -- 3 phases: Foundation (M1-3), Pilot (M4-6), Scale (M7-12)
+8. Why Azure? -- 3 capability cards: Enterprise scale, Security & Compliance, AI-first roadmap
+9. Next Steps (dark bg) -- numbered action items (typically 3-4 steps)
+10. Thank You (dark bg) -- customer name, "Powered by OneStopAgent"
+11. Appendix: Architecture Details -- component table with layer, service, role
+12. Appendix: Azure Services & Costs -- services + SKU + monthly cost table
 
 ## RULES:
 - Start with: const pptxgen = require("pptxgenjs");
@@ -195,11 +196,11 @@ Azure solution proposal presentation.
 - Use paraSpaceAfter not lineSpacing
 - NEVER reuse option objects
 - 0.5" minimum margins on all slides
-- Dark sandwich: slides 1, 8, 9 get dark backgrounds
+- Dark sandwich: slides 1, 9, 10 get dark backgrounds (navy: 003366)
 - Use Microsoft-style color palette (navy, white, accent blue, teal)
 - Stat callout cards with colored top border bars
 - Tables with alternating row colors
-- Big numbers (28-36pt) for KPIs
+- Big numbers (28-36pt) for KPIs on slides 4 and 6
 - Keep all shapes within 10" x 5.625" bounds
 - Use helper functions for formatting: fmt$(value), fmtPct(value)
 
@@ -207,7 +208,7 @@ Azure solution proposal presentation.
 - Return ONLY the JavaScript code, no markdown fences
 - The DATA object should be embedded as a const at the top
 - OUTPUT_PATH will be replaced by the caller -- use it as-is
-- Keep the script under 400 lines -- be concise, use helper functions
+- Keep the script under 450 lines -- be concise, use helper functions
 - Test mentally: every addText/addShape must have valid x,y,w,h within bounds
 - TRUNCATE long text: driver names max 40 chars, descriptions max 80 chars
 - Format all dollar values with commas: "$1,234,567" not "$1234567"

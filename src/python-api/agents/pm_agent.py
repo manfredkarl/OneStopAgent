@@ -55,6 +55,25 @@ ITERATION_MAPPING: dict[str, list[str]] = {
     "different approach": ["business_value", "architect", "cost", "roi", "presentation"],
     "value": ["business_value", "roi", "presentation"],
     "business": ["business_value", "roi", "presentation"],
+    # QW-2: Security/compliance intent keywords → architect + cost only
+    "secure": ["architect", "cost"],
+    "security": ["architect", "cost"],
+    "gdpr": ["architect", "cost"],
+    "pci": ["architect", "cost"],
+    "soc2": ["architect", "cost"],
+    "hipaa": ["architect", "cost"],
+    "encryption": ["architect", "cost"],
+    "zero trust": ["architect", "cost"],
+    # AC-5: Semantic iteration mappings
+    "budget": ["cost", "roi"],
+    "faster": ["architect", "cost", "roi"],
+    "performance": ["architect", "cost", "roi"],
+    "latency": ["architect", "cost", "roi"],
+    "users": ["architect", "cost", "roi"],
+    "concurrent": ["architect", "cost", "roi"],
+    "simpler": ["architect", "cost", "roi"],
+    "reduce": ["architect", "cost", "roi"],
+    "fewer": ["architect", "cost", "roi"],
 }
 
 
@@ -349,17 +368,38 @@ RULES:
         return "\n".join(lines)
 
     def approval_summary(self, step: str, state: AgentState) -> str:
-        """Generate a summary of agent output + key insight + approval prompt."""
+        """Generate a summary of agent output + key insight + approval prompt.
+
+        UX-1: Each step includes 1-2 decision questions to guide the seller.
+        """
         info = AGENT_INFO.get(step, {"name": step, "emoji": "\U0001f527"})
 
         summary = ""
         insight = ""
+        decision_question = ""
 
         if step == "architect":
             comps = state.architecture.get("components", [])
             summary = f"Designed architecture with {len(comps)} Azure components."
             based_on = state.architecture.get("basedOn", "custom design")
             insight = f"Based on: **{based_on}**"
+            # UX-1: risk summary and decision question
+            single_region = len([
+                c for c in comps
+                if any(kw in str(c).lower() for kw in ("app service", "sql", "cosmos", "function"))
+            ])
+            if single_region > 2:
+                decision_question = (
+                    f"\U0001f6a8 **Decision point**: {single_region} services are single-region. "
+                    "Add **'high availability'** to the next message to model HA costs, "
+                    "or proceed to cost estimation."
+                )
+            else:
+                decision_question = (
+                    "\U0001f4a1 Architecture looks HA-ready. "
+                    "Say **'add compliance'** if this is a regulated industry (HIPAA, GDPR, PCI), "
+                    "or proceed to cost estimation."
+                )
 
         elif step == "cost":
             est = state.costs.get("estimate", {})
@@ -368,6 +408,17 @@ RULES:
             sels = state.services.get("selections", [])
             summary = f"Mapped {len(sels)} Azure services and estimated monthly cost: **${monthly:,.0f}** (source: {source})."
             insight = f"Annual projection: **${est.get('totalAnnual', 0):,.0f}**"
+            # UX-1: highlight top cost driver
+            insights_data = est.get("insights", {})
+            top3 = insights_data.get("top3Drivers", [])
+            if top3:
+                top = top3[0]
+                decision_question = (
+                    f"\U0001f4a1 **Top driver**: {top['service']} (${top['monthly']:,}/mo, {top['pct']}% of total). "
+                    "Say **'make it cheaper'** to explore alternatives, or proceed to business value."
+                )
+                if insights_data.get("reservationNote"):
+                    decision_question += f"\n\n\U0001f4b0 {insights_data['reservationNote']}"
 
         elif step == "business_value":
             bv = state.business_value
@@ -380,7 +431,24 @@ RULES:
                 summary = f"Identified {len(drivers)} benchmark-backed value drivers."
                 if impact:
                     summary += f" Estimated annual impact: **${impact.get('low', 0):,.0f}–${impact.get('high', 0):,.0f}**."
-                insight = ""
+                # UX-1: highlight weakest driver for conversation
+                confidence_obj = bv.get("confidence")
+                if isinstance(confidence_obj, dict):
+                    driver_scores = confidence_obj.get("driver_scores", [])
+                    if driver_scores:
+                        min_score = min(driver_scores)
+                        min_idx = driver_scores.index(min_score)
+                        if min_idx < len(drivers):
+                            weak_driver = drivers[min_idx].get("name", "")
+                            decision_question = (
+                                f"\U0001f4a1 **Weakest driver**: {weak_driver} (confidence {min_score}/100). "
+                                "Get customer data to strengthen this driver, or proceed to ROI."
+                            )
+                elif drivers:
+                    decision_question = (
+                        "\U0001f4a1 Review the value drivers above. "
+                        "Say **'refine value'** to adjust assumptions, or proceed to ROI calculation."
+                    )
 
         elif step == "roi":
             roi_pct = state.roi.get("roi_percent_display") or state.roi.get("roi_percent")
@@ -394,6 +462,18 @@ RULES:
                     summary += "\n\nSome drivers couldn't be monetized yet. To refine the ROI, I'd need:"
                     for q in needs_info:
                         summary += f"\n- {q}"
+                # UX-1: breakeven decision question
+                if isinstance(payback, (int, float)) and payback > 12:
+                    decision_question = (
+                        f"\U0001f4a1 **Decision point**: Break-even is Month {payback:.0f}. "
+                        "What would accelerate adoption? Say **'increase adoption'** to model faster ramp, "
+                        "or proceed to presentation."
+                    )
+                else:
+                    decision_question = (
+                        "\U0001f4a1 Strong ROI case. "
+                        "Say **'add NPV'** for CFO-ready metrics, or proceed to presentation."
+                    )
             elif needs_info:
                 summary = "I need a bit more information to calculate ROI:\n"
                 for q in needs_info:
@@ -401,11 +481,13 @@ RULES:
                 summary += "\n\nShare what you can and I'll re-run the numbers."
             else:
                 summary = "ROI could not be calculated quantitatively — see qualitative benefits."
-            insight = ""
 
         elif step == "presentation":
             summary = "PowerPoint deck generated and ready for download."
-            insight = ""
+            decision_question = (
+                "\U0001f4a1 Review the deck. Say **'refine presentation'** to adjust any slide, "
+                "or download and share with the customer."
+            )
 
         parts = [
             f"{info.get('emoji', '🔧')} **{info.get('name', step)}** completed.",
@@ -414,6 +496,9 @@ RULES:
         ]
         if insight:
             parts.append(f"\U0001f4a1 {insight}")
+        if decision_question:
+            parts.append("")
+            parts.append(decision_question)
         parts.append("")
         parts.append("*To refine, just type your feedback below.*")
 

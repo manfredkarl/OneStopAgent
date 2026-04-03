@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 CONSUMPTION_ASSUMPTIONS = {
     "Azure Functions": "1M executions/month, 400K GB-s",
-    "Azure Blob Storage": "100 GB stored, 10K read operations/month",
-    "Azure Cosmos DB": "1,000 RU/s provisioned, 50 GB stored",
-    "Azure Event Hubs": "1M events/month",
-    "Azure OpenAI": "1M tokens/month",
-    "Azure AI Search": "1 search unit",
-    "Azure Monitor": "5 GB logs ingested/month",
+    "Azure Blob Storage": "500 GB stored, 50K read operations/month",
+    "Azure Cosmos DB": "5,000 RU/s provisioned, 100 GB stored",
+    "Azure Event Hubs": "5M events/month",
+    "Azure OpenAI": "150K requests/month",
+    "Azure AI Search": "2 search units",
+    "Azure Monitor": "10 GB logs ingested/month",
 }
 
 HOURLY_SERVICES = {
@@ -36,6 +36,45 @@ HOURLY_SERVICES = {
     "Azure Cache for Redis",
     "Azure Container Apps",
     "Azure Kubernetes Service",
+}
+
+# ── QW-1: Tiered consumption defaults by user count ──────────────────
+# Small: <500 users | Medium: 500-5000 | Large: >5000
+TIERED_CONSUMPTION: dict[str, dict[str, object]] = {
+    "storage_gb": {"small": 100, "medium": 500, "large": 2048},
+    "openai_requests_monthly": {"small": 50_000, "medium": 150_000, "large": 500_000},
+    "cosmos_ru_s": {"small": 1_000, "medium": 5_000, "large": 20_000},
+    "app_instances": {"small": 1, "medium": 2, "large": 3},
+}
+
+
+def _tier_for_users(users: int) -> str:
+    """Return consumption tier based on user count."""
+    if users < 500:
+        return "small"
+    elif users <= 5000:
+        return "medium"
+    else:
+        return "large"
+
+
+def _tiered_default(key: str, users: int) -> int:
+    """Return the tiered default value for a consumption metric."""
+    tier = _tier_for_users(users)
+    return int(TIERED_CONSUMPTION.get(key, {}).get(tier, 0))
+
+
+# ── QI-3: Per-service HA cost multipliers ────────────────────────────
+HA_COST_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "Azure App Service": {"active-active": 2.0, "active-passive": 1.5, "default": 1.5},
+    "Azure Container Apps": {"active-active": 2.0, "active-passive": 1.5, "default": 1.5},
+    "Azure Kubernetes Service": {"active-active": 2.0, "active-passive": 1.5, "default": 1.5},
+    "Azure Cosmos DB": {"active-active": 0.75, "active-passive": 0.50, "default": 0.50},
+    "Azure Cosmos DB for NoSQL": {"active-active": 0.75, "active-passive": 0.50, "default": 0.50},
+    "Azure Blob Storage": {"geo-redundant": 1.20, "active-active": 1.20, "default": 1.20},
+    "Azure Service Bus": {"active-active": 1.0, "active-passive": 1.0, "default": 1.0},
+    "Azure Event Hubs": {"active-active": 1.0, "active-passive": 1.0, "default": 1.0},
+    "default": {"active-active": 0.50, "active-passive": 0.30, "default": 0.40},
 }
 
 # ── Multi-region overhead by HA pattern (FRD-006 Fix M) ──────────────
@@ -87,8 +126,17 @@ def _extract_regions(text: str) -> list[str]:
 
 # ── Multi-Region Handling ────────────────────────────────────────────────
 
-def _handle_multi_region(selections: list[dict], regions: list[str]) -> list[dict]:
-    """If multiple regions, add HA/DR note + overhead line item."""
+def _ha_multiplier_for_service(service_name: str, ha_pattern: str) -> float:
+    """Return the HA cost multiplier for a service and HA pattern (QI-3)."""
+    svc_rules = HA_COST_MULTIPLIERS.get(service_name, HA_COST_MULTIPLIERS["default"])
+    return svc_rules.get(ha_pattern, svc_rules.get("default", 0.40))
+
+
+def _handle_multi_region(selections: list[dict], regions: list[str], ha_pattern: str = "default") -> list[dict]:
+    """If multiple regions, add HA/DR note + overhead line item.
+
+    Uses per-service HA cost multipliers (QI-3) instead of a flat percentage.
+    """
     if len(regions) <= 1:
         return selections
 
@@ -98,7 +146,9 @@ def _handle_multi_region(selections: list[dict], regions: list[str]) -> list[dic
     for sel in selections:
         sel["region"] = primary
         existing_note = sel.get("skuNote", "") or ""
-        ha_note = f"For HA, deploy secondary in {secondary}"
+        svc = sel.get("serviceName", "")
+        mult = _ha_multiplier_for_service(svc, ha_pattern)
+        ha_note = f"For HA, deploy secondary in {secondary} ({mult:.0%} overhead)"
         sel["skuNote"] = f"{existing_note}. {ha_note}".strip(". ") if existing_note else ha_note
 
     selections.append({
@@ -107,7 +157,7 @@ def _handle_multi_region(selections: list[dict], regions: list[str]) -> list[dic
         "sku": "N/A",
         "region": f"{primary} + {secondary}",
         "capabilities": ["High availability", "Disaster recovery", "Geo-redundancy"],
-        "skuNote": "Estimated 30-50% uplift on compute + storage costs",
+        "skuNote": "Per-service HA overhead (see individual service notes)",
     })
 
     return selections
@@ -215,30 +265,37 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         items, worst_source, assumptions = self._price_selections(selections, users, usage_dict)
 
         # ── Step 3: Multi-region handling ────────────────────────────
-        selections = _handle_multi_region(selections, regions)
+        # Extract HA pattern from user text
+        ha_pattern = "default"
+        text_lower = full_text.lower()
+        if "active-active" in text_lower or "active/active" in text_lower:
+            ha_pattern = "active-active"
+        elif "active-passive" in text_lower or "active/passive" in text_lower:
+            ha_pattern = "active-passive"
+
+        selections = _handle_multi_region(selections, regions, ha_pattern)
 
         if len(regions) > 1:
-            # Multi-region overhead based on HA pattern (FRD-006 Fix M)
-            # Extract HA pattern from user text (LLM does not generate haPattern)
-            ha_pattern = "default"
-            text_lower = full_text.lower()
-            if "active-active" in text_lower or "active/active" in text_lower:
-                ha_pattern = "active-active"
-            elif "active-passive" in text_lower or "active/passive" in text_lower:
-                ha_pattern = "active-passive"
-            overhead_pct = MULTI_REGION_OVERHEAD.get(ha_pattern, 0.40)
-            overhead = sum(item.get("monthlyCost", 0) for item in items) * overhead_pct
-            overhead = round(overhead, 2)
+            # Per-service HA overhead (QI-3): sum per-service multipliers weighted by cost
+            total_base = sum(item.get("monthlyCost", 0) for item in items)
+            overhead = 0.0
+            for item in items:
+                svc = item.get("serviceName", "")
+                mult = _ha_multiplier_for_service(svc, ha_pattern)
+                overhead += item.get("monthlyCost", 0) * mult
+            overhead = round(overhead - total_base, 2)  # incremental cost of HA
+            if overhead < 0:
+                overhead = 0.0
             items.append({
                 "serviceName": "Multi-region replication overhead",
                 "sku": "Estimated",
                 "region": f"{regions[0]} + {regions[1]}",
                 "monthlyCost": overhead,
-                "pricingNote": f"Estimated {overhead_pct * 100:.0f}% uplift for {ha_pattern} deployment",
+                "pricingNote": f"Per-service HA overhead for {ha_pattern} deployment",
             })
             assumptions.append(
-                f"Multi-region overhead estimated at {overhead_pct * 100:.0f}% "
-                f"({ha_pattern} pattern: replication + networking + secondary compute)"
+                f"Multi-region overhead estimated using per-service HA multipliers "
+                f"({ha_pattern} pattern: see HA_COST_MULTIPLIERS)"
             )
 
         # Add user-provided usage context to assumptions
@@ -265,6 +322,10 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
 
         # ── Populate both state fields ───────────────────────────────
         state.services = {"selections": selections}
+
+        # ── UX-2: Cost optimization insights ────────────────────────
+        insights = self._build_cost_insights(items, total_monthly, total_annual, users)
+
         state.costs = {
             "estimate": {
                 "currency": "USD",
@@ -273,6 +334,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
                 "totalAnnual": total_annual,
                 "assumptions": assumptions,
                 "pricingSource": worst_source,
+                "insights": insights,
             },
             "user_assumptions": user_assumptions,
         }
@@ -539,7 +601,10 @@ Return ONLY valid JSON (no markdown fences) as an array:
                         monthly_requests = val
                         break
             if monthly_requests == 0:
-                monthly_requests = 50_000  # Conservative default (reduced from 100K)
+                # QW-1: tiered default for OpenAI requests based on user count
+                monthly_requests = _tiered_default("openai_requests_monthly", users)
+                if monthly_requests == 0:
+                    monthly_requests = 50_000  # absolute fallback
             return unit_price * monthly_requests
 
         if "hour" in unit_lower or service_name in HOURLY_SERVICES:
@@ -549,7 +614,8 @@ Return ONLY valid JSON (no markdown fences) as an array:
         elif "day" in unit_lower:
             return unit_price * 30
         elif "gb" in unit_lower:
-            gb_volume = 100  # default
+            # QW-1: tiered GB default based on user count
+            gb_volume = _tiered_default("storage_gb", users) or 100
             if usage_dict:
                 for key in ("data_storage_gb", "data_volume_gb", "engineering_data_volume_gb", "engineering_data_lake_volume_gb"):
                     if usage_dict.get(key):
@@ -597,3 +663,54 @@ Return ONLY valid JSON (no markdown fences) as an array:
         if match:
             return monthly_cost * int(match.group(1))
         return monthly_cost
+
+    def _build_cost_insights(
+        self, items: list[dict], total_monthly: float, total_annual: float, users: int
+    ) -> dict:
+        """UX-2: Build cost optimization insights for seller conversations."""
+        if not items or total_monthly <= 0:
+            return {}
+
+        # Top 3 cost drivers
+        sorted_items = sorted(items, key=lambda x: x.get("monthlyCost", 0), reverse=True)
+        top3 = [
+            {
+                "service": i.get("serviceName", ""),
+                "sku": i.get("sku", ""),
+                "monthly": round(i.get("monthlyCost", 0)),
+                "pct": round(i.get("monthlyCost", 0) / total_monthly * 100) if total_monthly > 0 else 0,
+            }
+            for i in sorted_items[:3]
+        ]
+
+        # Reservation savings estimate (1-year reserved is ~30-40% cheaper for compute)
+        compute_monthly = sum(
+            i.get("monthlyCost", 0) for i in items
+            if any(kw in i.get("serviceName", "").lower()
+                   for kw in ("app service", "virtual machine", "kubernetes", "container apps"))
+        )
+        reservation_savings_annual = round(compute_monthly * 12 * 0.35) if compute_monthly > 0 else 0
+
+        # Cost per user per month
+        cost_per_user = round(total_monthly / users, 2) if users > 0 else None
+
+        # Optimization tips
+        tips = []
+        for item in sorted_items[:3]:
+            svc = item.get("serviceName", "")
+            if "openai" in svc.lower() or "ai" in svc.lower():
+                tips.append("Consider prompt caching and batching to reduce Azure OpenAI token consumption")
+            elif "cosmos" in svc.lower():
+                tips.append("Use Cosmos DB serverless for dev/test; switch to provisioned RU for production")
+            elif "kubernetes" in svc.lower() or "aks" in svc.lower():
+                tips.append("Use AKS spot node pools for batch/non-critical workloads (60-90% savings)")
+            elif "app service" in svc.lower():
+                tips.append("Use App Service reserved instances (1-yr) for ~35% cost reduction")
+
+        return {
+            "top3Drivers": top3,
+            "reservationSavingsAnnual": reservation_savings_annual,
+            "reservationNote": f"~${reservation_savings_annual:,}/yr savings with 1-yr reserved pricing on compute" if reservation_savings_annual > 0 else None,
+            "costPerUserMonthly": cost_per_user,
+            "optimizationTips": list(dict.fromkeys(tips))[:3],  # deduplicate, max 3
+        }

@@ -44,22 +44,64 @@ class ArchitectAgent:
 
     @staticmethod
     def _retrieve_patterns(state: AgentState) -> None:
-        """Query MCP for Azure patterns matching the use case, with local fallback."""
-        query = f"{state.user_input} {state.clarifications}".strip()
+        """QI-7: Multi-query MCP search — separate functional, scale, and compliance queries.
 
+        Merges results, deduplicates by URL, and ranks by confidence_score.
+        Falls back to local knowledge base when MCP is unavailable.
+        """
+        base_query = f"{state.user_input} {state.clarifications}".strip()
         industry = state.brainstorming.get("industry", "")
         if industry and industry != "Cross-Industry":
-            query += f" {industry}"
+            base_query += f" {industry}"
+
+        # Extract scale hints
+        scale_hint = ""
+        full_text = base_query.lower()
+        import re as _re
+        m = _re.search(r'(\d[\d,]*)\s*(?:concurrent|simultaneous)?\s*users', full_text)
+        if m:
+            scale_hint = f"high-scale {m.group(1)} concurrent users"
+
+        # Extract compliance hints
+        compliance_keywords = ["hipaa", "gdpr", "pci", "soc2", "iso27001", "fedramp", "compliance"]
+        compliance_terms = [kw for kw in compliance_keywords if kw in full_text]
+        compliance_hint = " ".join(compliance_terms) + " Azure" if compliance_terms else ""
+
+        # Build targeted queries
+        queries: list[str] = [base_query]
+        if scale_hint:
+            queries.append(f"{state.user_input[:80]} {scale_hint} Azure architecture")
+        if compliance_hint:
+            queries.append(f"{state.user_input[:80]} {compliance_hint}")
 
         try:
-            patterns = mcp_client.search(query=query, top_k=5)
-            logger.info("MCP returned %d patterns for query: %s", len(patterns), query[:50])
-            state.retrieved_patterns = patterns
+            seen_urls: set[str] = set()
+            all_patterns: list[dict] = []
+
+            for q in queries:
+                try:
+                    results = mcp_client.search(query=q, top_k=3)
+                    for p in results:
+                        url = p.get("url", "")
+                        if url not in seen_urls:
+                            seen_urls.add(url)
+                            all_patterns.append(p)
+                except MCPUnavailableError:
+                    raise  # re-raise to trigger local fallback
+
+            # Sort by confidence and cap at top 5
+            all_patterns.sort(key=lambda p: p.get("confidence_score", 0.0), reverse=True)
+            logger.info(
+                "MCP multi-query returned %d unique patterns from %d queries",
+                len(all_patterns), len(queries),
+            )
+            state.retrieved_patterns = all_patterns[:5]
             return
+
         except MCPUnavailableError as e:
             logger.warning("MCP unavailable, falling back to local knowledge base: %s", e)
 
-        local_patterns = search_local_patterns(query=query, top_k=5)
+        local_patterns = search_local_patterns(query=base_query, top_k=5)
         for pattern in local_patterns:
             pattern["_source"] = "local"
             pattern["_ungrounded"] = True
@@ -155,7 +197,13 @@ class ArchitectAgent:
                     '  "narrative": "2-3 sentences framing this architecture for the specific use case.",\n'
                     '  "adaptedFrom": "Name of Microsoft reference pattern adapted, or null",\n'
                     '  "adaptedFromUrl": "URL to the reference pattern, or null",\n'
-                    '  "adaptationNotes": "1-2 sentences on what was adapted and why, or null"\n'
+                    '  "adaptationNotes": "1-2 sentences on what was adapted and why, or null",\n'
+                    '  "nfr": {\n'
+                    '    "security": {"zones": ["zone1"], "identity": "e.g. Microsoft Entra ID + RBAC", "encryption": "e.g. TLS 1.3 in transit, AES-256 at rest"},\n'
+                    '    "compliance": {"frameworks": ["e.g. GDPR", "HIPAA"], "controls": ["e.g. Purview for data governance"]},\n'
+                    '    "ha": {"drStrategy": "e.g. Active-passive with Azure Site Recovery", "rpo": "e.g. 15 min", "rto": "e.g. 1 hr"},\n'
+                    '    "monitoring": {"observability": "e.g. Azure Monitor + Application Insights", "alerting": "e.g. Action Groups"}\n'
+                    "  }\n"
                     "}\n\n"
                     "LAYER GUIDELINES:\n"
                     "- 3-6 layers depending on the use case\n"
@@ -170,6 +218,14 @@ class ArchitectAgent:
                     "- Subgraph labels = layer names\n"
                     "- Node labels = short Azure service name (e.g. [Azure AI Search])\n"
                     "- Show data flow between layers with arrows (-->)\n"
+                    "- ALWAYS add connection type labels on arrows — use the pipe syntax:\n"
+                    "    A -->|REST API| B\n"
+                    "    C -->|Event Stream| D\n"
+                    "    E -->|Queue Messages| F\n"
+                    "    G -->|gRPC| H\n"
+                    "    I -->|SQL Query| J\n"
+                    "    K -->|Vector Search| L\n"
+                    "  Choose the label that best describes what flows between the nodes\n"
                     "- Do NOT use HTML tags like <br> in labels\n"
                     "- Use unique short IDs (A, B, C... or descriptive like PLM, HPC)\n\n"
                     "NARRATIVE RULES:\n"
@@ -226,6 +282,9 @@ class ArchitectAgent:
 
         adapted = result.get("adaptedFrom") or (pattern_title if pattern else None)
 
+        # QI-6: capture NFR section
+        nfr = result.get("nfr", {})
+
         return {
             "mermaidCode": mermaid,
             "layers": layers,
@@ -234,6 +293,7 @@ class ArchitectAgent:
             "basedOn": adapted or "custom design",
             "basedOnUrl": result.get("adaptedFromUrl") or (pattern.get("url") if pattern else None),
             "adaptationNotes": result.get("adaptationNotes"),
+            "nfr": nfr,
         }
 
     # ── Fallback ──────────────────────────────────────────────────────
@@ -284,3 +344,97 @@ class ArchitectAgent:
             "basedOnUrl": None,
             "adaptationNotes": "Generated from fallback when primary architecture generation was unavailable.",
         }
+
+    # ── Mermaid node utilities (tested via test_mermaid_cap.py) ──────
+
+    _NODE_PATTERN = re.compile(
+        r'(?:^|\s)(\w+)\s*'                    # node ID
+        r'(?:\[|{|>|\()'                         # opening bracket
+        r'[^\[\]{}()\n]*'                        # label contents
+        r'(?:\]|}|\))',                           # closing bracket
+        re.MULTILINE,
+    )
+    _SUBGRAPH_PATTERN = re.compile(r'^\s*subgraph\s', re.MULTILINE)
+    _COMMENT_PATTERN = re.compile(r'%%[^\n]*')
+
+    @classmethod
+    def _count_mermaid_nodes(cls, code: str) -> int:
+        """Count the number of unique labelled nodes in a Mermaid diagram.
+
+        Subgraph header lines (subgraph Name[Label]) and comment lines (%%) are excluded.
+        Each unique node ID that has a label definition is counted once.
+        """
+        # Strip comments
+        clean = cls._COMMENT_PATTERN.sub("", code)
+
+        # Remove subgraph declaration lines so their IDs aren't counted
+        clean = cls._SUBGRAPH_PATTERN.sub("~~SUBGRAPH~~", clean)
+
+        seen: set[str] = set()
+        for m in cls._NODE_PATTERN.finditer(clean):
+            node_id = m.group(1)
+            if node_id not in ("~~SUBGRAPH~~", "end", "TD", "LR", "TB", "RL", "BT"):
+                seen.add(node_id)
+        return len(seen)
+
+    @classmethod
+    def _cap_mermaid_nodes(
+        cls, code: str, layers: list[dict], max_nodes: int = 20
+    ) -> str:
+        """If the diagram has more than max_nodes, rebuild it from layers.
+
+        Rebuilds a deterministic flowchart using subgraph blocks per layer,
+        capped at max_nodes total. Returns the original code when under cap.
+        """
+        if cls._count_mermaid_nodes(code) <= max_nodes:
+            return code
+
+        # Flatten all components from layers
+        all_components: list[tuple[str, str]] = []  # (name, azureService)
+        for layer in layers:
+            for comp in layer.get("components", []):
+                svc = comp.get("azureService", comp.get("name", "Unknown"))
+                all_components.append((comp.get("name", svc), svc))
+            if len(all_components) >= max_nodes:
+                break
+
+        all_components = all_components[:max_nodes]
+
+        if not all_components:
+            return "flowchart TD\n  A[Azure Solution]"
+
+        lines = ["flowchart TD"]
+        comp_idx = 0
+        prev_subgraph_last_id: str | None = None
+
+        for layer in layers:
+            layer_components = layer.get("components", [])
+            if not layer_components:
+                continue
+            layer_name = layer.get("name", "Layer")
+            # Sanitise for mermaid subgraph label
+            safe_name = layer_name.replace("[", "(").replace("]", ")")
+            lines.append(f"  subgraph {safe_name.replace(' ', '_')}[\"{safe_name}\"]")
+            first_id_in_layer: str | None = None
+            last_id_in_layer: str | None = None
+            for comp in layer_components:
+                if comp_idx >= max_nodes:
+                    break
+                node_id = f"N{comp_idx}"
+                svc = comp.get("azureService", comp.get("name", "Unknown"))
+                safe_svc = svc.replace("[", "(").replace("]", ")")
+                lines.append(f"    {node_id}[\"{safe_svc}\"]")
+                if first_id_in_layer is None:
+                    first_id_in_layer = node_id
+                last_id_in_layer = node_id
+                comp_idx += 1
+            lines.append("  end")
+            # Connect previous layer to this layer
+            if prev_subgraph_last_id and first_id_in_layer:
+                lines.append(f"  {prev_subgraph_last_id} --> {first_id_in_layer}")
+            prev_subgraph_last_id = last_id_in_layer
+
+            if comp_idx >= max_nodes:
+                break
+
+        return "\n".join(lines)
