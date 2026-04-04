@@ -5,23 +5,127 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run integration tests (requires Azure credentials)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  checks: write
+  id-token: write
 
 jobs:
-  test-api:
+  # ── Unit & BDD Tests (mock LLM, no credentials needed) ─────────
+  test-unit:
+    name: "Unit & BDD Tests"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: pip install -r src/python-api/requirements.txt
-      - name: Lint
-        run: cd src/python-api && python -m py_compile main.py maf_orchestrator.py workflow.py
-      - name: Test
-        run: cd src/python-api && python -m pytest tests/ -v --ignore=tests/test_mermaid_cap.py || true
 
+      - name: Install dependencies
+        run: |
+          pip install -r src/python-api/requirements.txt
+          pip install pytest pytest-asyncio pytest-bdd pytest-cov
+
+      - name: Lint (compile check)
+        run: |
+          cd src/python-api
+          python -m py_compile main.py
+          python -m py_compile maf_orchestrator.py
+          python -m py_compile workflow.py
+          python -m py_compile agents/roi_agent.py
+          python -m py_compile agents/architect_agent.py
+          python -m py_compile agents/business_value_agent.py
+
+      - name: Run unit tests
+        run: |
+          cd src/python-api
+          python -m pytest tests/ -v \
+            --ignore=tests/test_mermaid_cap.py \
+            -m "not integration" \
+            --tb=short \
+            --junitxml=../../test-results/unit-results.xml \
+            --co -q 2>/dev/null || true
+          python -m pytest tests/ -v \
+            --ignore=tests/test_mermaid_cap.py \
+            -m "not integration" \
+            --tb=short \
+            --junitxml=../../test-results/unit-results.xml
+
+      - name: Test Summary
+        if: always()
+        uses: test-summary/action@v2
+        with:
+          paths: test-results/unit-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results/
+
+  # ── Integration Tests (real Azure OpenAI) ───────────────────────
+  test-integration:
+    name: "Integration Tests (Azure)"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true'
+      || github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Azure Login (federated)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Azure OpenAI token
+        run: |
+          TOKEN=$(az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv)
+          echo "AZURE_OPENAI_TOKEN=$TOKEN" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: |
+          pip install -r src/python-api/requirements.txt
+          pip install pytest pytest-asyncio pytest-bdd pytest-cov
+
+      - name: Run integration tests
+        env:
+          AZURE_OPENAI_TOKEN: ${{ env.AZURE_OPENAI_TOKEN }}
+        run: |
+          cd src/python-api
+          python -m pytest tests/ -v \
+            -m "integration" \
+            --tb=long \
+            --junitxml=../../test-results/integration-results.xml \
+            --timeout=120
+        timeout-minutes: 10
+
+      - name: Upload integration results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: test-results/
+
+  # ── Frontend Build ──────────────────────────────────────────────
   build-frontend:
+    name: "Frontend Build"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

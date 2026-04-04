@@ -99,10 +99,15 @@ class MAFOrchestrator:
             async def _run_brainstorm():
                 def on_token(token: str):
                     token_queue.put_nowait(token)
-                result_holder[0] = await pm.brainstorm_greeting_streaming(
-                    message, on_token, company_profile=state.company_profile
-                )
-                token_queue.put_nowait(None)
+                try:
+                    result_holder[0] = await pm.brainstorm_greeting_streaming(
+                        message, on_token, company_profile=state.company_profile
+                    )
+                except Exception as e:
+                    logger.error("PM brainstorm failed: %s", e)
+                    result_holder[0] = e
+                finally:
+                    token_queue.put_nowait(None)
 
             task = asyncio.create_task(_run_brainstorm())
             while True:
@@ -117,6 +122,15 @@ class MAFOrchestrator:
 
             await task
             result = result_holder[0]
+
+            # If brainstorm failed (e.g. expired token), send error to user
+            if isinstance(result, Exception):
+                yield ChatMessage(
+                    project_id=project_id, role="agent", agent_id="pm",
+                    content=f"⚠️ Project Manager failed to start: {result}\n\nPlease check your Azure OpenAI credentials and try again.",
+                    metadata={"type": "error", "agent": "pm"},
+                )
+                return
 
             state.brainstorming = {
                 "scenarios": result.get("scenarios", []),
@@ -374,7 +388,7 @@ class MAFOrchestrator:
 
         # Pre-compute profile-derived defaults if company profile is available
         profile_defaults: dict = {}
-        profile_hint_prefix = ""
+        profile_hints: dict = {}
         if state.company_profile:
             from services.company_intelligence import (
                 estimate_labor_rate, scope_employees,
@@ -391,24 +405,34 @@ class MAFOrchestrator:
             if total_employees:
                 scoped = scope_employees(total_employees, description)
                 profile_defaults["affected_employees"] = scoped
+                ratio = round(scoped / total_employees * 100) if total_employees else 0
+                profile_hints["affected_employees"] = (
+                    f"Scoped from {total_employees:,} total employees ({ratio}%)"
+                )
 
             # Current annual spend: use IT spend estimate
             if it_spend:
                 profile_defaults["current_annual_spend"] = it_spend
+                profile_hints["current_annual_spend"] = "From estimated IT spend"
 
             # Hourly labor rate: derived from HQ + industry
             labor_rate = estimate_labor_rate(hq, profile_industry)
             if labor_rate:
                 profile_defaults["hourly_labor_rate"] = labor_rate
+                profile_hints["hourly_labor_rate"] = (
+                    f"Estimated for {hq}, {profile_industry}" if hq
+                    else f"Estimated for {profile_industry}"
+                )
 
             # Total users: same as employee count (platform scale)
             if total_employees:
                 profile_defaults["concurrent_users"] = max(100, int(total_employees * 0.05))
+                profile_hints["concurrent_users"] = f"5% of {total_employees:,} employees"
 
-            profile_hint_prefix = (
-                f"Pre-filled from {company_name} profile. "
-                f"Adjust if your scope is different."
-            )
+            # Monthly revenue: derived from annual revenue
+            if annual_revenue:
+                profile_defaults["monthly_revenue"] = round(annual_revenue / 12, 2)
+                profile_hints["monthly_revenue"] = f"From ${annual_revenue:,.0f}/yr annual revenue"
 
         try:
             response = await asyncio.wait_for(llm.ainvoke([
@@ -445,8 +469,21 @@ class MAFOrchestrator:
                 {"id": "concurrent_users", "label": "Peak concurrent users on the platform", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
             ]
 
-        # Overlay profile-derived defaults
+        # Overlay profile-derived defaults and per-field source hints
         if profile_defaults:
+            # Add monthly_revenue assumption if profile provides it
+            if "monthly_revenue" in profile_defaults:
+                has_revenue = any(a.get("id") == "monthly_revenue" for a in assumptions)
+                if not has_revenue:
+                    assumptions.append({
+                        "id": "monthly_revenue",
+                        "label": "Estimated monthly revenue",
+                        "unit": "$",
+                        "default": profile_defaults["monthly_revenue"],
+                        "hint": "Used for revenue-impact and ROI calculations",
+                        "source": profile_hints.get("monthly_revenue", ""),
+                    })
+
             id_map = {
                 "affected_employees": profile_defaults.get("affected_employees"),
                 "current_annual_spend": profile_defaults.get("current_annual_spend"),
@@ -457,8 +494,8 @@ class MAFOrchestrator:
                 aid = assumption.get("id", "")
                 if aid in id_map and id_map[aid] is not None:
                     assumption["default"] = id_map[aid]
-                    if profile_hint_prefix and assumption.get("hint"):
-                        assumption["hint"] = f"{profile_hint_prefix} {assumption['hint']}"
+                    if aid in profile_hints:
+                        assumption["source"] = profile_hints[aid]
 
         return assumptions
 
@@ -577,9 +614,11 @@ class MAFOrchestrator:
                             metadata={"type": "plan_update", "step": step, "status": "running"},
                         )
                         # Signal sidebar to highlight this agent
+                        agent_info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
+                        label = f"{agent_info.get('emoji', '🔧')} {agent_info.get('name', step)} is working..."
                         yield ChatMessage(
                             project_id=project_id, role="agent", agent_id=agent_id,
-                            content="",
+                            content=label,
                             metadata={"type": "agent_start", "agent": agent_id, "step": step},
                         )
 

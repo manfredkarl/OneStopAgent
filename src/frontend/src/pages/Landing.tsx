@@ -166,6 +166,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const [description, setDescription] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
   const [opportunities, setOpportunities] = useState<Array<{customer: string; title: string; workloads: string; prompt: string}>>([]);
   const [loadingOpps, setLoadingOpps] = useState(false);
@@ -310,10 +311,32 @@ export default function Landing({ agents, onProjectCreated }: Props) {
     if (!text) return;
     setLoading(true);
     try {
-      // Pass active agents so the project respects sidebar toggles
       const activeAgents = agents.filter(a => a.active).map(a => a.agentId);
       const customer = overrideCustomer ?? (customerName || undefined);
-      const profile = overrideProfile ?? selectedProfile ?? undefined;
+      let profile = overrideProfile ?? selectedProfile ?? undefined;
+
+      // If customer name is provided but no profile yet, fetch it now
+      if (customer && customer.trim().length >= 2 && !profile) {
+        setLoadingMessage('Fetching company intelligence…');
+        try {
+          // Cancel any pending debounce
+          if (debounceRef.current) clearTimeout(debounceRef.current);
+          const results = await searchCompany(customer.trim());
+          if (results.length === 1) {
+            profile = { ...results[0], disambiguated: true } as CompanyProfile;
+            setSelectedProfile(profile);
+          } else if (results.length > 1) {
+            // Auto-pick the first (highest confidence) result
+            profile = { ...results[0], disambiguated: true } as CompanyProfile;
+            setSelectedProfile(profile);
+          }
+          // If 0 results, proceed without profile
+        } catch {
+          // Search failed — proceed without profile
+        }
+      }
+
+      setLoadingMessage('Creating project…');
       const result = await createProject(text, customer, activeAgents, profile);
       const projectId = result.projectId || result.id;
       onProjectCreated?.();
@@ -322,6 +345,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
       console.error('Failed to create project:', err);
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -375,7 +399,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
                 disabled={loading || !description.trim()}
                 className="px-6 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
               >
-                {loading ? 'Creating...' : 'Start'}
+                {loading ? (loadingMessage || 'Creating...') : 'Start'}
               </button>
             </div>
 

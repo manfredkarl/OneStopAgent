@@ -163,7 +163,7 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                   <div className="prose-content">
                     <MessageContent content={msg.content} />
                     <AssumptionsInput
-                      assumptions={msg.metadata.assumptions as Array<{id: string; label: string; unit: string; default: number; hint?: string}>}
+                      assumptions={msg.metadata.assumptions as Array<{id: string; label: string; unit: string; default: number; hint?: string; source?: string}>}
                       agentId={agentId}
                       onSubmit={(values) => {
                         onSend?.(JSON.stringify(values));

@@ -237,25 +237,47 @@ Rules:
 async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
     """Search for a company by name and extract structured profiles.
 
+    Uses multiple targeted searches to gather rich data:
+    - Wikipedia/overview for identity + HQ + employees
+    - Financial data for revenue
+    - Technology stack info
+
     Returns up to 3 ranked CompanyProfile dicts. Returns empty list on failure.
     """
     from services.web_search import search_web
     from agents.llm import llm
 
-    search_query = f"{query} company employees revenue annual report headquarters"
+    # Run multiple targeted searches in parallel for richer data
+    search_queries = [
+        f"{query} company Wikipedia employees headquarters founded",
+        f"{query} annual revenue 2024 2025 employees number of",
+        f"{query} cloud provider technology stack Azure AWS ERP",
+    ]
+    all_results: list[dict] = []
     try:
-        results = await asyncio.to_thread(search_web, search_query, 8)
+        for sq in search_queries:
+            results = await asyncio.to_thread(search_web, sq, 5)
+            all_results.extend(results)
     except Exception as e:
         logger.warning("Company web search failed for %r: %s", query, e)
         return []
 
-    if not results:
+    # Deduplicate by URL
+    seen_urls: set[str] = set()
+    unique_results: list[dict] = []
+    for r in all_results:
+        url = r.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            unique_results.append(r)
+
+    if not unique_results:
         return []
 
     # Format search results for the LLM
     snippets = "\n\n".join(
         f"Title: {r.get('title', '')}\nURL: {r.get('url', '')}\nSnippet: {r.get('snippet', '')}"
-        for r in results[:6]
+        for r in unique_results[:10]
     )
 
     try:
@@ -299,6 +321,20 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
         p["enrichedAt"] = now_iso
         p["disambiguated"] = False
         p["sources"] = ["DuckDuckGo web search"]
+
+        # Adjust confidence based on data completeness — LLM confidence
+        # reflects identity certainty; downgrade if key financials are missing
+        key_fields = [p.get("employeeCount"), p.get("annualRevenue"), p.get("headquarters")]
+        filled = sum(1 for f in key_fields if f)
+        if filled == 3 and p.get("confidence") == "high":
+            pass  # keep high
+        elif filled >= 2:
+            p["confidence"] = "high"
+        elif filled >= 1:
+            p["confidence"] = max(p.get("confidence", "medium"), "medium") if p.get("confidence") != "high" else "medium"
+        else:
+            p["confidence"] = "low"
+
         enriched.append(p)
 
     return enriched

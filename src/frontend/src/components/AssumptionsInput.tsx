@@ -6,6 +6,7 @@ interface Assumption {
   unit: string;
   default: number;
   hint?: string;
+  source?: string;
   value?: number;
 }
 
@@ -51,6 +52,7 @@ export default function AssumptionsInput({ assumptions, onSubmit, agentId }: Pro
           <div className="flex-1">
             <label className="text-sm font-medium text-[var(--text-primary)]">{a.label}</label>
             {a.hint && <p className="text-xs text-[var(--text-muted)]">{a.hint}</p>}
+            {a.source && <p className="text-xs italic text-[var(--accent)]">📌 {a.source}</p>}
           </div>
           <div className="flex items-center gap-1">
             {a.unit === '$' && <span className="text-sm text-[var(--text-muted)]">$</span>}

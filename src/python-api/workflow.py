@@ -455,59 +455,36 @@ class BusinessValueExecutor(PipelineExecutor):
     async def _run_bv_and_architect_parallel(
         self, msg: PipelineMessage, ctx: WorkflowContext, state
     ) -> None:
-        """AC-1: Run BV Phase 2 and Architect in parallel, emit results."""
+        """Run BV Phase 2, pause for approval, then Architect on approval."""
         loop = asyncio.get_running_loop()
-        bv_error: Exception | None = None
-        arch_error: Exception | None = None
 
+        # ── BV Phase 2 ──────────────────────────────────────────────
         await ctx.yield_output({"type": "agent_start", "step": "business_value", "msg_id": str(uuid.uuid4())})
-        await ctx.yield_output({"type": "agent_start", "step": "architect", "msg_id": str(uuid.uuid4())})
+        bv_error: Exception | None = None
+        try:
+            await asyncio.wait_for(loop.run_in_executor(None, self.agent.run, state), timeout=300)
+        except Exception as e:
+            bv_error = e
 
-        async def _run_bv():
-            nonlocal bv_error
-            try:
-                await asyncio.wait_for(loop.run_in_executor(None, self.agent.run, state), timeout=300)
-            except Exception as e:
-                bv_error = e
-
-        async def _run_architect():
-            nonlocal arch_error
-            try:
-                await asyncio.wait_for(loop.run_in_executor(None, self._architect_agent.run, state), timeout=300)
-            except Exception as e:
-                arch_error = e
-
-        await asyncio.gather(_run_bv(), _run_architect())
-
-        # Emit BV result
         if bv_error:
-            logger.exception("BV parallel run failed: %s", bv_error)
+            logger.exception("BV run failed: %s", bv_error)
             state.mark_step_failed("business_value")
             await ctx.yield_output({"type": "agent_error", "step": "business_value", "error": str(bv_error)})
-        else:
-            state.mark_step_completed("business_value")
-            await ctx.yield_output({
-                "type": "agent_result", "step": "business_value",
-                "content": self.pm.format_agent_output("business_value", state),
-            })
+            # BV failed — skip to architect if it's active
+            if "architect" in msg.active_agents:
+                await self._run_architect_only(msg, ctx)
+            else:
+                await ctx.send_message(msg)
+            return
 
-        # Emit architect result
-        if arch_error:
-            logger.exception("Architect parallel run failed: %s", arch_error)
-            state.mark_step_failed("architect")
-            await ctx.yield_output({"type": "agent_error", "step": "architect", "error": str(arch_error)})
-            if "architect" in REQUIRED_STEPS:
-                await ctx.yield_output({"type": "pipeline_done", "content": "Pipeline stopped: architect failed."})
-                return
-        else:
-            state.mark_step_completed("architect")
-            await ctx.yield_output({
-                "type": "agent_result", "step": "architect",
-                "content": self.pm.format_agent_output("architect", state),
-            })
+        state.mark_step_completed("business_value")
+        await ctx.yield_output({
+            "type": "agent_result", "step": "business_value",
+            "content": self.pm.format_agent_output("business_value", state),
+        })
 
-        # Approval gate for BV (architect approval is deferred — Cost runs after both)
-        if not bv_error and state.business_value.get("phase") == "needs_input":
+        # Check if BV needs more input first
+        if state.business_value.get("phase") == "needs_input":
             assumptions = state.business_value.get("assumptions_needed", [])
             await ctx.yield_output({"type": "assumptions_input", "step": "business_value", "assumptions": assumptions})
             await ctx.request_info(
@@ -516,14 +493,19 @@ class BusinessValueExecutor(PipelineExecutor):
             )
             return
 
-        if _should_pause(msg.execution_mode, "business_value") and not bv_error:
+        # ── Approval gate for BV — architect runs AFTER approval ──
+        if _should_pause(msg.execution_mode, "business_value"):
             summary = self.pm.approval_summary("business_value", state)
             await ctx.request_info(
                 request_data=ApprovalRequest(step="business_value", summary=summary),
                 response_type=str,
             )
         else:
-            await ctx.send_message(msg)
+            # Fast-run: go straight to architect
+            if "architect" in msg.active_agents and "architect" not in state.completed_steps:
+                await self._run_architect_only(msg, ctx)
+            else:
+                await ctx.send_message(msg)
 
     @response_handler
     async def on_assumptions_or_approval(
@@ -597,6 +579,12 @@ class BusinessValueExecutor(PipelineExecutor):
                 "type": "agent_result", "step": self.step_name,
                 "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
             })
+
+        # After BV approval, run architect if it hasn't run yet
+        if request.step == "business_value" and "architect" in msg.active_agents and "architect" not in state.completed_steps:
+            await self._run_architect_only(msg, ctx)
+            return
+
         await ctx.send_message(msg)
 
 

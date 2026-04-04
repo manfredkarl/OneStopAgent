@@ -27,8 +27,8 @@ const CONFIDENCE_COLORS: Record<string, string> = {
 };
 
 const CONFIDENCE_LABELS: Record<string, string> = {
-  high: 'Verified',
-  medium: 'Estimated',
+  high: 'Web-verified',
+  medium: 'Partial data',
   low: 'Size profile',
 };
 

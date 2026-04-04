@@ -948,7 +948,7 @@ class ROIAgent:
         if bv_drivers:
             assumption_types.append(
                 f"Value drivers: {len(bv_drivers)} identified "
-                f"({bv.get('confidence', 'moderate')} confidence)"
+                f"({bv.get('confidence', {}).get('label', 'moderate') if isinstance(bv.get('confidence'), dict) else bv.get('confidence', 'moderate')} confidence)"
             )
         assumption_types.append(f"Azure costs: {cost_source}")
         methodology += " Assumptions: " + "; ".join(assumption_types) + "."
@@ -1023,7 +1023,7 @@ class ROIAgent:
             "roiDescription": roi_description,
             "roiYear1Text": roi_display_text,
             "roiSteadyStateText": roi_steady_text,
-            "confidenceLevel": bv.get("confidence", "moderate"),
+            "confidenceLevel": bv.get("confidence", {}).get("label", "moderate") if isinstance(bv.get("confidence"), dict) else bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
             "futureAnnualOpex": round(future_annual),
             "drivers": display_drivers,
@@ -1078,7 +1078,11 @@ class ROIAgent:
             dashboard["savingsPercentage"] = None
 
         # ── Reconciliation results (FRD-004) ─────────────────────────
-        dashboard["confidenceLevel"] = adjusted_confidence
+        # Ensure confidenceLevel is always a string label, not a scored dict
+        if isinstance(adjusted_confidence, dict):
+            dashboard["confidenceLevel"] = adjusted_confidence.get("label", "moderate")
+        else:
+            dashboard["confidenceLevel"] = adjusted_confidence or "moderate"
         dashboard["plausibilityWarnings"] = plausibility_warnings
         if savings_capped:
             dashboard["savingsCapped"] = True

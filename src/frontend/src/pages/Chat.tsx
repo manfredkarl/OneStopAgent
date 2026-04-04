@@ -5,6 +5,7 @@ import { getChatHistory, getAgents, sendMessageStreaming, getProject } from '../
 import ChatThread from '../components/ChatThread';
 import ChatInput from '../components/ChatInput';
 import CompanyCard from '../components/CompanyCard';
+import CompanyDetailModal from '../components/CompanyDetailModal';
 
 interface Props {
   agents: AgentStatus[];
@@ -18,6 +19,7 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [companyProfile, setCompanyProfile] = useState<CompanyProfile | null>(null);
+  const [showCompanyDetail, setShowCompanyDetail] = useState(false);
   const initialSent = useRef(false);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
@@ -130,8 +132,19 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
       {companyProfile && (
         <aside className="w-56 shrink-0 bg-[var(--bg-primary)] border-l border-[var(--border)] overflow-y-auto p-3 hidden lg:block">
           <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Customer</p>
-          <CompanyCard profile={companyProfile} />
+          <div
+            className="cursor-pointer transition-all duration-150 rounded-xl hover:border-[var(--accent)] hover:scale-[1.02]"
+            onClick={() => setShowCompanyDetail(true)}
+            title="Click for full company details"
+          >
+            <CompanyCard profile={companyProfile} />
+          </div>
         </aside>
+      )}
+
+      {/* Company detail modal */}
+      {companyProfile && showCompanyDetail && (
+        <CompanyDetailModal profile={companyProfile} onClose={() => setShowCompanyDetail(false)} />
       )}
     </div>
   );

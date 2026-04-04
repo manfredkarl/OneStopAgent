@@ -27,7 +27,18 @@ class ArchitectAgent:
 
         try:
             pattern = self._select_pattern(state.retrieved_patterns)
-            requirements = state.to_context_string()
+            # Build clean context for architect — exclude BV/cost/ROI data
+            context_parts = [f"Project: {state.user_input}"]
+            if state.brainstorming:
+                context_parts.append(f"Industry: {state.brainstorming.get('industry', 'Cross-Industry')}")
+            if state.shared_assumptions:
+                sa_items = [f"  {k}: {v}" for k, v in state.shared_assumptions.items() if not k.startswith("_")]
+                if sa_items:
+                    context_parts.append("Shared assumptions:\n" + "\n".join(sa_items))
+            if state.retrieved_patterns:
+                titles = [p.get("title", "") for p in state.retrieved_patterns[:5]]
+                context_parts.append(f"Reference patterns: {', '.join(titles)}")
+            requirements = "\n".join(context_parts)
             industry = state.brainstorming.get("industry", "Cross-Industry")
             scenarios = state.brainstorming.get("scenarios", [])
             state.architecture = self._generate_architecture(
