@@ -14,11 +14,13 @@ class ProjectStore:
         user_id: str,
         description: str,
         customer_name: Optional[str] = None,
+        company_profile: Optional[dict] = None,
     ) -> Project:
         project = Project(
             user_id=user_id,
             description=description,
             customer_name=customer_name,
+            company_profile=company_profile,
         )
         self.projects[project.id] = project
         self.chat_histories[project.id] = []

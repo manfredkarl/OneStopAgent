@@ -3,8 +3,50 @@ export interface Project {
   user_id?: string;
   description: string;
   customer_name?: string;
+  company_profile?: CompanyProfile;
   status: 'in_progress' | 'completed' | 'error';
   created_at: string;
+}
+
+export interface CompanyProfile {
+  // Identity
+  name: string;
+  legalName?: string;
+  ticker?: string;
+  website?: string;
+  logoUrl?: string;
+
+  // Firmographics
+  industry?: string;
+  subIndustry?: string;
+  headquarters?: string;
+  foundedYear?: number;
+  employeeCount?: number;
+  employeeCountSource?: string;
+
+  // Financials
+  annualRevenue?: number;
+  revenueCurrency?: string;
+  fiscalYear?: string;
+  revenueSource?: string;
+  itSpendEstimate?: number;
+  itSpendRatio?: number;
+
+  // Technology
+  cloudProvider?: string;
+  knownAzureUsage?: string[];
+  erp?: string;
+  techStackNotes?: string;
+
+  // Derived / fallback
+  hourlyLaborRate?: number;
+  sizeTier?: string;
+
+  // Metadata
+  confidence: 'high' | 'medium' | 'low';
+  sources: string[];
+  enrichedAt?: string;
+  disambiguated: boolean;
 }
 
 export interface ChatMessage {

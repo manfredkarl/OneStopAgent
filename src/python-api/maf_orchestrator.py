@@ -70,9 +70,14 @@ class MAFOrchestrator:
     async def handle_message(
         self, project_id: str, message: str,
         active_agents: list[str], description: str,
+        company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
+
+        # Attach company profile to state on first message (phase == "new")
+        if phase == "new" and company_profile and not state.company_profile:
+            state.company_profile = company_profile
 
         try:
             intent, meta = await asyncio.wait_for(
@@ -94,7 +99,9 @@ class MAFOrchestrator:
             async def _run_brainstorm():
                 def on_token(token: str):
                     token_queue.put_nowait(token)
-                result_holder[0] = await pm.brainstorm_greeting_streaming(message, on_token)
+                result_holder[0] = await pm.brainstorm_greeting_streaming(
+                    message, on_token, company_profile=state.company_profile
+                )
                 token_queue.put_nowait(None)
 
             task = asyncio.create_task(_run_brainstorm())
@@ -357,12 +364,51 @@ class MAFOrchestrator:
 
     async def _generate_shared_assumptions(self, state: AgentState) -> list[dict]:
         """Generate overarching scenario assumptions that all agents share.
-        
+
+        When a company profile is available, pre-fills defaults from it.
         Keeps it lean — only the essentials that ALL agents need for consistency.
         Technical details (data volume, timeline, requests/day) belong in agent-specific questions.
         """
         industry = state.brainstorming.get("industry", "Cross-Industry")
         description = state.user_input
+
+        # Pre-compute profile-derived defaults if company profile is available
+        profile_defaults: dict = {}
+        profile_hint_prefix = ""
+        if state.company_profile:
+            from services.company_intelligence import (
+                estimate_labor_rate, scope_employees,
+            )
+            p = state.company_profile
+            company_name = p.get("name", "the company")
+            total_employees = p.get("employeeCount")
+            annual_revenue = p.get("annualRevenue")
+            it_spend = p.get("itSpendEstimate")
+            hq = p.get("headquarters", "")
+            profile_industry = p.get("industry", industry)
+
+            # Affected employees: scoped by use case
+            if total_employees:
+                scoped = scope_employees(total_employees, description)
+                profile_defaults["affected_employees"] = scoped
+
+            # Current annual spend: use IT spend estimate
+            if it_spend:
+                profile_defaults["current_annual_spend"] = it_spend
+
+            # Hourly labor rate: derived from HQ + industry
+            labor_rate = estimate_labor_rate(hq, profile_industry)
+            if labor_rate:
+                profile_defaults["hourly_labor_rate"] = labor_rate
+
+            # Total users: same as employee count (platform scale)
+            if total_employees:
+                profile_defaults["concurrent_users"] = max(100, int(total_employees * 0.05))
+
+            profile_hint_prefix = (
+                f"Pre-filled from {company_name} profile. "
+                f"Adjust if your scope is different."
+            )
 
         try:
             response = await asyncio.wait_for(llm.ainvoke([
@@ -386,17 +432,35 @@ class MAFOrchestrator:
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             assumptions = json.loads(text)
             if isinstance(assumptions, list) and len(assumptions) >= 3:
-                return assumptions[:5]
+                assumptions = assumptions[:5]
+            else:
+                raise ValueError(f"Too few assumptions returned: expected at least 3, got {len(assumptions) if isinstance(assumptions, list) else 0}")
         except Exception as e:
             logger.warning("Failed to generate shared assumptions: %s", e)
+            # Fallback defaults — lean and essential
+            assumptions = [
+                {"id": "affected_employees", "label": "Employees directly affected by the solution", "unit": "count", "default": 50, "hint": "Drives labor savings and change-management scope"},
+                {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI and value calculation"},
+                {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$/hr", "default": 85, "hint": "Used to monetize time savings"},
+                {"id": "concurrent_users", "label": "Peak concurrent users on the platform", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
+            ]
 
-        # Fallback defaults — lean and essential
-        return [
-            {"id": "affected_employees", "label": "Employees directly affected by the solution", "unit": "count", "default": 50, "hint": "Drives labor savings and change-management scope"},
-            {"id": "current_annual_spend", "label": "Current annual spend on equivalent tools/processes", "unit": "$", "default": 500000, "hint": "Baseline for ROI and value calculation"},
-            {"id": "hourly_labor_rate", "label": "Fully loaded hourly rate for affected staff", "unit": "$/hr", "default": 85, "hint": "Used to monetize time savings"},
-            {"id": "concurrent_users", "label": "Peak concurrent users on the platform", "unit": "count", "default": 100, "hint": "Determines compute tier and scaling"},
-        ]
+        # Overlay profile-derived defaults
+        if profile_defaults:
+            id_map = {
+                "affected_employees": profile_defaults.get("affected_employees"),
+                "current_annual_spend": profile_defaults.get("current_annual_spend"),
+                "hourly_labor_rate": profile_defaults.get("hourly_labor_rate"),
+                "concurrent_users": profile_defaults.get("concurrent_users"),
+            }
+            for assumption in assumptions:
+                aid = assumption.get("id", "")
+                if aid in id_map and id_map[aid] is not None:
+                    assumption["default"] = id_map[aid]
+                    if profile_hint_prefix and assumption.get("hint"):
+                        assumption["hint"] = f"{profile_hint_prefix} {assumption['hint']}"
+
+        return assumptions
 
     # ── MAF Workflow execution ──────────────────────────────────────
 

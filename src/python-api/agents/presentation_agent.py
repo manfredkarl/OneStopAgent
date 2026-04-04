@@ -78,6 +78,21 @@ class PresentationAgent:
             "industry": state.brainstorming.get("industry", "Cross-Industry"),
         }
 
+        # Add company profile for branded slides
+        if state.company_profile:
+            p = state.company_profile
+            data["companyProfile"] = {
+                "name": p.get("name", customer),
+                "industry": p.get("industry", ""),
+                "headquarters": p.get("headquarters", ""),
+                "employeeCount": p.get("employeeCount"),
+                "annualRevenue": p.get("annualRevenue"),
+                "revenueCurrency": p.get("revenueCurrency", "USD"),
+                "itSpendEstimate": p.get("itSpendEstimate"),
+                "knownAzureUsage": p.get("knownAzureUsage", []),
+                "cloudProvider": p.get("cloudProvider", ""),
+            }
+
         if state.architecture:
             data["architecture"] = {
                 "narrative": state.architecture.get("narrative", ""),

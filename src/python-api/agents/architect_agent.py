@@ -33,6 +33,7 @@ class ArchitectAgent:
             state.architecture = self._generate_architecture(
                 requirements, pattern, industry, scenarios,
                 shared_assumptions=state.shared_assumptions,
+                company_profile=state.company_profile,
             )
         except Exception:
             logger.exception("ArchitectAgent failed — using fallback")
@@ -127,6 +128,7 @@ class ArchitectAgent:
         industry: str,
         scenarios: list[dict],
         shared_assumptions: dict | None = None,
+        company_profile: dict | None = None,
     ) -> dict:
         """Generate a layered, use-case-framed architecture in one LLM call."""
         pattern_context = ""
@@ -163,6 +165,26 @@ class ArchitectAgent:
                     scale_parts.append(f"- Data volume: {int(fv)} GB")
             if scale_parts:
                 scale_context = "SCALE REQUIREMENTS (from shared assumptions):\n" + "\n".join(scale_parts) + "\nDesign the architecture to handle this scale appropriately.\n\n"
+
+        # Add company profile scale context
+        if company_profile:
+            p = company_profile
+            company_lines = [f"CUSTOMER SCALE ({p.get('name', 'Company')}):"]
+            if p.get("employeeCount"):
+                company_lines.append(f"- {p['employeeCount']:,} total employees")
+            if p.get("annualRevenue"):
+                rev = p["annualRevenue"]
+                currency = p.get("revenueCurrency", "USD")
+                company_lines.append(f"- Annual revenue: {currency} {rev:,.0f} — design for appropriate scale")
+            if p.get("headquarters"):
+                company_lines.append(f"- HQ: {p['headquarters']} — consider data residency/compliance")
+            if p.get("knownAzureUsage"):
+                company_lines.append(f"- Known Azure services: {', '.join(p['knownAzureUsage'][:4])}")
+            if p.get("erp"):
+                company_lines.append(f"- ERP: {p['erp']} — consider integration requirements")
+            if p.get("techStackNotes"):
+                company_lines.append(f"- Tech notes: {p['techStackNotes']}")
+            scale_context += "\n".join(company_lines) + "\n\n"
 
         scenario_context = ""
         if scenarios:

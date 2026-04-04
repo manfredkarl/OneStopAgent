@@ -1,4 +1,4 @@
-import type { ChatMessage, AgentStatus } from './types';
+import type { ChatMessage, AgentStatus, CompanyProfile } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || (
   typeof window !== 'undefined' && window.location.hostname.includes('azurecontainerapps.io')
@@ -18,15 +18,32 @@ function normalizeMessage(msg: any): ChatMessage {
   };
 }
 
-export async function createProject(description: string, customerName?: string, activeAgents?: string[]) {
+export async function createProject(description: string, customerName?: string, activeAgents?: string[], companyProfile?: CompanyProfile) {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
-    body: JSON.stringify({ description, customer_name: customerName, active_agents: activeAgents }),
+    body: JSON.stringify({ description, customer_name: customerName, active_agents: activeAgents, company_profile: companyProfile }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+export async function searchCompany(query: string): Promise<CompanyProfile[]> {
+  const res = await fetch(`${BASE_URL}/api/company/search?q=${encodeURIComponent(query)}`, {
+    headers: { 'x-user-id': 'demo-user' },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function getCompanyFallback(size: 'small' | 'mid-market' | 'enterprise', name: string): Promise<CompanyProfile> {
+  const res = await fetch(`${BASE_URL}/api/company/fallback/${size}?name=${encodeURIComponent(name)}`, {
+    headers: { 'x-user-id': 'demo-user' },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 
 export async function listProjects() {
   const res = await fetch(`${BASE_URL}/api/projects`, {

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createProject } from '../api';
-import type { AgentStatus } from '../types';
+import { createProject, searchCompany, getCompanyFallback } from '../api';
+import type { AgentStatus, CompanyProfile } from '../types';
+import CompanyCard from '../components/CompanyCard';
 
 interface Props {
   agents: AgentStatus[];
@@ -170,6 +171,106 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const [loadingOpps, setLoadingOpps] = useState(false);
   const [oppsLoaded, setOppsLoaded] = useState(false);
 
+  // Company intelligence state
+  const [companySearching, setCompanySearching] = useState(false);
+  const [companyResults, setCompanyResults] = useState<CompanyProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<CompanyProfile | null>(null);
+  const [showDisambiguation, setShowDisambiguation] = useState(false);
+  const [showSizePicker, setShowSizePicker] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced company search triggered on customer name change
+  useEffect(() => {
+    const name = customerName.trim();
+    if (name.length < 2) {
+      setCompanyResults([]);
+      setShowDisambiguation(false);
+      setShowSizePicker(false);
+      return;
+    }
+    // If user cleared the name, clear the profile
+    if (!name) {
+      setSelectedProfile(null);
+      return;
+    }
+
+    const timer = debounceRef;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      setCompanySearching(true);
+      setShowDisambiguation(false);
+      setShowSizePicker(false);
+      try {
+        const results = await searchCompany(name);
+        if (results.length === 0) {
+          // No results — show size picker
+          setCompanyResults([]);
+          setShowSizePicker(true);
+          setSelectedProfile(null);
+        } else if (results.length === 1) {
+          // Single high-confidence result — auto-select
+          const profile = { ...results[0], disambiguated: true };
+          setSelectedProfile(profile);
+          setCompanyResults(results);
+          setShowDisambiguation(false);
+          setShowSizePicker(false);
+        } else {
+          // Multiple results — show disambiguation popup
+          setCompanyResults(results);
+          setShowDisambiguation(true);
+          setSelectedProfile(null);
+          setShowSizePicker(false);
+        }
+      } catch {
+        // Search failed silently — don't block UX
+        setCompanyResults([]);
+      } finally {
+        setCompanySearching(false);
+      }
+    }, 500);
+
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [customerName]);
+
+  const handleSelectProfile = (profile: CompanyProfile) => {
+    setSelectedProfile({ ...profile, disambiguated: true });
+    setShowDisambiguation(false);
+    setShowSizePicker(false);
+  };
+
+  const handleSizePick = async (size: 'small' | 'mid-market' | 'enterprise') => {
+    try {
+      const profile = await getCompanyFallback(size, customerName.trim() || size);
+      setSelectedProfile({ ...profile, disambiguated: true } as CompanyProfile);
+    } catch {
+      // Build minimal profile client-side as fallback
+      const DEFAULTS: Record<string, Partial<CompanyProfile>> = {
+        small: { employeeCount: 200, annualRevenue: 25_000_000, itSpendEstimate: 1_250_000, hourlyLaborRate: 65 },
+        'mid-market': { employeeCount: 2500, annualRevenue: 250_000_000, itSpendEstimate: 10_000_000, hourlyLaborRate: 80 },
+        enterprise: { employeeCount: 25000, annualRevenue: 5_000_000_000, itSpendEstimate: 175_000_000, hourlyLaborRate: 95 },
+      };
+      setSelectedProfile({
+        name: customerName.trim() || size,
+        confidence: 'low',
+        sources: [`Company size estimate (${size} profile)`],
+        disambiguated: true,
+        sizeTier: size,
+        ...DEFAULTS[size],
+      } as CompanyProfile);
+    }
+    setShowSizePicker(false);
+    setShowDisambiguation(false);
+  };
+
+  const handleClearProfile = () => {
+    setSelectedProfile(null);
+    setShowDisambiguation(false);
+    setShowSizePicker(false);
+    setCompanyResults([]);
+  };
+
   const fetchOpportunities = async () => {
     setLoadingOpps(true);
     // Simulate WorkIQ/MSX API call (~2s)
@@ -204,14 +305,16 @@ export default function Landing({ agents, onProjectCreated }: Props) {
     setOppsLoaded(true);
   };
 
-  const handleCreate = async (desc?: string) => {
+  const handleCreate = async (desc?: string, overrideCustomer?: string, overrideProfile?: CompanyProfile) => {
     const text = desc || description.trim();
     if (!text) return;
     setLoading(true);
     try {
       // Pass active agents so the project respects sidebar toggles
       const activeAgents = agents.filter(a => a.active).map(a => a.agentId);
-      const result = await createProject(text, customerName || undefined, activeAgents);
+      const customer = overrideCustomer ?? (customerName || undefined);
+      const profile = overrideProfile ?? selectedProfile ?? undefined;
+      const result = await createProject(text, customer, activeAgents, profile);
       const projectId = result.projectId || result.id;
       onProjectCreated?.();
       navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);
@@ -247,20 +350,115 @@ export default function Landing({ agents, onProjectCreated }: Props) {
             rows={4}
             className="w-full resize-none rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
           />
-          <div className="flex gap-3 items-center">
-            <input
-              value={customerName}
-              onChange={e => setCustomerName(e.target.value)}
-              placeholder="Customer name (optional)"
-              className="flex-1 rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-            />
-            <button
-              onClick={() => handleCreate()}
-              disabled={loading || !description.trim()}
-              className="px-6 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              {loading ? 'Creating...' : 'Start'}
-            </button>
+
+          {/* Customer name + search */}
+          <div className="space-y-3">
+            <div className="flex gap-3 items-center">
+              <div className="flex-1 relative">
+                <input
+                  value={customerName}
+                  onChange={e => {
+                    setCustomerName(e.target.value);
+                    if (selectedProfile && e.target.value.trim() !== selectedProfile.name) {
+                      setSelectedProfile(null);
+                    }
+                  }}
+                  placeholder="Customer name (optional)"
+                  className="w-full rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+                />
+                {companySearching && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+              <button
+                onClick={() => handleCreate()}
+                disabled={loading || !description.trim()}
+                className="px-6 py-2.5 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                {loading ? 'Creating...' : 'Start'}
+              </button>
+            </div>
+
+            {/* Selected company profile preview */}
+            {selectedProfile && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Company Profile</p>
+                  <button
+                    onClick={handleClearProfile}
+                    className="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer"
+                  >
+                    ✕ Clear
+                  </button>
+                </div>
+                <CompanyCard profile={selectedProfile} onEdit={handleClearProfile} />
+              </div>
+            )}
+
+            {/* Disambiguation popup */}
+            {showDisambiguation && companyResults.length > 1 && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3">
+                <p className="text-xs font-semibold text-[var(--text-primary)]">Did you mean…?</p>
+                <div className="space-y-2">
+                  {companyResults.map((r, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSelectProfile(r)}
+                      className="w-full text-left p-3 rounded-lg border border-[var(--border-light)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer"
+                    >
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{r.name}</p>
+                      <p className="text-[11px] text-[var(--text-muted)]">
+                        {[r.industry, r.headquarters, r.employeeCount ? `${(r.employeeCount / 1000).toFixed(0)}K employees` : null]
+                          .filter(Boolean).join(' · ')}
+                      </p>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => { setShowDisambiguation(false); setShowSizePicker(true); }}
+                    className="w-full text-left p-2 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer"
+                  >
+                    None of these → pick a size profile instead
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Size picker — when company not found */}
+            {showSizePicker && !selectedProfile && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-[var(--text-primary)]">
+                    We couldn't find "{customerName}" in public sources.
+                  </p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                    Select a company size to pre-fill assumptions:
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'small' as const, label: 'Small', emp: '<500', rev: '<$50M' },
+                    { key: 'mid-market' as const, label: 'Mid-Market', emp: '500–5K', rev: '$50–500M' },
+                    { key: 'enterprise' as const, label: 'Enterprise', emp: '5K+', rev: '$500M+' },
+                  ] as const).map(s => (
+                    <button
+                      key={s.key}
+                      onClick={() => handleSizePick(s.key)}
+                      className="flex flex-col items-center p-3 rounded-lg border border-[var(--border-light)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer text-center"
+                    >
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">{s.label}</span>
+                      <span className="text-[10px] text-[var(--text-muted)] mt-0.5">{s.emp} emp</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">{s.rev}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setShowSizePicker(false)}
+                  className="w-full text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer py-1"
+                >
+                  Skip — I'll provide details manually
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
