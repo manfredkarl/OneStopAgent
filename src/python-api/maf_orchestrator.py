@@ -434,7 +434,7 @@ class MAFOrchestrator:
             if isinstance(assumptions, list) and len(assumptions) >= 3:
                 assumptions = assumptions[:5]
             else:
-                raise ValueError("Too few assumptions returned")
+                raise ValueError(f"Too few assumptions returned: expected at least 3, got {len(assumptions) if isinstance(assumptions, list) else 0}")
         except Exception as e:
             logger.warning("Failed to generate shared assumptions: %s", e)
             # Fallback defaults — lean and essential

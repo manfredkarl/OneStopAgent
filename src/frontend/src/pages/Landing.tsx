@@ -194,8 +194,9 @@ export default function Landing({ agents, onProjectCreated }: Props) {
       return;
     }
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
+    const timer = debounceRef;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
       setCompanySearching(true);
       setShowDisambiguation(false);
       setShowSizePicker(false);
@@ -227,7 +228,10 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         setCompanySearching(false);
       }
     }, 500);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
   }, [customerName]);
 
   const handleSelectProfile = (profile: CompanyProfile) => {

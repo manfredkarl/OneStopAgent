@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import type { ChatMessage, AgentStatus, CompanyProfile } from '../types';
+import type { ChatMessage, AgentStatus, CompanyProfile, Project } from '../types';
 import { getChatHistory, getAgents, sendMessageStreaming, getProject } from '../api';
 import ChatThread from '../components/ChatThread';
 import ChatInput from '../components/ChatInput';
@@ -27,7 +27,7 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
     getChatHistory(projectId).then(setMessages).catch(console.error);
     getAgents(projectId).then(onAgentsChange).catch(console.error);
     // Load company profile from project
-    getProject(projectId).then((proj: any) => {
+    getProject(projectId).then((proj: Project) => {
       if (proj?.company_profile) {
         setCompanyProfile(proj.company_profile as CompanyProfile);
       }

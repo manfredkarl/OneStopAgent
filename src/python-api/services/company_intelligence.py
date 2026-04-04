@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -159,7 +161,6 @@ def estimate_labor_rate(headquarters: str, industry: str) -> float:
 
 def scope_employees(employee_count: int | None, use_case: str) -> int:
     """Estimate affected employees based on use-case keywords and total headcount."""
-    import re as _re
     total = employee_count or 1_000
     use_case_lower = use_case.lower()
     for keyword, ratio in USE_CASE_SCOPE_RATIOS.items():
@@ -168,7 +169,7 @@ def scope_employees(employee_count: int | None, use_case: str) -> int:
         # Use word-boundary matching for short/ambiguous keywords to avoid false matches
         # e.g. "it" must not match "initiative", "r&d" must not match "standard"
         if len(keyword) <= 4 or "&" in keyword:
-            if _re.search(r'\b' + _re.escape(keyword) + r'\b', use_case_lower):
+            if re.search(r'\b' + re.escape(keyword) + r'\b', use_case_lower):
                 return int(total * ratio)
         elif keyword in use_case_lower:
             return int(total * ratio)
@@ -178,7 +179,6 @@ def scope_employees(employee_count: int | None, use_case: str) -> int:
 def build_fallback_profile(size: str, customer_name: str) -> dict[str, Any]:
     """Build a complete company profile from a size tier fallback."""
     base = FALLBACK_PROFILES.get(size, FALLBACK_PROFILES["mid-market"])
-    from datetime import datetime, timezone
     return {
         "name": customer_name,
         "industry": None,
@@ -241,7 +241,6 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
     """
     from services.web_search import search_web
     from agents.llm import llm
-    from datetime import datetime, timezone
 
     search_query = f"{query} company employees revenue annual report headquarters"
     try:

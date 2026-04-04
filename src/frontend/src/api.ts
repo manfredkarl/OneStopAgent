@@ -45,6 +45,7 @@ export async function getCompanyFallback(size: 'small' | 'mid-market' | 'enterpr
 }
 
 
+export async function listProjects() {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     headers: { 'x-user-id': 'demo-user' },
   });
