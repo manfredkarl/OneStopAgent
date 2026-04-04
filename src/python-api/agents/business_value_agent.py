@@ -172,6 +172,12 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
         monthly_cost = state.costs.get("estimate", {}).get("totalMonthly", 0)
         if monthly_cost > 0:
             extra.append(f"MONTHLY AZURE COST: ${monthly_cost:,.0f}")
+
+        # QI-2: Architecture-scoped driver hints
+        arch_hints = self._build_architecture_driver_hints(state.architecture)
+        if arch_hints:
+            extra.append("ARCHITECTURE DRIVER HINTS (reference at least one in your drivers):\n" + arch_hints)
+
         extra_context = "\n".join(extra)
 
         # Build source citation instruction based on search availability
@@ -288,16 +294,32 @@ CATEGORY RULES:
             # Validate impact range and verify driver arithmetic
             validated_range, bv_warnings = self._validate_and_verify(result, state)
 
-            confidence = result.get("confidence", "moderate")
+            confidence_raw = result.get("confidence", "moderate")
             if bv_warnings:
-                confidence = "low"
+                confidence_raw = "low"
                 for w in bv_warnings:
                     logger.warning("BV validation: %s", w)
 
             # Downgrade confidence when no industry benchmarks available
             if not benchmark_available:
-                if confidence == "high":
-                    confidence = "moderate"
+                if confidence_raw == "high":
+                    confidence_raw = "moderate"
+
+            # QI-5: Build confidence as scored object
+            confidence = self._build_confidence_score(confidence_raw, drivers, benchmark_available, bv_warnings)
+
+            # QI-1: Verify LLM arithmetic
+            arithmetic_warnings = self._verify_driver_arithmetic(drivers, state)
+            if arithmetic_warnings:
+                for w in arithmetic_warnings:
+                    logger.warning("BV arithmetic: %s", w)
+                bv_warnings = bv_warnings + arithmetic_warnings
+                if isinstance(confidence, dict) and confidence["overall_score"] > 50:
+                    confidence["overall_score"] = max(40, confidence["overall_score"] - 15)
+                    confidence["recommendation"] = (
+                        confidence.get("recommendation", "")
+                        + " Note: arithmetic inconsistencies detected — review driver calculations."
+                    ).strip()
 
             state.business_value = {
                 "drivers": drivers,
@@ -378,3 +400,164 @@ CATEGORY RULES:
             return None, []
 
         return {"low": round(low, 2), "high": round(high, 2)}, []
+
+    # ── QI-2: Architecture-scoped driver hints ────────────────────────
+
+    # Map architecture component keywords → BV driver hints
+    COMPONENT_DRIVER_HINTS: dict[str, str] = {
+        "serverless": "Operational efficiency from serverless compute (no infra management, pay-per-execution)",
+        "function": "Operational efficiency from serverless Functions (no infra management)",
+        "managed database": "DBA headcount reduction with fully managed database services",
+        "cosmos": "Reduced operational overhead: Cosmos DB auto-scales, eliminating DBA tuning work",
+        "cdn": "Reduced latency → improved user experience → higher conversion rates",
+        "ai search": "Faster information retrieval → knowledge worker productivity gains",
+        "cognitive search": "Faster information retrieval → knowledge worker productivity gains",
+        "openai": "AI-assisted workflows reduce manual effort per task",
+        "kubernetes": "Container orchestration reduces deployment and operations overhead",
+        "service bus": "Async messaging decouples services, reducing error cascades and rework",
+        "event hub": "Real-time event streaming reduces batch processing lag and downstream errors",
+        "devops": "CI/CD automation reduces release cycle time and manual deployment effort",
+        "purview": "Automated data governance reduces compliance audit preparation time",
+        "sentinel": "Automated threat detection reduces mean-time-to-response and breach cost",
+        "defender": "Unified security posture reduces security incident costs",
+    }
+
+    @classmethod
+    def _build_architecture_driver_hints(cls, architecture: dict) -> str:
+        """QI-2: Build component-specific driver hints from architecture."""
+        components = architecture.get("components", [])
+        if not components:
+            return ""
+
+        hints: list[str] = []
+        seen: set[str] = set()
+        for comp in components:
+            svc = (comp.get("azureService", "") + " " + comp.get("name", "")).lower()
+            for kw, hint in cls.COMPONENT_DRIVER_HINTS.items():
+                if kw in svc and hint not in seen:
+                    seen.add(hint)
+                    hints.append(f"- {hint}")
+
+        return "\n".join(hints[:4])  # max 4 hints to keep prompt concise
+
+    # ── QI-5: Confidence as scored object ────────────────────────────
+
+    @staticmethod
+    def _build_confidence_score(
+        confidence_label: str,
+        drivers: list[dict],
+        benchmark_available: bool,
+        warnings: list[str],
+    ) -> dict:
+        """QI-5: Convert confidence string to scored object (0-100).
+
+        Scoring:
+        - Base score from label: high=85, moderate=60, low=35
+        - +10 if benchmarks available
+        - -5 per driver that is excluded
+        - -5 per warning
+        - Per-driver score: 85 if source_url present, 60 if calculated, 40 otherwise
+        """
+        label_scores = {"high": 85, "moderate": 60, "low": 35}
+        base = label_scores.get(str(confidence_label).lower(), 60)
+
+        if benchmark_available:
+            base = min(100, base + 10)
+
+        excluded_count = sum(1 for d in drivers if d.get("excluded", False))
+        base -= excluded_count * 5
+        base -= len(warnings) * 5
+        base = max(10, min(100, base))
+
+        driver_scores = []
+        for d in drivers:
+            if d.get("excluded", False):
+                driver_scores.append(30)
+            elif d.get("source_url"):
+                driver_scores.append(85)
+            elif d.get("source_name") and "calculated" in d.get("source_name", "").lower():
+                driver_scores.append(65)
+            else:
+                driver_scores.append(50)
+
+        methodology_parts = []
+        computed = sum(
+            1 for d in drivers
+            if not d.get("excluded", False)
+            and "calculated" in d.get("source_name", "").lower()
+        )
+        if computed > 0:
+            methodology_parts.append(f"{computed} driver(s) computed from user data")
+        if benchmark_available:
+            methodology_parts.append("external benchmarks available")
+        else:
+            methodology_parts.append("no external benchmarks (user-data only)")
+        if excluded_count:
+            methodology_parts.append(f"{excluded_count} driver(s) excluded due to missing data")
+
+        if base >= 75:
+            recommendation = "Strong case — validate revenue driver with customer before presenting."
+        elif base >= 55:
+            recommendation = "Moderate confidence — collect more customer-specific data to strengthen."
+        else:
+            recommendation = "Low confidence — gather baseline data (headcount, current spend) before presenting."
+
+        return {
+            "overall_score": base,
+            "driver_scores": driver_scores,
+            "methodology": "; ".join(methodology_parts),
+            "recommendation": recommendation,
+            # Keep backward-compat label for legacy consumers
+            "label": confidence_label,
+        }
+
+    # ── QI-1: Arithmetic verification ────────────────────────────────
+
+    @staticmethod
+    def _verify_driver_arithmetic(drivers: list[dict], state: AgentState) -> list[str]:
+        """QI-1: Parse driver descriptions for numeric calculations and flag >10% divergence.
+
+        Looks for patterns like "N × $R × P% × H hrs = $V" and verifies the math.
+        Returns a list of warning strings for any driver with >10% arithmetic error.
+        """
+        import re
+        warnings: list[str] = []
+
+        for driver in drivers:
+            if driver.get("excluded", False):
+                continue
+
+            desc = driver.get("description", "")
+            name = driver.get("name", "")
+
+            # Pattern: number × dollar_rate × pct% × hours = dollar_result
+            # e.g. "350 engineers × $100/hr × 15% × 2080 hrs = $10,920,000"
+            pattern = re.compile(
+                r'(\d[\d,]*)\s*(?:engineers?|employees?|workers?|users?|fte)?\s*'
+                r'[×x\*]\s*\$?([\d,]+(?:\.\d+)?)\s*(?:/hr|/hour)?\s*'
+                r'[×x\*]\s*([\d.]+)\s*%\s*'
+                r'(?:[×x\*]\s*([\d,]+(?:\.\d+)?)\s*(?:hrs?|hours?)?)?\s*'
+                r'=\s*\$?([\d,]+(?:\.\d+)?)',
+                re.IGNORECASE,
+            )
+            match = pattern.search(desc)
+            if match:
+                try:
+                    headcount = float(match.group(1).replace(",", ""))
+                    rate = float(match.group(2).replace(",", ""))
+                    pct = float(match.group(3)) / 100
+                    hours = float(match.group(4).replace(",", "")) if match.group(4) is not None else 1.0
+                    claimed = float(match.group(5).replace(",", ""))
+                    computed = headcount * rate * pct * hours
+                    if claimed > 0:
+                        divergence = abs(computed - claimed) / claimed
+                        if divergence > 0.10:
+                            warnings.append(
+                                f"Driver '{name}': arithmetic mismatch "
+                                f"(computed ${computed:,.0f} vs claimed ${claimed:,.0f}, "
+                                f"{divergence * 100:.0f}% divergence)"
+                            )
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+
+        return warnings

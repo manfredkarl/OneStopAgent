@@ -250,7 +250,51 @@ class MAFOrchestrator:
 
         # ── Phase: done ─────────────────────────────────────────────
         elif phase == "done":
-            if intent == Intent.ITERATION:
+            # AC-4: Detect granular retry commands ("retry cost", "retry roi", etc.)
+            retry_target = self._parse_retry_command(message)
+            if retry_target:
+                # Determine which agents to re-run (target + downstream)
+                agents_to_rerun = self._retry_agents_for(retry_target)
+                state.clarifications += f"\nRetry: {message}"
+
+                rerun_set = set(agents_to_rerun)
+                state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
+                state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
+                state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+
+                AGENT_STATE_FIELDS = {
+                    "cost": "costs", "business_value": "business_value",
+                    "roi": "roi", "presentation": "presentation_path",
+                }
+                for agent_name in agents_to_rerun:
+                    # Clear stale phase markers
+                    if agent_name == "cost" and "phase" in state.costs:
+                        del state.costs["phase"]
+                    if agent_name == "business_value" and "phase" in state.business_value:
+                        del state.business_value["phase"]
+                    # Reset output state
+                    field = AGENT_STATE_FIELDS.get(agent_name)
+                    if field:
+                        if field == "presentation_path":
+                            state.presentation_path = ""
+                        else:
+                            setattr(state, field, {})
+
+                names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
+                if not names:
+                    yield self._msg(project_id, "No agents to retry.", {"type": "pm_response"})
+                    return
+                first_name = names[0]
+                yield self._msg(
+                    project_id,
+                    f"Retrying {first_name} and downstream agents ({', '.join(names)})...",
+                    {"type": "pm_response"},
+                )
+                self.phases[project_id] = "executing"
+                async for msg in self._run_workflow(project_id, state, list(rerun_set)):
+                    yield msg
+
+            elif intent == Intent.ITERATION:
                 agents_to_rerun = meta.get("agents_to_rerun") or pm.get_agents_to_rerun(message)
                 state.clarifications += f"\nIteration: {message}"
 
@@ -355,6 +399,41 @@ class MAFOrchestrator:
         ]
 
     # ── MAF Workflow execution ──────────────────────────────────────
+
+    # AC-4: Granular retry — "retry cost" re-runs cost + downstream only
+    _RETRY_PATTERNS: dict[str, str] = {
+        "retry cost": "cost",
+        "retry roi": "roi",
+        "retry business value": "business_value",
+        "retry bv": "business_value",
+        "retry architect": "architect",
+        "retry presentation": "presentation",
+        "redo cost": "cost",
+        "redo roi": "roi",
+        "rerun cost": "cost",
+        "rerun roi": "roi",
+    }
+
+    # Pipeline order for AC-4 downstream dependency
+    _PIPELINE_ORDER = ["business_value", "architect", "cost", "roi", "presentation"]
+
+    @classmethod
+    def _parse_retry_command(cls, message: str) -> str | None:
+        """AC-4: Detect 'retry <agent>' commands. Returns agent name or None."""
+        msg_lower = message.strip().lower()
+        for pattern, agent in cls._RETRY_PATTERNS.items():
+            if msg_lower.startswith(pattern):
+                return agent
+        return None
+
+    @classmethod
+    def _retry_agents_for(cls, agent: str) -> list[str]:
+        """AC-4: Return agent + all downstream agents to re-run."""
+        try:
+            start_idx = cls._PIPELINE_ORDER.index(agent)
+        except ValueError:
+            return [agent]
+        return cls._PIPELINE_ORDER[start_idx:]
 
     async def _run_workflow(
         self, project_id: str, state: AgentState, active_agents: list[str],
