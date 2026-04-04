@@ -1,11 +1,13 @@
 """
 OneStopAgent Evaluation Runner
 Runs full pipeline scenarios, evaluates quality, produces structured report.
+Optionally uses LLM-as-judge for deep quality evaluation.
 
 Usage:
     python -m tests.eval_runner                    # Run against localhost:8000
     python -m tests.eval_runner --url https://...  # Run against deployed instance
     python -m tests.eval_runner --scenarios nike    # Run single scenario
+    python -m tests.eval_runner --judge             # Enable LLM quality judge
 """
 
 import argparse
@@ -13,6 +15,7 @@ import json
 import time
 import sys
 import os
+import re
 import httpx
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
@@ -104,8 +107,201 @@ class ScenarioResult:
     error: Optional[str] = None
 
 
+class LLMJudge:
+    """Uses Azure OpenAI to evaluate agent output quality."""
+
+    ENDPOINT = os.environ.get(
+        "AZURE_OPENAI_ENDPOINT",
+        "https://demopresentations.services.ai.azure.com",
+    )
+    DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4")
+    API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21")
+
+    AGENT_PROMPTS = {
+        "pm": (
+            "You are evaluating the Project Manager agent's output for an Azure solution scoping tool.\n"
+            "The PM brainstorms use cases based on the customer scenario.\n\n"
+            "Evaluate:\n"
+            "1. RELEVANCE: Are the suggested use cases relevant to this company/industry?\n"
+            "2. SPECIFICITY: Does it reference real Azure services, not vague 'cloud' talk?\n"
+            "3. COMPLETENESS: Does it cover multiple angles (cost savings, revenue, efficiency)?\n"
+            "4. REALISM: Would a real Azure seller find this useful for a customer meeting?\n"
+        ),
+        "business_value": (
+            "You are evaluating the Business Value agent's output.\n"
+            "It should quantify value drivers with dollar amounts based on company size.\n\n"
+            "Evaluate:\n"
+            "1. MATH: Do the calculations make sense? (hours × rate = cost, etc.)\n"
+            "2. SCALE: Are dollar amounts proportional to the company size? "
+            "A $50B-revenue company should see 7-9 figure impacts, not $10K.\n"
+            "3. DRIVERS: Are there at least 2 concrete value drivers with numbers?\n"
+            "4. REALISM: Would a CFO find these estimates credible? Not too high (>$1B for a single AI project), not too low?\n"
+            "5. METHODOLOGY: Does it explain its calculation approach?\n"
+        ),
+        "architect": (
+            "You are evaluating the System Architect agent's output.\n"
+            "It should produce an Azure architecture for the described solution.\n\n"
+            "Evaluate:\n"
+            "1. FIT: Does the architecture match the use case described? (e.g., IoT for predictive maintenance)\n"
+            "2. AZURE SERVICES: Are real, appropriate Azure services named? (not generic 'database')\n"
+            "3. DIAGRAM: Is there a Mermaid diagram that shows component relationships?\n"
+            "4. COMPLETENESS: Does it cover data layer, compute, AI/ML, networking, security?\n"
+            "5. ISOLATION: The output should NOT contain business value data (dollar amounts, ROI, drivers).\n"
+            "   If you see value drivers or dollar calculations, flag as CRITICAL regression.\n"
+        ),
+        "cost": (
+            "You are evaluating the Cost Specialist agent's output.\n"
+            "It should estimate Azure costs for the proposed architecture.\n\n"
+            "Evaluate:\n"
+            "1. ALIGNMENT: Do the costed services match the architecture? (same services, not different ones)\n"
+            "2. BREAKDOWN: Is there a per-service cost breakdown with monthly/annual figures?\n"
+            "3. RANGE: Are costs reasonable for the scale? Enterprise AI: $5K-$200K/mo typically.\n"
+            "4. SPECIFICS: Are SKUs, tiers, or instance sizes mentioned? Not just 'Azure OpenAI: $X'.\n"
+            "5. COMPLETENESS: Are all major architecture components costed?\n"
+        ),
+        "roi": (
+            "You are evaluating the ROI agent's output and dashboard data.\n"
+            "It should combine business value and costs into ROI analysis.\n\n"
+            "Evaluate:\n"
+            "1. MATH: Does ROI% ≈ (Annual Benefits - Annual Costs) / Annual Costs × 100?\n"
+            "   Check if the numbers add up roughly.\n"
+            "2. PAYBACK: Is payback period reasonable? (3-24 months typical for enterprise AI)\n"
+            "3. COHERENCE: Do annual benefits come from the BV agent's numbers?\n"
+            "   Do annual costs come from the Cost agent's numbers?\n"
+            "4. CONFIDENCE: Is the confidence level justified given assumptions?\n"
+            "5. CREDIBILITY: Would a C-level exec find this ROI analysis convincing?\n"
+        ),
+        "cross_agent": (
+            "You are evaluating the coherence across ALL agents in an Azure solution scoping pipeline.\n"
+            "The pipeline is: PM use cases → BV value drivers → Architect design → Cost estimate → ROI.\n\n"
+            "Evaluate:\n"
+            "1. THREAD: Does the architecture address the PM's suggested use cases?\n"
+            "2. BV→ARCH ALIGNMENT: Does the architecture enable the value drivers identified by BV?\n"
+            "3. ARCH→COST MATCH: Are the same Azure services in the architecture and cost breakdown?\n"
+            "4. COST→ROI FLOW: Do the ROI numbers incorporate both BV benefits and Cost expenses?\n"
+            "5. NARRATIVE: Does the entire pipeline tell a coherent story from idea to ROI?\n"
+            "6. NO DATA LEAKS: Architect output should NOT contain BV dollar amounts.\n"
+        ),
+    }
+
+    def __init__(self):
+        self.token = os.environ.get("AZURE_OPENAI_TOKEN", "")
+        if not self.token:
+            try:
+                import subprocess
+                self.token = subprocess.check_output(
+                    ["az", "account", "get-access-token",
+                     "--resource", "https://cognitiveservices.azure.com",
+                     "--query", "accessToken", "-o", "tsv"],
+                    text=True,
+                ).strip()
+            except Exception:
+                pass
+        self.client = httpx.Client(timeout=120.0)
+
+    def _call_llm(self, system: str, user: str) -> str:
+        """Call Azure OpenAI and return the response text."""
+        url = (
+            f"{self.ENDPOINT}/openai/deployments/{self.DEPLOYMENT}"
+            f"/chat/completions?api-version={self.API_VERSION}"
+        )
+        resp = self.client.post(
+            url,
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+            json={
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.2,
+                "max_completion_tokens": 1500,
+            },
+        )
+        if resp.status_code != 200:
+            return f"[LLM judge error: {resp.status_code} {resp.text[:200]}]"
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+    def judge_agent(self, agent: str, scenario_desc: str, company: str,
+                    output: str, all_outputs: dict[str, str] | None = None) -> list[Finding]:
+        """Judge a single agent's output quality. Returns findings."""
+        if not output.strip():
+            return []
+
+        system_prompt = self.AGENT_PROMPTS.get(agent, "")
+        if not system_prompt:
+            return []
+
+        system_prompt += (
+            "\n\nRespond with a JSON object:\n"
+            '{"score": 1-10, "issues": [{"severity": "error"|"warning"|"info", "message": "..."}], '
+            '"summary": "one-line quality summary"}\n'
+            "Only flag real problems. Score 7+ means acceptable quality."
+        )
+
+        if agent == "cross_agent":
+            user_content = f"**Scenario**: {scenario_desc}\n**Company**: {company or 'Generic startup'}\n\n"
+            for agent_name, agent_output in (all_outputs or {}).items():
+                user_content += f"### {agent_name} output:\n{agent_output[:2000]}\n\n"
+        else:
+            user_content = (
+                f"**Scenario**: {scenario_desc}\n"
+                f"**Company**: {company or 'Generic startup'}\n\n"
+                f"**Agent output**:\n{output[:3000]}"
+            )
+
+        try:
+            raw = self._call_llm(system_prompt, user_content)
+            return self._parse_judge_response(raw, agent)
+        except Exception as e:
+            return [Finding("warning", f"judge_{agent}", f"LLM judge failed: {e}")]
+
+    def _parse_judge_response(self, raw: str, agent: str) -> list[Finding]:
+        """Parse structured JSON from LLM judge response."""
+        findings: list[Finding] = []
+        # Extract JSON from markdown code blocks if present
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw, re.DOTALL)
+        json_str = json_match.group(1) if json_match else raw.strip()
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # Try to find JSON object in the response
+            brace_match = re.search(r'\{[^{}]*"score"[^{}]*\}', raw, re.DOTALL)
+            if brace_match:
+                try:
+                    data = json.loads(brace_match.group())
+                except json.JSONDecodeError:
+                    findings.append(Finding("info", f"judge_{agent}",
+                        f"Judge score: unparseable | Raw: {raw[:200]}"))
+                    return findings
+            else:
+                findings.append(Finding("info", f"judge_{agent}",
+                    f"Judge response (raw): {raw[:300]}"))
+                return findings
+
+        score = data.get("score", 0)
+        summary = data.get("summary", "")
+        issues = data.get("issues", [])
+
+        # Add score as info finding
+        score_label = "✅" if score >= 7 else "⚠️" if score >= 4 else "❌"
+        findings.append(Finding("info", f"judge_{agent}",
+            f"{score_label} Quality score: {score}/10 — {summary}"))
+
+        # Add specific issues
+        for issue in issues:
+            sev = issue.get("severity", "info")
+            msg = issue.get("message", "")
+            if sev in ("error", "warning", "info") and msg:
+                findings.append(Finding(sev, f"judge_{agent}", msg))
+
+        return findings
+
+
 class EvalRunner:
-    def __init__(self, base_url: str = "http://localhost:8000", user_id: str = "eval-runner"):
+    def __init__(self, base_url: str = "http://localhost:8000", user_id: str = "eval-runner",
+                 use_judge: bool = False):
         self.base_url = base_url.rstrip("/")
         self.user_id = user_id
         self.client = httpx.Client(
@@ -114,6 +310,7 @@ class EvalRunner:
             timeout=300.0,  # 5 min timeout for LLM calls
         )
         self.results: list[ScenarioResult] = []
+        self.judge = LLMJudge() if use_judge else None
 
     def run_all(self, scenario_names: list[str] | None = None):
         """Run all (or specified) scenarios."""
@@ -236,6 +433,10 @@ class EvalRunner:
             result.findings.append(Finding("error", "pipeline", f"Unexpected error: {e}"))
 
         result.total_duration_s = round(time.time() - start, 1)
+
+        # ── LLM-as-Judge evaluation ──
+        if self.judge and any(ar.content for ar in result.agent_results.values()):
+            self._run_judge(name, scenario, result)
 
         # Determine overall status from findings
         has_errors = any(f.severity == "error" for f in result.findings)
@@ -410,7 +611,7 @@ class EvalRunner:
             ar.status = "error"
             ar.findings.append(Finding("error", "pm", "No PM response received — agent may be stuck"))
         else:
-            ar.content = content[:500]
+            ar.content = content[:4000]
             if len(content) < 50:
                 ar.findings.append(Finding("warning", "pm", "PM response suspiciously short"))
             if "error" in content.lower() or "failed" in content.lower():
@@ -444,7 +645,7 @@ class EvalRunner:
                     "No BV result in response (may be in next step)"))
         else:
             content = bv_msg.get("content", "")
-            ar.content = content[:1000]
+            ar.content = content[:4000]
 
             if "driver" not in content.lower() and "value" not in content.lower():
                 ar.findings.append(Finding("warning", "business_value",
@@ -492,7 +693,7 @@ class EvalRunner:
                 ar.status = "skipped"
         else:
             content = arch_msg.get("content", "")
-            ar.content = content[:1500]
+            ar.content = content[:4000]
 
             if (expected.get("arch_has_mermaid")
                     and "mermaid" not in content.lower()
@@ -547,7 +748,7 @@ class EvalRunner:
                 ar.status = "skipped"
         else:
             content = cost_msg.get("content", "")
-            ar.content = content[:1000]
+            ar.content = content[:4000]
 
             if "$" not in content:
                 ar.findings.append(Finding("warning", "cost",
@@ -591,11 +792,14 @@ class EvalRunner:
                 ar.findings.append(Finding("warning", "roi", "No ROI result received"))
         else:
             if roi_msg:
-                ar.content = roi_msg.get("content", "")[:1000]
+                ar.content = roi_msg.get("content", "")[:4000]
 
             if dashboard_msg:
                 dashboard = dashboard_msg.get("metadata", {}).get("dashboard", {})
                 ar.data = dashboard
+                # Ensure judge has content even if no separate roi_msg
+                if not ar.content:
+                    ar.content = json.dumps(dashboard, indent=2, default=str)[:4000]
 
                 # REGRESSION: Check confidenceLevel is string
                 conf = dashboard.get("confidenceLevel")
@@ -657,6 +861,49 @@ class EvalRunner:
 
         result.agent_results["roi"] = ar
         result.findings.extend(ar.findings)
+
+    # ── LLM Judge integration ────────────────────────────────────
+
+    def _run_judge(self, name: str, scenario: dict, result: ScenarioResult):
+        """Run LLM-as-judge on each agent output + cross-agent coherence."""
+        print(f"   🧑‍⚖️ Running LLM quality judge...")
+        desc = scenario["description"]
+        company = scenario.get("customer_name", "")
+
+        # Collect all outputs for cross-agent check
+        all_outputs: dict[str, str] = {}
+        agents_to_judge = ["pm", "business_value", "architect", "cost", "roi"]
+
+        for agent in agents_to_judge:
+            ar = result.agent_results.get(agent)
+            if ar and ar.content:
+                all_outputs[agent] = ar.content
+
+        # Judge each agent individually
+        for agent, output in all_outputs.items():
+            print(f"      ⚖️  Judging {agent}...")
+            findings = self.judge.judge_agent(agent, desc, company, output)
+            for f in findings:
+                result.findings.append(f)
+                # Also attach to the agent result
+                if agent in result.agent_results:
+                    result.agent_results[agent].findings.append(f)
+
+        # Cross-agent coherence check (the key part — does BV+Cost+ROI add up?)
+        if len(all_outputs) >= 3:
+            print(f"      ⚖️  Judging cross-agent coherence...")
+            findings = self.judge.judge_agent(
+                "cross_agent", desc, company, "", all_outputs=all_outputs
+            )
+            # Create a synthetic agent result for cross-agent findings
+            cross_ar = AgentResult(agent="cross_agent_coherence", status="evaluated")
+            cross_ar.findings = findings
+            result.agent_results["cross_agent_coherence"] = cross_ar
+            result.findings.extend(findings)
+
+        judge_errors = sum(1 for f in result.findings if f.agent.startswith("judge_") and f.severity == "error")
+        judge_warns = sum(1 for f in result.findings if f.agent.startswith("judge_") and f.severity == "warning")
+        print(f"   🧑‍⚖️ Judge done: {judge_errors} errors, {judge_warns} warnings")
 
     # ── Reporting ────────────────────────────────────────────────
 
@@ -812,9 +1059,10 @@ def main():
     parser = argparse.ArgumentParser(description="OneStopAgent Evaluation Runner")
     parser.add_argument("--url", default="http://localhost:8000", help="Backend URL")
     parser.add_argument("--scenarios", nargs="*", help="Specific scenarios to run")
+    parser.add_argument("--judge", action="store_true", help="Enable LLM-as-judge quality evaluation")
     args = parser.parse_args()
 
-    runner = EvalRunner(base_url=args.url)
+    runner = EvalRunner(base_url=args.url, use_judge=args.judge)
     runner.run_all(args.scenarios)
 
     # Exit with error code if any scenario failed
