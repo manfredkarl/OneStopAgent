@@ -209,6 +209,25 @@ HARD CONSTRAINTS — violating these invalidates your output:
 - Show your arithmetic for EVERY dollar figure. No unexplained numbers.
 """
 
+        # Company profile context for grounded analysis
+        company_context_block = ""
+        if state.company_profile:
+            p = state.company_profile
+            company_lines = [f"\nCUSTOMER CONTEXT ({p.get('name', '')}):"]
+            if p.get("employeeCount"):
+                company_lines.append(f"- {p['employeeCount']:,} employees globally")
+            if p.get("annualRevenue"):
+                rev = p["annualRevenue"]
+                currency = p.get("revenueCurrency", "USD")
+                company_lines.append(f"- Annual revenue: {currency} {rev:,.0f}")
+            if p.get("itSpendEstimate"):
+                ratio_pct = (p.get("itSpendRatio", 0.04) * 100)
+                company_lines.append(
+                    f"- IT spend estimated at ${p['itSpendEstimate']:,.0f}/yr ({ratio_pct:.1f}% of revenue)"
+                )
+            company_lines.append("Compute value drivers relative to THEIR scale, not generic benchmarks.")
+            company_context_block = "\n".join(company_lines)
+
         prompt = f"""You are a value engineer. Produce 2–4 value drivers for this Azure solution.
 
 CUSTOMER: {customer}
@@ -216,6 +235,7 @@ INDUSTRY: {industry}
 USE CASE: {description}
 {f"CLARIFICATIONS: {clarifications}" if clarifications else ""}
 {extra_context}
+{company_context_block}
 
 USER-PROVIDED NUMBERS (these are FACTS — use them for computation):
 {assumption_context}

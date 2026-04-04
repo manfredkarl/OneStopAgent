@@ -124,9 +124,31 @@ async def info():
     return {"version": "1.0.0", "framework": "python-fastapi-agent-framework"}
 
 
+@app.get("/api/company/search")
+async def search_company(q: str):
+    """Search for a company profile by name. Returns up to 3 ranked matches."""
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    from services.company_intelligence import search_and_extract_company
+    results = await search_and_extract_company(q.strip())
+    return results
+
+
+@app.get("/api/company/fallback/{size}")
+async def company_fallback(size: str, name: str = ""):
+    """Return a fallback company profile for unknown companies."""
+    from services.company_intelligence import build_fallback_profile, FALLBACK_PROFILES
+    if size not in FALLBACK_PROFILES:
+        raise HTTPException(status_code=400, detail=f"Unknown size tier '{size}'. Use: small, mid-market, enterprise")
+    return build_fallback_profile(size, name or size.title())
+
+
 @app.post("/api/projects")
 async def create_project(req: CreateProjectRequest, x_user_id: str = Header()):
-    project = store.create_project(x_user_id, req.description, req.customer_name)
+    project = store.create_project(
+        x_user_id, req.description, req.customer_name,
+        company_profile=req.company_profile,
+    )
     # Override default active_agents if provided by frontend
     if req.active_agents is not None:
         project.active_agents = [a.replace("-", "_") for a in req.active_agents]
@@ -177,7 +199,8 @@ async def send_message(
         async def stream() -> AsyncGenerator[dict, None]:
             try:
                 async for msg in orchestrator.handle_message(
-                    project_id, req.message, project.active_agents, project.description
+                    project_id, req.message, project.active_agents, project.description,
+                    company_profile=project.company_profile,
                 ):
                     # Don't persist individual streaming tokens — only final messages
                     if msg.metadata is None or msg.metadata.get("type") != "agent_token":
@@ -199,7 +222,8 @@ async def send_message(
     messages: list[dict] = []
     try:
         async for msg in orchestrator.handle_message(
-            project_id, req.message, project.active_agents, project.description
+            project_id, req.message, project.active_agents, project.description,
+            company_profile=project.company_profile,
         ):
             if not (msg.metadata and msg.metadata.get("type") == "agent_token"):
                 store.add_message(project_id, msg)

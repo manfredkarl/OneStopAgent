@@ -263,7 +263,7 @@ RULES:
             }
 
     async def brainstorm_greeting_streaming(
-        self, user_input: str, on_token
+        self, user_input: str, on_token, company_profile: dict | None = None,
     ) -> dict:
         """Async streaming version of brainstorm_greeting.
 
@@ -271,29 +271,55 @@ RULES:
         as the LLM generates it. Accumulates the full JSON and parses at end.
         Returns the same structure as brainstorm_greeting().
         """
+        # Build optional company context block
+        company_context = ""
+        if company_profile:
+            p = company_profile
+            lines = [f"\nCUSTOMER PROFILE (verified from public sources):"]
+            lines.append(f"- Company: {p.get('name', '')} ({p.get('industry', '')})")
+            if p.get("employeeCount"):
+                lines.append(f"- {p['employeeCount']:,} employees | HQ: {p.get('headquarters', 'Unknown')}")
+            if p.get("annualRevenue"):
+                rev = p["annualRevenue"]
+                currency = p.get("revenueCurrency", "USD")
+                lines.append(f"- Annual revenue: {currency} {rev:,.0f}")
+            if p.get("itSpendEstimate"):
+                lines.append(f"- Est. IT spend: ${p['itSpendEstimate']:,.0f}/yr")
+            if p.get("cloudProvider"):
+                lines.append(f"- Cloud: {p['cloudProvider']}")
+            if p.get("knownAzureUsage"):
+                lines.append(f"- Known Azure: {', '.join(p['knownAzureUsage'][:4])}")
+            if p.get("erp"):
+                lines.append(f"- ERP: {p['erp']}")
+            lines.append(
+                "\nUse this context to tailor your questions and scenarios specifically "
+                f"to {p.get('name', 'this company')}'s industry, scale, and technology landscape."
+            )
+            company_context = "\n".join(lines)
+
         messages = [
-            {"role": "system", "content": """You are an Azure solution project manager. Be CONCISE.
+            {"role": "system", "content": f"""You are an Azure solution project manager. Be CONCISE.
 The user described a project idea. Respond with ONLY a JSON object (no markdown fences):
 
-{
+{{
     "response": "Brief markdown response: 1 sentence acknowledgment, 2-3 short Azure scenario bullets (service names + why), 2-3 clarifying questions. Keep under 300 words. End with: Say **proceed** to start.",
     "azure_fit": "strong" or "weak" or "unclear",
     "azure_fit_explanation": "1 sentence WHY Azure fits or doesn't",
     "industry": "Retail, Healthcare, Financial Services, Manufacturing, or Cross-Industry",
     "scenarios": [
-        {
+        {{
             "title": "Short name",
             "description": "1 sentence",
             "azure_services": ["Service1", "Service2"]
-        }
+        }}
     ]
-}
+}}
 
 RULES:
 - Keep the response field SHORT — no walls of text
 - 2-3 scenarios max, 1 sentence each
 - 2-3 questions max
-- Be specific about Azure services"""},
+- Be specific about Azure services{company_context}"""},
             {"role": "user", "content": user_input},
         ]
 

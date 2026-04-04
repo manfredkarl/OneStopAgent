@@ -1,7 +1,48 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 from datetime import datetime
 import uuid
+
+
+class CompanyProfile(BaseModel):
+    """Structured company intelligence profile extracted from public sources."""
+    name: str
+    legalName: Optional[str] = None
+    ticker: Optional[str] = None
+    website: Optional[str] = None
+    logoUrl: Optional[str] = None
+
+    # Firmographics
+    industry: Optional[str] = None
+    subIndustry: Optional[str] = None
+    headquarters: Optional[str] = None
+    foundedYear: Optional[int] = None
+    employeeCount: Optional[int] = None
+    employeeCountSource: Optional[str] = None
+
+    # Financials
+    annualRevenue: Optional[float] = None
+    revenueCurrency: Optional[str] = None
+    fiscalYear: Optional[str] = None
+    revenueSource: Optional[str] = None
+    itSpendEstimate: Optional[float] = None
+    itSpendRatio: Optional[float] = None
+
+    # Technology
+    cloudProvider: Optional[str] = None
+    knownAzureUsage: Optional[list[str]] = None
+    erp: Optional[str] = None
+    techStackNotes: Optional[str] = None
+
+    # Derived / fallback fields
+    hourlyLaborRate: Optional[float] = None
+    sizeTier: Optional[str] = None  # "small" | "mid-market" | "enterprise" for fallbacks
+
+    # Metadata
+    confidence: Literal["high", "medium", "low"] = "low"
+    sources: list[str] = Field(default_factory=list)
+    enrichedAt: Optional[str] = None
+    disambiguated: bool = False
 
 
 class Project(BaseModel):
@@ -9,6 +50,7 @@ class Project(BaseModel):
     user_id: str
     description: str
     customer_name: Optional[str] = None
+    company_profile: Optional[dict[str, Any]] = None
     active_agents: list[str] = Field(
         default_factory=lambda: [
             "architect",
@@ -36,6 +78,7 @@ class CreateProjectRequest(BaseModel):
     description: str = Field(min_length=10, max_length=5000)
     customer_name: Optional[str] = Field(default=None, max_length=200)
     active_agents: Optional[list[str]] = None
+    company_profile: Optional[dict[str, Any]] = None
 
 
 class SendMessageRequest(BaseModel):

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import type { ChatMessage, AgentStatus } from '../types';
-import { getChatHistory, getAgents, sendMessageStreaming } from '../api';
+import type { ChatMessage, AgentStatus, CompanyProfile } from '../types';
+import { getChatHistory, getAgents, sendMessageStreaming, getProject } from '../api';
 import ChatThread from '../components/ChatThread';
 import ChatInput from '../components/ChatInput';
+import CompanyCard from '../components/CompanyCard';
 
 interface Props {
   agents: AgentStatus[];
@@ -16,6 +17,7 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile | null>(null);
   const initialSent = useRef(false);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
@@ -24,6 +26,12 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
     if (!projectId) return;
     getChatHistory(projectId).then(setMessages).catch(console.error);
     getAgents(projectId).then(onAgentsChange).catch(console.error);
+    // Load company profile from project
+    getProject(projectId).then((proj: any) => {
+      if (proj?.company_profile) {
+        setCompanyProfile(proj.company_profile as CompanyProfile);
+      }
+    }).catch(() => {});
   }, [projectId]);
 
   const handleSend = useCallback(async (message: string) => {
@@ -111,9 +119,20 @@ export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProj
   }, [projectId]);
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--bg-main)]">
-      <ChatThread messages={messages} onSend={handleSend} projectId={projectId} isThinking={sending} />
-      <ChatInput onSend={handleSend} disabled={sending} />
+    <div className="flex-1 flex min-w-0 overflow-hidden">
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--bg-main)]">
+        <ChatThread messages={messages} onSend={handleSend} projectId={projectId} isThinking={sending} />
+        <ChatInput onSend={handleSend} disabled={sending} />
+      </div>
+
+      {/* Sticky company card — right panel */}
+      {companyProfile && (
+        <aside className="w-56 shrink-0 bg-[var(--bg-primary)] border-l border-[var(--border)] overflow-y-auto p-3 hidden lg:block">
+          <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">Customer</p>
+          <CompanyCard profile={companyProfile} />
+        </aside>
+      )}
     </div>
   );
 }

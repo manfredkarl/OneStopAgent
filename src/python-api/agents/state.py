@@ -153,6 +153,7 @@ class AgentState:
     user_input: str = ""
     customer_name: str = ""
     clarifications: str = ""
+    company_profile: dict[str, Any] | None = None
 
     # ── Mode tracking ────────────────────────────────────────────────
     mode: str = "brainstorm"          # "brainstorm" or "solution"
@@ -227,6 +228,22 @@ class AgentState:
     def to_context_string(self) -> str:
         """Build a context string for LLM prompts with everything known so far."""
         parts = [f"User request: {self.user_input}"]
+        if self.company_profile:
+            p = self.company_profile
+            profile_parts = [f"Customer: {p.get('name', '')}"]
+            if p.get("industry"):
+                profile_parts.append(f"Industry: {p['industry']}")
+            if p.get("employeeCount"):
+                profile_parts.append(f"Employees: {p['employeeCount']:,}")
+            if p.get("annualRevenue"):
+                rev = p["annualRevenue"]
+                currency = p.get("revenueCurrency", "USD")
+                profile_parts.append(f"Revenue: {currency} {rev:,.0f}")
+            if p.get("itSpendEstimate"):
+                profile_parts.append(f"Est. IT Spend: ${p['itSpendEstimate']:,.0f}/yr")
+            if p.get("headquarters"):
+                profile_parts.append(f"HQ: {p['headquarters']}")
+            parts.append("Company profile: " + " | ".join(profile_parts))
         if self.clarifications:
             parts.append(f"Clarifications: {self.clarifications}")
         if self.shared_assumptions:
