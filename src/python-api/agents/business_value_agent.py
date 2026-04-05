@@ -5,7 +5,7 @@ Phase 2: Calculate value drivers using user-provided assumptions.
 """
 import json
 import logging
-from agents.llm import llm
+from agents.llm import llm, parse_llm_json
 from agents.state import AgentState
 from agents.assumption_catalog import filter_already_answered
 from services.web_search import search_industry_benchmarks
@@ -64,14 +64,10 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}"}
             ])
 
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            assumptions = json.loads(text)
+            assumptions = parse_llm_json(response.content, label="BV.generate_assumptions")
             if isinstance(assumptions, list) and len(assumptions) > 0:
                 return filter_already_answered(assumptions[:5], state)
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Phase 1 assumption generation failed: %s", e)
 
         # Fallback generic assumptions — use typed shared assumptions for defaults
@@ -135,8 +131,8 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
         search_results: list[dict[str, str]] = []
         try:
             search_results = search_industry_benchmarks(industry, use_case)
-        except Exception as e:
-            logger.warning(f"Industry benchmark search failed: {e}")
+        except (OSError, ConnectionError, TimeoutError, RuntimeError) as e:
+            logger.warning("Industry benchmark search failed: %s", e)
 
         # Build search context
         search_context = ""
@@ -153,14 +149,14 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
                 "Since you are computing value from the user-provided assumptions below, "
                 "be HONEST about the source: the numbers come from the user's data combined "
                 "with a standard calculation methodology.\n"
-                "Use descriptive source_name labels such as:\n"
-                "  - 'Calculated from user assumptions' (when the math is based on user inputs)\n"
+                "Use ONLY these source_name labels (no others):\n"
+                "  - 'Calculated from user assumptions: [formula]' (when the math is based on user inputs)\n"
                 "  - 'Labor rate analysis' (for headcount × rate × savings calculations)\n"
                 "  - 'Spend optimization model' (for infrastructure cost reduction drivers)\n"
                 "  - 'Revenue acceleration estimate' (for revenue uplift drivers)\n"
-                "  - 'Azure industry analysis' or 'Microsoft customer evidence' (for Azure-specific claims)\n"
-                "NEVER use the vague label 'Industry estimate'.\n"
-                "Always set source_url to '' (empty string) when no real URL exists.\n"
+                "NEVER use 'Industry estimate', 'Azure industry analysis', 'Microsoft customer evidence', "
+                "or any other label not listed above when no real URL exists.\n"
+                "Always set source_url to '' (empty string).\n"
             )
 
         # Extra context from prior agents (iteration re-runs)
@@ -187,9 +183,9 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
         else:
             source_instruction = (
                 "Be honest about sources. Since calculations are derived from user-provided assumptions, "
-                "use descriptive labels like 'Calculated from user assumptions', 'Labor rate analysis', "
-                "'Spend optimization model', 'Revenue acceleration estimate', 'Azure industry analysis', "
-                "or 'Microsoft customer evidence'. NEVER use the vague label 'Industry estimate'. "
+                "use ONLY these labels: 'Calculated from user assumptions: [formula]', 'Labor rate analysis', "
+                "'Spend optimization model', or 'Revenue acceleration estimate'. "
+                "NEVER use 'Industry estimate', 'Azure industry analysis', or any unverifiable claim. "
                 "Set source_url to '' (empty string). "
                 "In the description, briefly cite the methodology, e.g. "
                 "'Based on 20-30% engineering time savings applied to 1,600 hrs/week × $100/hr labor rate'."
@@ -292,11 +288,9 @@ CATEGORY RULES:
                 {"role": "user", "content": prompt},
             ])
 
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            result = json.loads(text)
+            result = parse_llm_json(response.content, label="BV.run")
+            if result is None:
+                raise ValueError("LLM returned unparseable JSON for value drivers")
 
             # Safety cap at 5 drivers (prompt asks for 2-4)
             drivers = result.get("drivers", [])[:5]
@@ -361,7 +355,7 @@ CATEGORY RULES:
                     "No external industry benchmarks were available for validation."
                 )
 
-        except json.JSONDecodeError as e:
+        except (KeyError, ValueError, TypeError) as e:
             logger.error("BV LLM returned invalid JSON: %s", e, exc_info=True)
             state.business_value = {
                 "drivers": [],
@@ -375,7 +369,7 @@ CATEGORY RULES:
                 "error": "The AI model returned an unexpected format. Results may be incomplete.",
             }
 
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError) as e:
             logger.error("BV LLM call failed: %s", e, exc_info=True)
             state.business_value = {
                 "drivers": [],
@@ -385,8 +379,8 @@ CATEGORY RULES:
                 "sources": [],
                 "user_assumptions": user_assumptions,
                 "_used_fallback": True,
-                "error_type": "unknown",
-                "error": "Could not generate value drivers. Please retry or refine the use case description.",
+                "error_type": "connection",
+                "error": "Could not reach the AI model. Please check your connection and retry.",
             }
 
         return state

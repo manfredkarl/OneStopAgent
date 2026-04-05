@@ -163,15 +163,6 @@ SOLUTIONING_PLAN = [
     "presentation",
 ]
 
-# Maps internal plan step IDs to frontend agent toggle IDs
-PLAN_TO_ACTIVE = {
-    "architect": "architect",
-    "cost": "cost",
-    "business_value": "business_value",
-    "roi": "roi",
-    "presentation": "presentation",
-}
-
 
 class ProjectManager:
     def __init__(self):
@@ -366,8 +357,7 @@ RULES:
         """Build solutioning execution plan respecting agent toggles. Architect is always included."""
         plan = []
         for agent_id in SOLUTIONING_PLAN:
-            mapped = PLAN_TO_ACTIVE.get(agent_id, agent_id)
-            if mapped in active_agents or agent_id == "architect":
+            if agent_id in active_agents or agent_id == "architect":
                 plan.append(agent_id)
         return plan
 

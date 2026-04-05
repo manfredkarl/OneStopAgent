@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from agents.state import AgentState
+from utils import strip_markdown_fences
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,13 @@ class PresentationAgent:
 
         try:
             path = execute_pptxgenjs(script, customer)
-        except Exception as e:
+        except (RuntimeError, FileNotFoundError, OSError) as e:
             # Auto-fix: ask LLM to fix the specific error
             logger.warning("PPTX execution failed: %s — auto-fixing", e)
             try:
                 script = self._fix_script(script, str(e), llm)
                 path = execute_pptxgenjs(script, customer)
-            except Exception as e2:
+            except (RuntimeError, FileNotFoundError, OSError) as e2:
                 logger.error("PPTX auto-fix also failed: %s", e2)
                 raise RuntimeError(f"Presentation generation failed after auto-fix: {e2}") from e2
 
@@ -290,8 +291,7 @@ Add a small note explaining confidence: High = most prices from live Azure API, 
 
         script = response.content.strip()
         # Strip markdown fences if present
-        if script.startswith("```"):
-            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        script = strip_markdown_fences(script)
 
         if "pptxgenjs" not in script.lower() or "writefile" not in script.lower():
             raise ValueError("Generated script missing required PptxGenJS structure")
@@ -305,6 +305,5 @@ Add a small note explaining confidence: High = most prices from live Azure API, 
             {"role": "user", "content": f"This PptxGenJS script failed with error:\n{error[:500]}\n\nFix the script:\n{broken_script[:8000]}"},
         ])
         script = response.content.strip()
-        if script.startswith("```"):
-            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        script = strip_markdown_fences(script)
         return script

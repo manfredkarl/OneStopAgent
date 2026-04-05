@@ -224,7 +224,7 @@ class MAFOrchestrator:
                         {"role": "user", "content": f"User's original request: {state.user_input}\n\nUser's additional input: {message}"},
                     ]), timeout=30)
                     ack_text = ack.content.strip()
-                except (asyncio.TimeoutError, Exception):
+                except (asyncio.TimeoutError, json.JSONDecodeError, ValueError, TypeError, RuntimeError):
                     ack_text = "Got it. Anything else, or say **proceed** to start?"
                 yield self._msg(project_id, ack_text)
 
@@ -302,11 +302,14 @@ class MAFOrchestrator:
                         del state.costs["phase"]
                     if agent_name == "business_value" and "phase" in state.business_value:
                         del state.business_value["phase"]
-                    # Reset output state
+                    # Reset output state — but preserve architecture when cost re-runs without architect
                     field = AGENT_STATE_FIELDS.get(agent_name)
                     if field:
                         if field == "presentation_path":
                             state.presentation_path = ""
+                        elif field == "architecture" and "architect" not in rerun_set:
+                            # Cost agent needs the existing architecture components — don't clear it
+                            pass
                         else:
                             setattr(state, field, {})
 
@@ -347,6 +350,9 @@ class MAFOrchestrator:
                     if field:
                         if field == "presentation_path":
                             state.presentation_path = ""
+                        elif field == "architecture" and "architect" not in rerun_set:
+                            # Cost agent needs the existing architecture components — don't clear it
+                            pass
                         else:
                             setattr(state, field, {})
 

@@ -9,7 +9,7 @@ import json
 import logging
 import re
 
-from agents.llm import llm
+from agents.llm import llm, parse_llm_json
 from agents.state import AgentState
 from services.mcp import mcp_client, MCPUnavailableError
 from data.knowledge_base import search_local_patterns
@@ -46,7 +46,7 @@ class ArchitectAgent:
                 shared_assumptions=state.shared_assumptions,
                 company_profile=state.company_profile,
             )
-        except Exception:
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError, OSError, ConnectionError, TimeoutError):
             logger.exception("ArchitectAgent failed — using fallback")
             state.architecture = self._build_fallback(state)
 
@@ -177,16 +177,12 @@ class ArchitectAgent:
             if scale_parts:
                 scale_context = "SCALE REQUIREMENTS (from shared assumptions):\n" + "\n".join(scale_parts) + "\nDesign the architecture to handle this scale appropriately.\n\n"
 
-        # Add company profile scale context
+        # Add company profile scale context — architecture-only (no financial data)
         if company_profile:
             p = company_profile
             company_lines = [f"CUSTOMER SCALE ({p.get('name', 'Company')}):"]
             if p.get("employeeCount"):
                 company_lines.append(f"- {p['employeeCount']:,} total employees")
-            if p.get("annualRevenue"):
-                rev = p["annualRevenue"]
-                currency = p.get("revenueCurrency", "USD")
-                company_lines.append(f"- Annual revenue: {currency} {rev:,.0f} — design for appropriate scale")
             if p.get("headquarters"):
                 company_lines.append(f"- HQ: {p['headquarters']} — consider data residency/compliance")
             if p.get("knownAzureUsage"):
@@ -273,15 +269,10 @@ class ArchitectAgent:
             {"role": "user", "content": f"Design a layered Azure architecture for:\n{requirements}"},
         ])
 
-        text = response.content.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-        try:
-            result = json.loads(text)
-        except json.JSONDecodeError as e:
-            logger.error("LLM returned invalid architecture JSON: %s", text[:200])
-            raise ValueError(f"Invalid architecture JSON from LLM") from e
+        result = parse_llm_json(response.content, label="ArchitectAgent")
+        if result is None:
+            logger.error("LLM returned invalid architecture JSON: %s", response.content[:200])
+            raise ValueError("Invalid architecture JSON from LLM")
 
         # Validate mermaid
         mermaid = result.get("mermaidCode", "")

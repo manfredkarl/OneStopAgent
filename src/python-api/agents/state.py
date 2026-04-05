@@ -109,6 +109,11 @@ class SharedAssumptions:
                 continue
 
             if numeric <= 0:
+                logger.warning(
+                    "SharedAssumptions: skipping non-positive value for key %r (value=%s). "
+                    "All assumption values must be positive numbers.",
+                    sa_key, numeric,
+                )
                 continue
 
             sk = sa_key.lower()
