@@ -242,12 +242,12 @@ class LLMJudge:
         if agent == "cross_agent":
             user_content = f"**Scenario**: {scenario_desc}\n**Company**: {company or 'Generic startup'}\n\n"
             for agent_name, agent_output in (all_outputs or {}).items():
-                user_content += f"### {agent_name} output:\n{agent_output[:2000]}\n\n"
+                user_content += f"### {agent_name} output:\n{agent_output[:3000]}\n\n"
         else:
             user_content = (
                 f"**Scenario**: {scenario_desc}\n"
                 f"**Company**: {company or 'Generic startup'}\n\n"
-                f"**Agent output**:\n{output[:3000]}"
+                f"**Agent output**:\n{output[:5000]}"
             )
 
         try:

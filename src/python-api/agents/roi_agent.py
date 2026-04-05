@@ -222,6 +222,8 @@ class ROIAgent:
         # ── Accumulate per-pool reductions from cost_reduction drivers ─
         pool_reductions: dict[str | None, float] = {}  # pool → cumulative reduction fraction
         for d in bv_drivers:
+            if d.get("excluded", False):
+                continue
             if d.get("category") != "cost_reduction":
                 continue
             low = d.get("impact_pct_low")
@@ -281,12 +283,16 @@ class ROIAgent:
 
         Uses structured impact_pct_low/high fields when available,
         falls back to regex on metric string for backward compatibility.
+        Excluded drivers get $0 allocation.
         """
         if not drivers:
             return []
 
         percentages: list[float] = []
         for d in drivers:
+            if d.get("excluded", False):
+                percentages.append(0.0)
+                continue
             low = d.get("impact_pct_low")
             high = d.get("impact_pct_high")
             if low is not None and high is not None:
@@ -974,25 +980,46 @@ class ROIAgent:
 
         # ── ROI display text ─────────────────────────────────────────
         if roi_percent is not None:
-            roi_display_text = f"{(roi_percent / 100 + 1):.1f}x"
+            roi_display_text = f"{roi_percent:+.0f}%"
         else:
             roi_display_text = None
 
         # Steady-state ROI display (for secondary context)
         if azure_annual > 0:
-            roi_steady_text = f"{(roi_run_rate / 100 + 1):.1f}x"
+            roi_steady_text = f"{roi_run_rate:+.0f}%"
         else:
             roi_steady_text = None
 
         adoption_ramp_local = self._select_adoption_ramp(state)
         yr1_pct = int(adoption_ramp_local[0] * 100)
+        year1_adopted_value = annual_value * adoption_ramp_local[0]
 
         roi_description = (
-            f"Year 1 ROI: {yr1_pct}% adoption-adjusted value "
-            f"vs. Year 1 investment (${year1_investment:,.0f}, incl. setup). "
-            f"Steady-state: {roi_steady_text or 'N/A'} "
-            f"(full value vs. Azure run-rate ${azure_annual:,.0f}/yr)."
+            f"Year 1 ROI of {roi_display_text or 'N/A'} reflects {yr1_pct}% adoption "
+            f"(${round(year1_adopted_value):,} realized) against a Year 1 all-in "
+            f"investment of ${year1_investment:,.0f} (Azure ${azure_annual:,.0f} + "
+            f"implementation + change management). "
+            f"Steady-state ROI of {roi_steady_text or 'N/A'} compares full annual "
+            f"value of ${round(annual_value):,} to ongoing Azure platform cost of "
+            f"${azure_annual:,.0f}/yr (excludes setup costs already incurred)."
         )
+        if monthly_savings < 0:
+            cost_increase_annual = abs(monthly_savings) * 12
+            if annual_value > cost_increase_annual:
+                roi_description += (
+                    f" Note: Monthly operating cost increases by "
+                    f"${abs(monthly_savings):,.0f} (AI platform costs exceed current "
+                    f"baseline), but value drivers (revenue uplift, risk reduction) "
+                    f"of ${round(annual_value):,}/yr more than offset this increase."
+                )
+            else:
+                roi_description += (
+                    f" Note: Monthly operating cost increases by "
+                    f"${abs(monthly_savings):,.0f} (AI platform costs exceed current "
+                    f"baseline). Projected annual value of ${round(annual_value):,} "
+                    f"does not fully offset the ${cost_increase_annual:,.0f}/yr cost "
+                    f"increase — ROI depends on realizing revenue uplift assumptions."
+                )
 
         # ── Assemble dashboard ───────────────────────────────────────
         dashboard: dict = {
@@ -1012,6 +1039,7 @@ class ROIAgent:
             "aiCost": {
                 "total": round(future_monthly),
                 "breakdown": ai_breakdown,
+                "note": "Total monthly operating cost WITH AI (Azure platform + reduced existing labor/tools). Compare to currentCost for savings.",
             },
             "roiPercent": roi_percent,
             "roiYear1": roi_year1,
@@ -1020,12 +1048,33 @@ class ROIAgent:
             "roiDisplayText": roi_display_text,
             "roiRunRateText": roi_steady_text,
             "roiSubtitle": f"Year 1 ROI ({yr1_pct}% adoption, incl. setup)",
+            "roiRunRateNote": (
+                f"Steady-state ROI compares annual value (${round(annual_value):,}) "
+                f"to Azure platform cost (${azure_annual:,.0f}/yr) — the new "
+                f"incremental investment. Existing business operating costs are "
+                f"excluded as they are not new spending caused by the project."
+            ),
             "roiDescription": roi_description,
             "roiYear1Text": roi_display_text,
             "roiSteadyStateText": roi_steady_text,
             "confidenceLevel": bv.get("confidence", {}).get("label", "moderate") if isinstance(bv.get("confidence"), dict) else bv.get("confidence", "moderate"),
             "paybackMonths": payback_months,
             "futureAnnualOpex": round(future_annual),
+            "futureAnnualOpexNote": (
+                "Total business operating cost after AI transformation "
+                "(existing labor/tools reduced by driver effects + Azure platform). "
+                "NOT the ROI denominator — ROI uses only the new Azure investment."
+            ),
+            # ── Value bridge (traces annualImpact → Year 1 → Steady-state) ──
+            "year1Investment": round(year1_investment),
+            "year1AdoptionPct": yr1_pct,
+            "year1AdoptedValue": round(year1_adopted_value),
+            "annualImpactSteadyState": round(annual_value),
+            "netCostChangeMonthly": monthly_savings,
+            "netCostChangeLabel": (
+                f"{'Saves' if monthly_savings >= 0 else 'Increases cost by'} "
+                f"${abs(monthly_savings):,.0f}/mo vs. current baseline"
+            ),
             "drivers": display_drivers,
             "valueWaterfall": value_waterfall,
             "projection": projection,

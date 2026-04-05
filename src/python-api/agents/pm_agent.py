@@ -621,18 +621,8 @@ RULES:
             items = est.get("items", [])
             assumptions = est.get("assumptions", [])
 
-            # ── Section 1: Mapped Azure Services ──
-            parts = [f"## \u2601\ufe0f Azure Services ({len(sels)} mapped)\n"]
-            for s in sels[:15]:
-                reason = s.get("reason", "")
-                reason_text = f" — {reason}" if reason else ""
-                parts.append(
-                    f"- **{s.get('componentName', '')}** \u2192 "
-                    f"{s.get('serviceName', '')} ({s.get('sku', '')}){reason_text}"
-                )
-
-            # ── Section 2: Cost Summary ──
-            parts.append(f"\n## \U0001f4b0 Cost Summary\n")
+            # ── Section 1: Cost Summary (FIRST — most important) ──
+            parts = [f"## \U0001f4b0 Cost Estimate\n"]
             parts.append(f"| | |")
             parts.append(f"|---|---|")
             parts.append(f"| **Monthly** | **${monthly:,.0f}** |")
@@ -652,14 +642,14 @@ RULES:
             confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"
             parts.append(f"| **Confidence** | {confidence} |\n")
 
-            # Top 5 cost drivers
+            # ── Section 2: Top Cost Drivers (per-service breakdown) ──
             sorted_items = sorted(items, key=lambda x: x.get("monthlyCost", 0), reverse=True)
             top5 = sorted_items[:5]
             if top5:
-                parts.append("### Top Cost Drivers\n")
+                parts.append("### Per-Service Cost Breakdown\n")
                 parts.append("| Service | SKU | Monthly |")
                 parts.append("|---------|-----|--------:|")
-                for item in top5:
+                for item in sorted_items:
                     cost = item.get("monthlyCost", 0)
                     note = item.get("pricingNote") or ""
                     if cost == 0 and note:
@@ -672,17 +662,21 @@ RULES:
                         f"| {item.get('serviceName', '')} | {item.get('sku', '')} | {cost_text} |"
                     )
 
-            # Flag any $0 items not in top 5
-            zero_items = [i for i in items if i.get("monthlyCost", 0) == 0 and i not in top5]
-            if zero_items:
-                names = ", ".join(i.get("serviceName", "") for i in zero_items[:5])
-                parts.append(f"\n*Also usage-dependent (placeholder $0): {names}*")
-
             # Assumptions
             if assumptions:
                 parts.append("\n### Assumptions\n")
                 for a in assumptions:
                     parts.append(f"- {a}")
+
+            # ── Section 3: Azure Service Details ──
+            parts.append(f"\n## \u2601\ufe0f Azure Services ({len(sels)} mapped)\n")
+            for s in sels[:15]:
+                reason = s.get("reason", "")
+                reason_text = f" — {reason}" if reason else ""
+                parts.append(
+                    f"- **{s.get('componentName', '')}** \u2192 "
+                    f"{s.get('serviceName', '')} ({s.get('sku', '')}){reason_text}"
+                )
 
             return "\n".join(parts)
 
@@ -740,7 +734,7 @@ RULES:
             if roi.get("roi_percent") is not None:
                 parts = ["## \U0001f4c8 ROI Analysis\n"]
                 roi_display = roi.get("roi_percent_display") or roi.get("roi_percent", 0) or 0
-                roi_text = f"{(roi_display / 100 + 1):.1f}x"
+                roi_text = f"{roi_display:+.0f}%"
                 payback = roi.get('payback_months')
                 payback_str = f"{payback:.1f} months" if isinstance(payback, (int, float)) else "N/A"
                 parts.append(f"**ROI: {roi_text}** | Payback: **{payback_str}**\n")

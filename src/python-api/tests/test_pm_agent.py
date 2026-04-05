@@ -316,7 +316,7 @@ class TestFormatAgentOutputCost:
 
     def test_cost_output_has_services(self, pm, full_state):
         output = pm.format_agent_output("cost", full_state)
-        assert "Azure OpenAI Service" in output or "Cost Summary" in output
+        assert "Azure OpenAI Service" in output or "Cost Estimate" in output
 
     def test_cost_output_has_totals(self, pm, full_state):
         output = pm.format_agent_output("cost", full_state)
@@ -329,7 +329,7 @@ class TestFormatAgentOutputCost:
         state.services = {}
         output = pm.format_agent_output("cost", state)
         assert isinstance(output, str)
-        assert "Cost Summary" in output
+        assert "Cost Summary" in output or "Cost Estimate" in output
 
     def test_cost_has_monthly_and_annual_labels(self, pm, full_state):
         output = pm.format_agent_output("cost", full_state)
@@ -347,8 +347,8 @@ class TestFormatAgentOutputROI:
 
     def test_roi_output_has_roi_percent(self, pm, full_state):
         output = pm.format_agent_output("roi", full_state)
-        # 350% → (350/100 + 1) = 4.5x
-        assert "4.5x" in output
+        # 350% ROI displayed as "+350%"
+        assert "+350%" in output
 
     def test_roi_output_has_payback(self, pm, full_state):
         output = pm.format_agent_output("roi", full_state)

@@ -259,6 +259,130 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "note": "Defender for Cloud Servers P1: ~$5/server/mo, 3 servers assumed",
         "unit": "1/Month",
     },
+    # ── IoT & Streaming services ──────────────────────────────────
+    "Azure IoT Hub": {
+        "price": 250.0,
+        "source": "estimated",
+        "note": "IoT Hub S2: ~$250/mo (1.5M msgs/day)",
+        "unit": "1/Month",
+    },
+    "IoT Hub": {
+        "price": 250.0,
+        "source": "estimated",
+        "note": "IoT Hub S2: ~$250/mo (1.5M msgs/day)",
+        "unit": "1/Month",
+    },
+    "Azure IoT Edge": {
+        "price": 0.0,
+        "source": "estimated",
+        "note": "IoT Edge runtime free; cost is in underlying compute/VMs",
+        "unit": "1/Month",
+    },
+    "Azure Stream Analytics": {
+        "price": 80.0,
+        "source": "estimated",
+        "note": "Stream Analytics: ~$0.11/SU/hr, 1 SU assumed",
+        "unit": "1/Month",
+    },
+    "Stream Analytics": {
+        "price": 80.0,
+        "source": "estimated",
+        "note": "Stream Analytics: ~$0.11/SU/hr, 1 SU assumed",
+        "unit": "1/Month",
+    },
+    # ── Compute & Serverless ──────────────────────────────────────
+    "Azure Functions": {
+        "price": 25.0,
+        "source": "estimated",
+        "note": "Functions consumption: ~$0.20/M executions + compute",
+        "unit": "1/Month",
+    },
+    "Functions": {
+        "price": 25.0,
+        "source": "estimated",
+        "note": "Functions consumption: ~$0.20/M executions + compute",
+        "unit": "1/Month",
+    },
+    # ── Storage & Analytics ───────────────────────────────────────
+    "Azure Data Lake Storage Gen2": {
+        "price": 55.0,
+        "source": "estimated",
+        "note": "ADLS Gen2: ~$0.018/GB/mo, ~3TB stored",
+        "unit": "1/Month",
+    },
+    "Azure Data Lake Storage": {
+        "price": 55.0,
+        "source": "estimated",
+        "note": "ADLS Gen2: ~$0.018/GB/mo, ~3TB stored",
+        "unit": "1/Month",
+    },
+    "Power BI": {
+        "price": 4995.0,
+        "source": "estimated",
+        "note": "Power BI Premium P1 capacity: ~$4,995/mo",
+        "unit": "1/Month",
+    },
+    "Power BI Premium": {
+        "price": 4995.0,
+        "source": "estimated",
+        "note": "Power BI Premium P1 capacity: ~$4,995/mo",
+        "unit": "1/Month",
+    },
+    # ── Monitoring & Networking ───────────────────────────────────
+    "Azure Monitor": {
+        "price": 25.0,
+        "source": "estimated",
+        "note": "Azure Monitor: ~$2.30/GB ingested, ~10GB/mo assumed",
+        "unit": "1/Month",
+    },
+    "Azure Event Hubs": {
+        "price": 1175.0,
+        "source": "estimated",
+        "note": "Event Hubs Premium: ~$1,175/mo per PU",
+        "unit": "1/Month",
+    },
+    "Event Hubs": {
+        "price": 1175.0,
+        "source": "estimated",
+        "note": "Event Hubs Premium: ~$1,175/mo per PU",
+        "unit": "1/Month",
+    },
+    "Azure Cache for Redis": {
+        "price": 73.0,
+        "source": "estimated",
+        "note": "Redis Cache Standard C1 (1GB): ~$73/mo",
+        "unit": "1/Month",
+    },
+    "Redis Cache": {
+        "price": 73.0,
+        "source": "estimated",
+        "note": "Redis Cache Standard C1 (1GB): ~$73/mo",
+        "unit": "1/Month",
+    },
+    "Azure Front Door": {
+        "price": 335.0,
+        "source": "estimated",
+        "note": "Front Door Premium: ~$335/mo base + transfer",
+        "unit": "1/Month",
+    },
+    "Front Door": {
+        "price": 335.0,
+        "source": "estimated",
+        "note": "Front Door Premium: ~$335/mo base + transfer",
+        "unit": "1/Month",
+    },
+    "Azure Databricks": {
+        "price": 450.0,
+        "source": "estimated",
+        "note": "Databricks Standard: ~$0.40/DBU, ~3 DBUs assumed",
+        "unit": "1/Month",
+    },
+    "Databricks": {
+        "price": 450.0,
+        "source": "estimated",
+        "note": "Databricks Standard: ~$0.40/DBU, ~3 DBUs assumed",
+        "unit": "1/Month",
+    },
 }
 
 
