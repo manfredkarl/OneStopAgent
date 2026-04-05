@@ -629,6 +629,9 @@ class MAFOrchestrator:
                         if "dashboard" in data and data["dashboard"]:
                             metadata["type"] = "roi_dashboard"
                             metadata["dashboard"] = data["dashboard"]
+                        if "presentation_path" in data and data["presentation_path"]:
+                            metadata["type"] = "presentation_ready"
+                            metadata["presentation_path"] = data["presentation_path"]
                         yield ChatMessage(
                             project_id=project_id, role="agent",
                             agent_id=agent_id, content=content, metadata=metadata,

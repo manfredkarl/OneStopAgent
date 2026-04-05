@@ -711,10 +711,13 @@ class PresentationExecutor(PipelineExecutor):
 
             output_text = self.pm.format_agent_output(self.step_name, state)
 
-            await ctx.yield_output({
+            result_payload: dict = {
                 "type": "agent_result", "step": self.step_name,
                 "content": output_text,
-            })
+            }
+            if state.presentation_path:
+                result_payload["presentation_path"] = state.presentation_path
+            await ctx.yield_output(result_payload)
 
             if _should_pause(msg.execution_mode, self.step_name):
                 await ctx.request_info(
@@ -757,7 +760,8 @@ class PresentationExecutor(PipelineExecutor):
                 "type": "agent_result", "step": self.step_name,
                 "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
             })
-        await ctx.send_message(msg)
+        # Presentation is the terminal executor — do NOT send_message
+        # (there is no next executor in the chain).
         await ctx.yield_output({
             "type": "pipeline_done",
             "content": "Pipeline complete.",

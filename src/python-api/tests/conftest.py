@@ -214,7 +214,14 @@ def mock_llm():
             "paybackMonths": 5,
             "npv": 1200000,
         }),
-        "presentation": json.dumps({"status": "generated", "path": "output/deck.pptx"}),
+        "pptxgenjs": (
+            'const pptxgen = require("pptxgenjs");\n'
+            "const pres = new pptxgen();\n"
+            'pres.layout = "LAYOUT_16x9";\n'
+            "let slide = pres.addSlide();\n"
+            'slide.addText("Test Deck", { x: 1, y: 1, w: 8, h: 1, fontSize: 24 });\n'
+            "pres.writeFile({ fileName: OUTPUT_PATH });\n"
+        ),
     }
 
     def _side_effect(messages):
@@ -304,6 +311,23 @@ class AgentStateFactory:
         # Ensure both business_value and costs are populated
         assert state.business_value.get("annual_impact_range"), "BV data missing"
         assert state.costs.get("estimate", {}).get("totalAnnual"), "Cost data missing"
+        return state
+
+    @staticmethod
+    def state_ready_for_presentation() -> AgentState:
+        """State with all upstream data — the Presentation agent's prerequisites."""
+        state = AgentStateFactory.state_after_cost()
+        state.roi = {
+            "roi_percent": 150,
+            "payback_months": 8,
+            "annual_cost": 102000,
+            "annual_value": 255000,
+            "monetized_drivers": [
+                {"name": "Developer Productivity", "annual_value": 200000},
+            ],
+            "qualitative_benefits": ["Improved developer experience"],
+            "dashboard": {},
+        }
         return state
 
 
