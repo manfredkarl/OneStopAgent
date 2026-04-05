@@ -46,7 +46,7 @@ class ProjectStore:
 
     def get_messages(self, project_id: str) -> list[ChatMessage]:
         with self._lock:
-            return list(self.chat_histories.get(project_id, []))
+            return self.chat_histories.get(project_id, [])
 
     def clear(self) -> None:
         """Reset all data (for testing)."""

@@ -200,7 +200,8 @@ class _LazyLLMProxy:
     level ``llm`` name) before the first call is made.
     """
 
-    def __getattr__(self, name: str):  # type: ignore[override]
+    def __getattr__(self, name: str):
+        # Called when normal attribute lookup fails; forwards to the real client.
         return getattr(_get_llm(), name)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -210,11 +211,17 @@ class _LazyLLMProxy:
         else:
             setattr(_get_llm(), name, value)
 
-    # Expose astream as a method (generators need special forwarding)
-    def astream(self, messages):  # type: ignore[override]
+    # ``astream`` is an async generator method.  ``__getattr__`` returns a
+    # bound-method object rather than the generator itself, so callers that
+    # do ``async for chunk in llm.astream(...)`` would fail.  Forwarding it
+    # explicitly ensures the generator protocol works correctly.
+    def astream(self, messages):
         return _get_llm().astream(messages)
 
 
+# ``_LazyLLMProxy`` duck-types ``LLMClient`` but is not a subclass; the type
+# ignore suppresses the intentional mismatch so callers can annotate against
+# the concrete type while still benefiting from lazy construction.
 llm: LLMClient = _LazyLLMProxy()  # type: ignore[assignment]
 
 # Re-export shared JSON parsing utility so callers can use:
