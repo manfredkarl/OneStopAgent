@@ -99,7 +99,10 @@ class AutoRefreshCredential:
             )
             return self._cached
         except Exception:
-            logger.exception("Token provider: failed to refresh token")
+            # Credential refresh failed — invalidate the cached credential so
+            # the next call rebuilds the chain (e.g. after CLI logout).  C7 fix.
+            logger.exception("Token provider: failed to refresh token; resetting credential chain")
+            self._inner_credential = None
             raise
 
     def _get_inner_credential(self) -> Any:

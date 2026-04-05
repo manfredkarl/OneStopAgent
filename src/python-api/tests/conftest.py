@@ -254,7 +254,12 @@ def mock_llm():
 
     mock.astream = _astream
 
-    with patch("agents.llm.llm", mock):
+    # Patch both the module-level proxy name AND the internal singleton so
+    # that agents which resolved the ``llm`` reference at import time also
+    # receive the mock.  This handles the lazy-init path (C1 fix).
+    import agents.llm as _llm_mod
+    with patch("agents.llm.llm", mock), \
+         patch.object(_llm_mod, "_llm_instance", mock):
         yield mock
 
 
