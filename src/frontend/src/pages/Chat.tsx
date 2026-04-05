@@ -13,7 +13,7 @@ interface Props {
   onProjectCreated?: () => void;
 }
 
-export default function Chat({ agents, onAgentsChange, onProjectCreated: _onProjectCreated }: Props) {
+export default function Chat({ agents, onAgentsChange }: Props) {
   const { id: projectId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);

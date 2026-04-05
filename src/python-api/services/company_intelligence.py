@@ -381,6 +381,22 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
         else:
             p["confidence"] = "low"
 
+        # Validate against CompanyProfile schema — fixes hallucinated/invalid fields
+        try:
+            from models.schemas import CompanyProfile
+            import pydantic
+            validated = CompanyProfile(**p)
+            p = validated.model_dump(exclude_none=True)
+        except Exception as exc:
+            logger.warning("LLM company profile failed schema validation for %r: %s", p.get("name"), exc)
+            # Sanitize known bad fields rather than discarding the entire profile
+            for bad_field in ("employeeCount", "annualRevenue", "itSpendRatio"):
+                try:
+                    CompanyProfile(**{bad_field: p.get(bad_field), "name": p.get("name", "")})
+                except Exception:
+                    logger.debug("Removing invalid field %r from company profile", bad_field)
+                    p.pop(bad_field, None)
+
         enriched.append(p)
 
     _cache_put(cache_key, enriched)

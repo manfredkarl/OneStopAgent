@@ -128,17 +128,6 @@ export async function sendMessageStreaming(
   }
 }
 
-export async function sendMessage(projectId: string, message: string): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
-    body: JSON.stringify({ message }),
-  });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  const data = await res.json();
-  return (Array.isArray(data) ? data : [data]).map(normalizeMessage);
-}
-
 export async function downloadPptx(projectId: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/export/pptx`, {
     headers: { 'x-user-id': 'demo-user' },

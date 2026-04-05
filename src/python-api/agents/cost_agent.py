@@ -12,7 +12,7 @@ import logging
 import re
 from threading import Lock
 
-from agents.llm import llm
+from agents.llm import llm, parse_llm_json
 from agents.state import AgentState
 from agents.assumption_catalog import filter_already_answered
 from services.pricing import query_azure_pricing_sync
@@ -198,14 +198,10 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
                 {"role": "user", "content": f"Industry: {industry}\nUse case: {description}\nArchitecture components: {', '.join(comp_names)}"}
             ])
 
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            assumptions = json.loads(text)
+            assumptions = parse_llm_json(response.content, label="CostAgent.generate_usage_assumptions")
             if isinstance(assumptions, list) and len(assumptions) > 0:
                 return filter_already_answered(assumptions[:5], state)
-        except Exception:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             pass
 
         # Fallback generic usage questions
@@ -403,6 +399,16 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
             usage_lines = [f"- {k.replace('_', ' ').title()}: {v}" for k, v in usage.items()]
             usage_context = "\nUSAGE ASSUMPTIONS (from user — use these for SKU sizing):\n" + "\n".join(usage_lines)
 
+        # Include brainstorming scenarios to inform SKU selection
+        scenarios_context = ""
+        scenarios = state.brainstorming.get("scenarios", [])
+        if scenarios:
+            scenario_lines = [
+                f"- {s.get('title', '')}: {s.get('description', '')}"
+                for s in scenarios[:3]
+            ]
+            scenarios_context = "\nSCENARIOS (use to inform service selection):\n" + "\n".join(scenario_lines)
+
         prompt = f"""Map these architecture components to specific Azure services with appropriate SKUs.
 
 COMPONENTS:
@@ -415,6 +421,7 @@ CONTEXT:
 - Use case: {state.user_input}
 {f"- Additional context: {state.clarifications}" if state.clarifications else ""}
 {usage_context}
+{scenarios_context}
 
 RULES:
 - For each component, select the most appropriate Azure service and a specific SKU/tier
@@ -451,11 +458,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 {"role": "user", "content": prompt},
             ])
 
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            selections = json.loads(text)
+            selections = parse_llm_json(response.content, label="CostAgent._llm_map_services")
             if not isinstance(selections, list):
                 raise ValueError("Expected JSON array")
 
@@ -473,7 +476,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 for c in components
             ]
 
-        except Exception as e:
+        except (KeyError, ValueError, TypeError) as e:
             logger.error("LLM-based SKU mapping failed: %s", e, exc_info=True)
             self._last_mapping_fallback = True
             selections = [
