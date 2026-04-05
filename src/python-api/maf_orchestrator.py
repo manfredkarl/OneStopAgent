@@ -291,9 +291,10 @@ class MAFOrchestrator:
                 state.clarifications += f"\nRetry: {message}"
 
                 rerun_set = set(agents_to_rerun)
-                state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
-                state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
-                state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+                with state._lock:
+                    state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
+                    state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
+                    state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
                 AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
                 for agent_name in agents_to_rerun:
@@ -332,9 +333,10 @@ class MAFOrchestrator:
                 state.clarifications += f"\nIteration: {message}"
 
                 rerun_set = set(agents_to_rerun)
-                state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
-                state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
-                state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+                with state._lock:
+                    state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
+                    state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
+                    state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
                 # H4: Clear agent-specific phase markers to avoid stale "needs_input"
                 for agent_name in agents_to_rerun:
@@ -367,9 +369,10 @@ class MAFOrchestrator:
                 self._cleanup_project(project_id)
                 self.phases[project_id] = "new"
                 state.mode = "brainstorm"
-                state.completed_steps.clear()
-                state.skipped_steps.clear()
-                state.failed_steps.clear()
+                with state._lock:
+                    state.completed_steps.clear()
+                    state.skipped_steps.clear()
+                    state.failed_steps.clear()
                 yield self._msg(project_id, "Starting fresh! Tell me about your project.")
 
             else:

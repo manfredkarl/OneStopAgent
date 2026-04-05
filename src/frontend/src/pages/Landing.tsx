@@ -179,6 +179,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const [showDisambiguation, setShowDisambiguation] = useState(false);
   const [showSizePicker, setShowSizePicker] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSubmittingRef = useRef(false);
 
   // Debounced company search triggered on customer name change
   useEffect(() => {
@@ -309,6 +310,10 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const handleCreate = async (desc?: string, overrideCustomer?: string, overrideProfile?: CompanyProfile) => {
     const text = desc || description.trim();
     if (!text) return;
+    // Synchronous guard prevents double-submission from fast double-click
+    // (React's setLoading is async so the disabled check alone isn't sufficient).
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setLoading(true);
     try {
       const activeAgents = agents.filter(a => a.active).map(a => a.agentId);
@@ -344,6 +349,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
     } catch (err) {
       console.error('Failed to create project:', err);
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
       setLoadingMessage('');
     }

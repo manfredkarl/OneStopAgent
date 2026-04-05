@@ -85,7 +85,6 @@ class LLMClient:
         )
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._loop_lock = threading.Lock()
-        self._sync_client: AzureOpenAIChatClient | None = None
 
     def _new_client(self) -> AzureOpenAIChatClient:
         """Create a fresh client (safe for use on any event loop)."""
@@ -95,12 +94,6 @@ class LLMClient:
             api_version=_api_version,
             credential=_build_credential(),
         )
-
-    def _get_sync_client(self) -> AzureOpenAIChatClient:
-        """Return a cached sync client, creating one lazily if needed."""
-        if self._sync_client is None:
-            self._sync_client = self._new_client()
-        return self._sync_client
 
     # -- synchronous (called from agent run() methods) ----------------------
 
@@ -122,8 +115,9 @@ class LLMClient:
             return future.result(timeout=300)  # 5 min for long generation (e.g. full PPTX scripts)
 
         # Slow path: reuse a cached sync client on a fresh event loop.
-        # This avoids cross-loop issues with aiohttp/httpx connection pools.
-        client = self._get_sync_client()
+        # Each thread gets its own event loop + client to avoid cross-loop
+        # conflicts with aiohttp/httpx connection pools (C4 fix).
+        client = self._new_client()
 
         async def _call() -> LLMResponse:
             maf_msgs = _to_maf_messages(messages)
@@ -131,7 +125,11 @@ class LLMClient:
             text = response.messages[-1].text if response.messages else str(response)
             return LLMResponse(content=text)
 
-        return asyncio.run(_call())
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_call())
+        finally:
+            loop.close()
 
     # -- asynchronous -------------------------------------------------------
 
@@ -172,10 +170,59 @@ class LLMClient:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton (same import pattern as before)
+# Module-level singleton — lazily created on first access.
+#
+# Lazy init avoids a crash (AZURE_OPENAI_ENDPOINT not set) and, critically,
+# allows test fixtures to patch ``agents.llm.llm`` *before* the client is
+# constructed.  All callers import the name ``llm`` from this module; the
+# object is created the first time any agent actually invokes it.
 # ---------------------------------------------------------------------------
 
-llm = LLMClient()
+_llm_instance: "LLMClient | None" = None
+_llm_lock = threading.Lock()
+
+
+def _get_llm() -> "LLMClient":
+    global _llm_instance
+    if _llm_instance is None:
+        with _llm_lock:
+            if _llm_instance is None:
+                _llm_instance = LLMClient()
+    return _llm_instance
+
+
+class _LazyLLMProxy:
+    """Proxy that forwards attribute access to the lazily-created LLMClient.
+
+    This allows ``from agents.llm import llm`` to keep working unchanged in
+    all consumer files while still deferring construction until first use.
+    Test fixtures can swap ``agents.llm._llm_instance`` (or patch the module-
+    level ``llm`` name) before the first call is made.
+    """
+
+    def __getattr__(self, name: str):
+        # Called when normal attribute lookup fails; forwards to the real client.
+        return getattr(_get_llm(), name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # Allow setting internal attributes normally; delegate the rest.
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+        else:
+            setattr(_get_llm(), name, value)
+
+    # ``astream`` is an async generator method.  ``__getattr__`` returns a
+    # bound-method object rather than the generator itself, so callers that
+    # do ``async for chunk in llm.astream(...)`` would fail.  Forwarding it
+    # explicitly ensures the generator protocol works correctly.
+    def astream(self, messages):
+        return _get_llm().astream(messages)
+
+
+# ``_LazyLLMProxy`` duck-types ``LLMClient`` but is not a subclass; the type
+# ignore suppresses the intentional mismatch so callers can annotate against
+# the concrete type while still benefiting from lazy construction.
+llm: LLMClient = _LazyLLMProxy()  # type: ignore[assignment]
 
 # Re-export shared JSON parsing utility so callers can use:
 #   from agents.llm import llm, parse_llm_json

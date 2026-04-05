@@ -400,5 +400,8 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
 
         enriched.append(p)
 
-    _cache_put(cache_key, enriched)
+    # Only cache non-empty results — caching an empty list would block
+    # retries for the full 30-minute TTL (C5 fix).
+    if enriched:
+        _cache_put(cache_key, enriched)
     return enriched

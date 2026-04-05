@@ -552,8 +552,8 @@ Return ONLY valid JSON (no markdown fences) as an array:
             service_name = sel.get("serviceName", "")
             sku = sel.get("sku", "")
             region = sel.get("region", "eastus")
-            price = result["price"]
-            source = result["source"]
+            price = result.get("price", 0)
+            source = result.get("source", "unknown")
             note = result.get("note")
             unit = result.get("unit", "1 Hour")
 

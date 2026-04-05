@@ -370,7 +370,7 @@ class ROIAgent:
         savings_capped = False
         savings_cap_pct = 0.0
         raw_hard = sum(i["amount"] for i in cost_items)
-        if max_hard_savings > 0 and raw_hard > max_hard_savings:
+        if max_hard_savings > 0 and raw_hard > 0 and raw_hard > max_hard_savings:
             scale = max_hard_savings / raw_hard
             cost_items = [{"label": i["label"], "amount": round(i["amount"] * scale)}
                           for i in cost_items]
