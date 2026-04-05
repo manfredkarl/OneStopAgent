@@ -78,7 +78,7 @@ class TestProjectCRUD:
 
     def test_create_project_missing_user_id(self, client):
         resp = client.post("/api/projects", json=PROJECT_BODY)
-        assert resp.status_code == 422
+        assert resp.status_code == 400
 
     def test_list_projects_empty(self, client):
         resp = client.get("/api/projects", headers=USER_HEADER)
@@ -232,12 +232,12 @@ class TestSecurityGuards:
     def test_projects_require_user_header(self, client):
         """All project-scoped endpoints must require x-user-id."""
         # GET /api/projects
-        assert client.get("/api/projects").status_code == 422
+        assert client.get("/api/projects").status_code == 400
         # POST /api/projects
-        assert client.post("/api/projects", json=PROJECT_BODY).status_code == 422
+        assert client.post("/api/projects", json=PROJECT_BODY).status_code == 400
         # GET /api/projects/{id}
-        assert client.get("/api/projects/any-id").status_code == 422
+        assert client.get("/api/projects/any-id").status_code == 400
         # GET /api/projects/{id}/chat
-        assert client.get("/api/projects/any-id/chat").status_code == 422
+        assert client.get("/api/projects/any-id/chat").status_code == 400
         # GET /api/projects/{id}/agents
-        assert client.get("/api/projects/any-id/agents").status_code == 422
+        assert client.get("/api/projects/any-id/agents").status_code == 400
