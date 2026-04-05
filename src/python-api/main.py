@@ -344,6 +344,8 @@ async def download_pptx(project_id: str, x_user_id: str = Header()):
     )
 
 if __name__ == "__main__":
+    import os
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    dev_mode = os.environ.get("ENV", "production").lower() == "development"
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=dev_mode)

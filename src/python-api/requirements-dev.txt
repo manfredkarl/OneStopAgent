@@ -1,0 +1,6 @@
+# Development and test dependencies — not needed in production Docker image
+-r requirements.txt
+pytest>=7.0
+pytest-asyncio>=0.23
+pytest-bdd>=7.0
+pytest-cov>=4.1

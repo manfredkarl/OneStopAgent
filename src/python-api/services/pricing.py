@@ -4,7 +4,9 @@ Queries the public Azure Retail Prices REST API. Uses service name mapping
 to handle naming differences between LLM output and the API.
 """
 
+import atexit
 import datetime
+import functools
 import logging
 
 import httpx
@@ -12,6 +14,13 @@ from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
+
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call)
+_http_client = httpx.Client(
+    timeout=15,
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+)
+atexit.register(_http_client.close)
 
 PRICING_API = "https://prices.azure.com/api/retail/prices"
 
@@ -521,20 +530,20 @@ ESTIMATED_PRICES: dict[str, dict] = {
 }
 
 
-def _query_api(service_name: str, region: str) -> list[dict]:
-    """Query the Retail Prices API. Returns list of price items."""
+@functools.lru_cache(maxsize=512)
+def _query_api(service_name: str, region: str) -> tuple[dict, ...]:
+    """Query the Retail Prices API. Returns tuple of price items (cached by service+region)."""
     filter_str = f"serviceName eq '{service_name}' and armRegionName eq '{region}'"
     try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(
-                PRICING_API,
-                params={"$filter": filter_str, "currencyCode": "USD"},
-            )
-            if resp.status_code == 200:
-                return resp.json().get("Items", [])
+        resp = _http_client.get(
+            PRICING_API,
+            params={"$filter": filter_str, "currencyCode": "USD"},
+        )
+        if resp.status_code == 200:
+            return tuple(resp.json().get("Items", []))
     except Exception as e:
         logger.warning("Pricing API request failed for %s: %s", service_name, e)
-    return []
+    return ()
 
 
 # ── Tier-proximity scoring for SKU fallback (FRD-006 Fix J) ──────────
@@ -553,7 +562,7 @@ def _tier_distance(requested: str, candidate: str) -> int:
     return abs(req_idx - cand_idx)
 
 
-def _find_best_match(items: list[dict], sku: str) -> dict | None:
+def _find_best_match(items: tuple[dict, ...] | list[dict], sku: str) -> dict | None:
     """Find the best matching price item for a given SKU."""
     if not items:
         return None

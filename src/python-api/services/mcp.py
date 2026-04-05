@@ -4,6 +4,7 @@ This module contains ONLY the MCP API client. No business logic —
 that belongs in KnowledgeAgent (ref refactor.md §3.2, FRD-02 §4).
 """
 from __future__ import annotations
+import atexit
 import httpx
 import logging
 from typing import Any
@@ -15,6 +16,12 @@ _tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
 
 MCP_ENDPOINT = "https://learn.microsoft.com/api/mcp"
+
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call)
+_http_client = httpx.Client(
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+)
+atexit.register(_http_client.close)
 
 
 class MCPUnavailableError(Exception):
@@ -52,28 +59,28 @@ class MCPClient:
             span.set_attribute("mcp.top_k", top_k)
             span.set_attribute("mcp.endpoint", self.endpoint)
             try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    response = client.post(
-                        self.endpoint,
-                        json={
-                            "jsonrpc": "2.0",
-                            "method": "search",
-                            "params": {"query": query, "top": top_k},
-                            "id": 1,
-                        },
-                        headers={"Content-Type": "application/json"},
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        results = data.get("result", data.get("results", []))
-                        mapped = [self._map_result(r, query) for r in results[:top_k]]
-                        span.set_attribute("mcp.result_count", len(mapped))
-                        return mapped
-                    else:
-                        logger.warning(f"MCP server returned {response.status_code}: {response.text[:200]}")
-                        span.set_attribute("mcp.error", f"HTTP {response.status_code}")
-                        raise MCPUnavailableError(f"MCP server returned {response.status_code}")
+                response = _http_client.post(
+                    self.endpoint,
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "search",
+                        "params": {"query": query, "top": top_k},
+                        "id": 1,
+                    },
+                    headers={"Content-Type": "application/json"},
+                    timeout=self.timeout,
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("result", data.get("results", []))
+                    mapped = [self._map_result(r, query) for r in results[:top_k]]
+                    span.set_attribute("mcp.result_count", len(mapped))
+                    return mapped
+                else:
+                    logger.warning(f"MCP server returned {response.status_code}: {response.text[:200]}")
+                    span.set_attribute("mcp.error", f"HTTP {response.status_code}")
+                    raise MCPUnavailableError(f"MCP server returned {response.status_code}")
             
             except httpx.ConnectError as e:
                 logger.warning(f"MCP server unreachable: {e}")
