@@ -1,5 +1,12 @@
 # FRD-004: Cross-Agent Reconciliation
 
+| Fix | Status |
+|-----|--------|
+| FR-004-001: Cost agent baseline comparison | 🚧 Partial |
+| FR-004-002: ROI plausibility engine | ✅ Implemented |
+| FR-004-003: Savings cap tracking | 🚧 Partial |
+| FR-004-004: Dashboard plausibility output | 🚧 Partial |
+
 **Feature ID**: F-004
 **Status**: Draft
 **Priority**: P1

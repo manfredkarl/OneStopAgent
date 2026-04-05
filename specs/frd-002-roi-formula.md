@@ -1,5 +1,16 @@
 # FRD-002: ROI Formula Accuracy
 
+| Fix | Status |
+|-----|--------|
+| FR-002-001: Future operating cost as ROI denominator | ✅ Implemented |
+| FR-002-002: Payback against Year 1 total cost | ✅ Implemented |
+| FR-002-003: Sensitivity table update | ✅ Implemented |
+| FR-002-004: State output additions | ✅ Implemented |
+| FR-002-005: Dashboard output additions | ✅ Implemented |
+| FR-002-006: Move investment computation | ✅ Implemented |
+| FR-002-007: Variable baseline multiplier | ✅ Implemented |
+| FR-002-008: Suppress estimated cost comparison | 🚧 Partial |
+
 **Feature ID**: F-002
 **Status**: Draft
 **Priority**: P0

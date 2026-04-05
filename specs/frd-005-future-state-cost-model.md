@@ -1,5 +1,12 @@
 # FRD-005: Future-State Cost Model
 
+| Fix | Status |
+|-----|--------|
+| FR-005-001: Pool classification | ✅ Implemented |
+| FR-005-002: Pool matching | ✅ Implemented |
+| FR-005-003: Rewritten _build_future_cost | ✅ Implemented |
+| FR-005-004: Future total as ROI input | ✅ Implemented |
+
 **Feature ID**: F-005
 **Status**: Draft
 **Priority**: P1

@@ -1,5 +1,12 @@
 # FRD-008: Error Handling & Transparency
 
+| Fix | Status |
+|-----|--------|
+| FR-008-001: Flag fallback in Cost agent | ✅ Implemented |
+| FR-008-002: Flag fallback in BV agent | ✅ Implemented |
+| FR-008-003: ROI fallback detection | ✅ Implemented |
+| FR-008-004: Typed exception handling | 🚧 Partial |
+
 **Feature ID**: F-008
 **Status**: Draft
 **Priority**: P2

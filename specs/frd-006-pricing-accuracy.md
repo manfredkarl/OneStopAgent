@@ -1,5 +1,14 @@
 # FRD-006: Azure Pricing Accuracy
 
+| Fix | Status |
+|-----|--------|
+| FR-006-001: Tier-proximity scoring | ✅ Implemented |
+| FR-006-002: Parallel pricing | ✅ Implemented |
+| FR-006-003: Session cache | 🚧 Partial |
+| FR-006-004: Unit detection whitelist | ❌ Not Started |
+| FR-006-005: HA-pattern overhead | ✅ Implemented |
+| FR-006-006: Configurable AI pricing | ✅ Implemented |
+
 **Feature ID**: F-006
 **Status**: Draft
 **Priority**: P2

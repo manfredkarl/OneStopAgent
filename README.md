@@ -53,7 +53,7 @@ Open **http://localhost:4200** in your browser.
 |-------|-----------|
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Backend | Python + FastAPI + SSE streaming |
-| LLM | Azure OpenAI (GPT-5.4) via Microsoft Agent Framework |
+| LLM | Azure OpenAI (`gpt-5.4` deployment name) via Microsoft Agent Framework |
 | Pricing | Azure Retail Prices REST API (public, no auth) |
 | Slides | PptxGenJS (Node.js template engine) |
 | Diagrams | Mermaid (rendered client-side as SVG) |
@@ -116,6 +116,8 @@ src/
 - **Executive deck** — professional PowerPoint generated via PptxGenJS template
 - **SSE streaming** — agent output streams to the UI in real-time
 - **Guided + fast-run modes** — pause at each step for approval, or run the full pipeline
+
+> **Note:** Three additional agents (Envisioning, Solution Engineer, Platform Engineer) are registered in the UI but not yet implemented.
 
 ## License
 

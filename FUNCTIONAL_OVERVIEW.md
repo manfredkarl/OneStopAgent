@@ -22,9 +22,9 @@ The seller opens the app, describes a customer need in plain language, and a tea
 
 4. **Agents execute automatically** — the PM calls specialist agents in sequence, each building on the previous one's output:
 
+   - **📊 Business Value** — Two-phase analysis: asks for business assumptions (employees, hourly rate, etc.), then calculates industry-benchmarked value drivers with web search for real sources
    - **🏗️ System Architect** — Designs an Azure architecture with a Mermaid diagram showing all components and their relationships
    - **💰 Cost & Services** — Maps architecture components to Azure services with SKUs, then queries the Azure Retail Prices API for cost estimates. Asks usage questions first (concurrent users, API calls/day, etc.)
-   - **📊 Business Value** — Two-phase analysis: asks for business assumptions (employees, hourly rate, etc.), then calculates industry-benchmarked value drivers with web search for real sources
    - **📈 ROI Calculator** — Pure-math ROI with visual dashboard showing cost comparison, value drivers, and 3-year projection
    - **📑 Presentation** — Generates a professional PowerPoint deck using a PptxGenJS template with LLM-polished text content
 
@@ -59,7 +59,7 @@ User → Project Manager (planner) → MAF Workflow → Agents run in sequence �
 
 2. **Execution Plan** is a simple list:
    ```python
-   ["architect", "azure_services", "cost", "business_value", "presentation"]
+   ["business_value", "architect", "cost", "roi", "presentation"]
    ```
 
 3. **MAFOrchestrator** runs agents via MAF workflow:
@@ -99,7 +99,7 @@ from langchain_openai import AzureChatOpenAI
 
 llm = AzureChatOpenAI(
     azure_endpoint="https://demopresentations.services.ai.azure.com",
-    azure_deployment="gpt-4.1",
+    azure_deployment="gpt-5.4",
     azure_ad_token=token,
 )
 
@@ -128,7 +128,7 @@ Agent responses stream to the frontend in real-time using **Server-Sent Events**
 
 ### Azure OpenAI Integration
 
-- Uses **Azure OpenAI GPT-5.4** deployed on Azure AI Foundry
+- Uses **Azure OpenAI** with deployment name `gpt-5.4` (configurable via `AZURE_OPENAI_DEPLOYMENT` env var) on Azure AI Foundry
 - Authenticated via **Azure CLI credential** (`az account get-access-token`)
 - Token passed as `AZURE_OPENAI_TOKEN` environment variable at server startup
 - LangChain's `AzureChatOpenAI` handles the API calls

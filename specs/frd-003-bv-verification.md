@@ -1,5 +1,14 @@
 # FRD-003: Business Value Verification
 
+| Fix | Status |
+|-----|--------|
+| FR-003-001: Structured driver schema (impact_pct fields) | ✅ Implemented |
+| FR-003-002: Replace regex-based coverage extraction | ✅ Implemented |
+| FR-003-003: Validate and verify BV output | ✅ Implemented |
+| FR-003-004: ROI agent driver sum check | ✅ Implemented |
+| FR-003-005: Flexible driver count | 🚧 Partial |
+| FR-003-006: Confidence downgrade | ✅ Implemented |
+
 **Feature ID**: F-003
 **Status**: Draft
 **Priority**: P1

@@ -12,6 +12,16 @@ information degrades at each handoff. The user provides grounded inputs
 ROI dashboard renders, the baseline has inflated to $439M, ghost value
 drivers appear, and caps are bypassed. Five root causes identified.
 
+### Implementation Status
+
+| Issue | Description | Status |
+|-------|-------------|--------|
+| Issue 1: Baseline Inflation | User → Employee confusion in `total_users` | ✅ Implemented (`affected_employees` field added, orchestrator prompt updated, `monthly_ceiling` logic in baseline resolver) |
+| Issue 2: Ghost Risk Driver | Auto-generated risk ignores BV exclusions | ✅ Implemented (`_compute_risk_reduction` now accepts `bv_drivers` param) |
+| Issue 3: Value Cap Bypass | Uncapped revenue + risk inflate total | ❌ Not Started (no `bv_cap` clamping found in `_build_dashboard`) |
+| Issue 4: Communication Services Undercosting | Flat $500/mo ignores usage | 🚧 Partial (Communication Services entry exists in `ESTIMATED_PRICES` but per-minute pricing unverified) |
+| Issue 5: Baseline Must Be Ceiling | Labor calc can exceed stated spend | ✅ Implemented (`monthly_ceiling` enforced from `sa_annual_spend` in `_resolve_current_baseline`) |
+
 ---
 
 ## Issue 1: Baseline Inflation (User → Employee Confusion)

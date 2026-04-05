@@ -1,5 +1,11 @@
 # FRD-007: ROI Model Refinements
 
+| Fix | Status |
+|-----|--------|
+| FR-007-001: Context-aware risk reduction | ✅ Implemented |
+| FR-007-002: Complexity-based adoption ramp | ✅ Implemented |
+| FR-007-003: Remove productivityGains | ✅ Implemented |
+
 **Feature ID**: F-007
 **Status**: Draft
 **Priority**: P2

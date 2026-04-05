@@ -1,5 +1,13 @@
 # FRD-001: Typed Shared Assumptions
 
+| Fix | Status |
+|-----|--------|
+| FR-001-001: SharedAssumptions dataclass | ✅ Implemented |
+| FR-001-002: AgentState.sa property | ✅ Implemented |
+| FR-001-003: Remove legacy fuzzy matchers | ✅ Implemented |
+| FR-001-004: Assumption dedup catalog | ✅ Implemented |
+| FR-001-005: Wire dedup into agents | ✅ Implemented |
+
 **Feature ID**: F-001
 **Status**: Draft
 **Priority**: P0
