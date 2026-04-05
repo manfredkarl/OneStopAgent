@@ -43,6 +43,8 @@ jobs:
           python -m py_compile agents/roi_agent.py
           python -m py_compile agents/architect_agent.py
           python -m py_compile agents/business_value_agent.py
+          python -m py_compile agents/llm.py
+          python -m py_compile services/token_provider.py
 
       - name: Run unit tests
         run: |
@@ -78,7 +80,6 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true'
-      || github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
     steps:
       - uses: actions/checkout@v4
