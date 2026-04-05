@@ -38,7 +38,7 @@ class ROIAgent:
     # ── Constants ────────────────────────────────────────────────────
     MAX_DISPLAY_ROI = 1000        # 10× = 1000%
     MAX_SAVINGS_PCT = 60          # cap monthly savings display
-    MIN_PAYBACK_MONTHS = 0.5
+    MIN_PAYBACK_MONTHS = 3.0
     MAX_PAYBACK_MONTHS = 120.0
     ADOPTION_RAMP = [0.50, 0.85, 1.00]  # default; overridden by _select_adoption_ramp
 
@@ -658,7 +658,8 @@ class ROIAgent:
         else:
             roi_year1 = 0.0
 
-        # Steady-state ROI: full value vs Azure annual run-rate
+        # Steady-state ROI: full value vs Azure annual run-rate (incremental investment)
+        # Uses azure_annual only — labor/tools savings are in the NUMERATOR (via annual_value)
         if azure_annual > 0:
             roi_run_rate = ((total_annual_value - azure_annual) / azure_annual) * 100
         else:
@@ -1000,8 +1001,10 @@ class ROIAgent:
             f"investment of ${year1_investment:,.0f} (Azure ${azure_annual:,.0f} + "
             f"implementation + change management). "
             f"Steady-state ROI of {roi_steady_text or 'N/A'} compares full annual "
-            f"value of ${round(annual_value):,} to ongoing Azure platform cost of "
-            f"${azure_annual:,.0f}/yr (excludes setup costs already incurred)."
+            f"value of ${round(annual_value):,} to Azure platform cost of "
+            f"${azure_annual:,.0f}/yr — the incremental new investment. "
+            f"Labor/tools cost savings are counted as benefits (in annualImpact), "
+            f"not in the denominator."
         )
         if monthly_savings < 0:
             cost_increase_annual = abs(monthly_savings) * 12
@@ -1024,7 +1027,16 @@ class ROIAgent:
         # ── Assemble dashboard ───────────────────────────────────────
         dashboard: dict = {
             "monthlySavings": monthly_savings,
+            "monthlySavingsNote": (
+                "Operating cost delta only (currentCost - aiCost). Does NOT include "
+                "revenue uplift or risk reduction — see annualImpact for total value."
+            ),
             "annualImpact": round(annual_value),
+            "annualImpactNote": (
+                "Total annual business value from ALL drivers: cost savings + "
+                "revenue uplift + risk reduction. Larger than monthlySavings×12 "
+                "when revenue/risk drivers contribute value beyond cost savings."
+            ),
             "azureMonthlyCost": azure_monthly,
             "platformCostMonthly": azure_monthly,
             "platformCostAnnual": round(azure_annual),
@@ -1042,6 +1054,11 @@ class ROIAgent:
                 "note": "Total monthly operating cost WITH AI (Azure platform + reduced existing labor/tools). Compare to currentCost for savings.",
             },
             "roiPercent": roi_percent,
+            "roiPercentNote": (
+                f"Headline ROI = Year 1 ({yr1_pct}% adoption). "
+                f"Formula: (adopted_value - year1_investment) / year1_investment × 100. "
+                f"See roiRunRate for steady-state ROI with full adoption."
+            ),
             "roiYear1": roi_year1,
             "roiRunRate": roi_run_rate,
             "roiCapped": roi_capped,
@@ -1050,9 +1067,9 @@ class ROIAgent:
             "roiSubtitle": f"Year 1 ROI ({yr1_pct}% adoption, incl. setup)",
             "roiRunRateNote": (
                 f"Steady-state ROI compares annual value (${round(annual_value):,}) "
-                f"to Azure platform cost (${azure_annual:,.0f}/yr) — the new "
-                f"incremental investment. Existing business operating costs are "
-                f"excluded as they are not new spending caused by the project."
+                f"to Azure platform cost (${azure_annual:,.0f}/yr) — the incremental "
+                f"new investment. Labor/tools savings are in the numerator (as part of "
+                f"annualImpact), not double-counted in the denominator."
             ),
             "roiDescription": roi_description,
             "roiYear1Text": roi_display_text,
@@ -1063,7 +1080,8 @@ class ROIAgent:
             "futureAnnualOpexNote": (
                 "Total business operating cost after AI transformation "
                 "(existing labor/tools reduced by driver effects + Azure platform). "
-                "NOT the ROI denominator — ROI uses only the new Azure investment."
+                "NOT the ROI denominator — steady-state ROI uses only new Azure "
+                "platform cost as denominator; labor/tools savings are benefits."
             ),
             # ── Value bridge (traces annualImpact → Year 1 → Steady-state) ──
             "year1Investment": round(year1_investment),
@@ -1234,7 +1252,7 @@ class ROIAgent:
             adj_value = total_annual_value * pct
             # Year 1 ROI: value vs net new investment (Azure + impl + change)
             adj_roi_y1 = ((adj_value - year1_total_cost) / year1_total_cost * 100) if year1_total_cost > 0 else 0
-            # Run-rate ROI: value vs Azure annual (ongoing new cost)
+            # Run-rate ROI: value vs Azure annual (incremental new cost only)
             adj_roi_rr = ((adj_value - azure_annual) / azure_annual * 100) if azure_annual > 0 else 0
             adj_payback = round(year1_total_cost / adj_value * 12, 1) if adj_value > 0 else None
             if adj_payback is not None and adj_payback > self.MAX_PAYBACK_MONTHS:

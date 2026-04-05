@@ -305,6 +305,27 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         for ua in user_assumptions:
             assumptions.append(f"{ua.get('label', 'Unknown')}: {ua.get('value', 0)} {ua.get('unit', '')}")
 
+        # ── Infrastructure overhead: networking, egress, CI/CD, backup ──
+        subtotal = sum(i["monthlyCost"] for i in items)
+        infra_pct = 0.15  # 15% overhead for unlisted infrastructure
+        infra_overhead = round(subtotal * infra_pct, 2)
+        if infra_overhead > 0:
+            items.append({
+                "serviceName": "Infrastructure overhead",
+                "sku": "Estimated 15%",
+                "region": regions[0] if regions else "eastus",
+                "monthlyCost": infra_overhead,
+                "pricingNote": (
+                    "Covers networking (VNet, private endpoints, egress), "
+                    "CI/CD pipelines, backup/DR, monitoring alerts, and "
+                    "other shared infrastructure not individually listed."
+                ),
+            })
+            assumptions.append(
+                "15% infrastructure overhead added for networking, egress, "
+                "CI/CD, backup, and shared platform services"
+            )
+
         total_monthly = round(sum(i["monthlyCost"] for i in items), 2)
         total_annual = round(total_monthly * 12, 2)
 
@@ -541,6 +562,16 @@ Return ONLY valid JSON (no markdown fences) as an array:
             monthly = self._calculate_monthly(price, unit, service_name, users, usage_dict)
             monthly = self._apply_instance_count(monthly, sku)
 
+            # Sanity cap: no single service should exceed $30K/mo in an estimate
+            # (prevents LLM-generated absurd instance counts from propagating)
+            MAX_SERVICE_MONTHLY = 30_000
+            if monthly > MAX_SERVICE_MONTHLY:
+                logger.warning(
+                    "Cost cap: %s at $%.0f/mo exceeds $%d cap, clamping",
+                    service_name, monthly, MAX_SERVICE_MONTHLY,
+                )
+                monthly = MAX_SERVICE_MONTHLY
+
             cost_note = note
             if monthly == 0:
                 cost_note = "Usage-dependent \u2014 placeholder estimate (actual cost varies with consumption)"
@@ -611,7 +642,16 @@ Return ONLY valid JSON (no markdown fences) as an array:
             return unit_price * monthly_requests
 
         if "hour" in unit_lower or service_name in HOURLY_SERVICES:
-            return unit_price * 730
+            monthly = unit_price * 730
+            # Sanity: if hourly conversion gives >$20K, price is likely
+            # already monthly or per-unit (API misclassification)
+            if monthly > 20_000 and unit_price > 25:
+                logger.warning(
+                    "Hourly price $%.2f for %s seems too high — treating as monthly",
+                    unit_price, service_name,
+                )
+                return unit_price
+            return monthly
         elif "month" in unit_lower:
             return unit_price
         elif "day" in unit_lower:

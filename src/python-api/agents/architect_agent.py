@@ -264,7 +264,10 @@ class ArchitectAgent:
                     "NARRATIVE RULES:\n"
                     "- Open with 'This architecture is designed for [specific use case]...'\n"
                     "- Reference the adapted pattern if one was provided\n"
-                    "- Mention the key differentiating layers"
+                    "- Mention the key differentiating layers\n"
+                    "- Do NOT include business value metrics, dollar amounts, ROI, savings estimates,\n"
+                    "  or value driver language. Focus purely on technical architecture.\n"
+                    "- Do NOT reference staff counts, headcount reduction, or cost reduction outcomes"
                 ),
             },
             {"role": "user", "content": f"Design a layered Azure architecture for:\n{requirements}"},

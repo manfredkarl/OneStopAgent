@@ -383,6 +383,141 @@ ESTIMATED_PRICES: dict[str, dict] = {
         "note": "Databricks Standard: ~$0.40/DBU, ~3 DBUs assumed",
         "unit": "1/Month",
     },
+    # ── Data & AI services ────────────────────────────────────────
+    "Azure Cosmos DB": {
+        "price": 275.0,
+        "source": "estimated",
+        "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
+        "unit": "1/Month",
+    },
+    "Cosmos DB": {
+        "price": 275.0,
+        "source": "estimated",
+        "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
+        "unit": "1/Month",
+    },
+    "Azure Cosmos DB for NoSQL": {
+        "price": 275.0,
+        "source": "estimated",
+        "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
+        "unit": "1/Month",
+    },
+    "Azure AI Search": {
+        "price": 250.0,
+        "source": "estimated",
+        "note": "AI Search S1: ~$250/mo (25 partitions, 50GB storage)",
+        "unit": "1/Month",
+    },
+    "Azure Cognitive Search": {
+        "price": 250.0,
+        "source": "estimated",
+        "note": "Cognitive Search S1: ~$250/mo",
+        "unit": "1/Month",
+    },
+    "Azure Blob Storage": {
+        "price": 42.0,
+        "source": "estimated",
+        "note": "Blob Storage Hot LRS: ~$0.018/GB, 2TB assumed + transactions",
+        "unit": "1/Month",
+    },
+    "Blob Storage": {
+        "price": 42.0,
+        "source": "estimated",
+        "note": "Blob Storage Hot LRS: ~$0.018/GB, 2TB assumed + transactions",
+        "unit": "1/Month",
+    },
+    "Azure Bot Service": {
+        "price": 50.0,
+        "source": "estimated",
+        "note": "Bot Service S1: ~$0.50/1K messages, 100K msgs/mo assumed",
+        "unit": "1/Month",
+    },
+    "Bot Service": {
+        "price": 50.0,
+        "source": "estimated",
+        "note": "Bot Service S1: ~$0.50/1K messages, 100K msgs/mo assumed",
+        "unit": "1/Month",
+    },
+    # ── Compute & Hosting ─────────────────────────────────────────
+    "Azure App Service": {
+        "price": 146.0,
+        "source": "estimated",
+        "note": "App Service P1v3: ~$146/mo (Linux)",
+        "unit": "1/Month",
+    },
+    "App Service": {
+        "price": 146.0,
+        "source": "estimated",
+        "note": "App Service P1v3: ~$146/mo (Linux)",
+        "unit": "1/Month",
+    },
+    "Azure Kubernetes Service": {
+        "price": 292.0,
+        "source": "estimated",
+        "note": "AKS: $0 control plane + 2× D4s v5 nodes (~$146/mo each)",
+        "unit": "1/Month",
+    },
+    "Azure Machine Learning": {
+        "price": 350.0,
+        "source": "estimated",
+        "note": "AML Enterprise: managed endpoint D4s v5 (~$146) + compute instance (~$200)",
+        "unit": "1/Month",
+    },
+    "Azure Digital Twins": {
+        "price": 100.0,
+        "source": "estimated",
+        "note": "Digital Twins: ~$0.001/operation, ~100M ops/mo assumed",
+        "unit": "1/Month",
+    },
+    # ── Integration & Governance ──────────────────────────────────
+    "Azure Logic Apps": {
+        "price": 35.0,
+        "source": "estimated",
+        "note": "Logic Apps Consumption: ~$0.000025/action, ~1M actions/mo",
+        "unit": "1/Month",
+    },
+    "Logic Apps": {
+        "price": 35.0,
+        "source": "estimated",
+        "note": "Logic Apps Consumption: ~$0.000025/action, ~1M actions/mo",
+        "unit": "1/Month",
+    },
+    "Azure API Management": {
+        "price": 290.0,
+        "source": "estimated",
+        "note": "API Management Standard: ~$290/mo per unit",
+        "unit": "1/Month",
+    },
+    "API Management": {
+        "price": 290.0,
+        "source": "estimated",
+        "note": "API Management Standard: ~$290/mo per unit",
+        "unit": "1/Month",
+    },
+    "Microsoft Purview": {
+        "price": 200.0,
+        "source": "estimated",
+        "note": "Purview Data Map: ~$0.25/CU + governance features",
+        "unit": "1/Month",
+    },
+    "Azure Purview": {
+        "price": 200.0,
+        "source": "estimated",
+        "note": "Purview Data Map: ~$0.25/CU + governance features",
+        "unit": "1/Month",
+    },
+    "Azure Site Recovery": {
+        "price": 25.0,
+        "source": "estimated",
+        "note": "Site Recovery: ~$25/protected instance/mo",
+        "unit": "1/Month",
+    },
+    "Dynamics 365": {
+        "price": 210.0,
+        "source": "estimated",
+        "note": "Dynamics 365 Customer Service Professional: ~$50/user/mo, ~4 users",
+        "unit": "1/Month",
+    },
 }
 
 
@@ -469,6 +604,7 @@ def query_azure_pricing_sync(
         span.set_attribute("pricing.region", region)
 
         # Return a known estimate for services not in the Retail Prices API
+        # Only exact match here — services that genuinely don't have API data
         if service_name in ESTIMATED_PRICES:
             est = dict(ESTIMATED_PRICES[service_name])
             if est["price"] is None:
@@ -515,7 +651,17 @@ def query_azure_pricing_sync(
                 "unit": unit,
             }
 
-        # No data found
+        # No data found — try fuzzy match against ESTIMATED_PRICES before giving up
+        sn_lower = service_name.lower()
+        for est_name, est_data in ESTIMATED_PRICES.items():
+            if est_name.lower() in sn_lower or sn_lower in est_name.lower():
+                est = dict(est_data)
+                if est["price"] is None:
+                    est["price"] = per_request_cost()
+                span.set_attribute("pricing.source", "estimated-fuzzy")
+                logger.info("Fuzzy match: '%s' → '%s'", service_name, est_name)
+                return est
+
         span.set_attribute("pricing.source", "unavailable")
         logger.warning(
             "No pricing found: %s (API: %s), SKU: %s, region: %s",

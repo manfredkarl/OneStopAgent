@@ -242,12 +242,12 @@ class LLMJudge:
         if agent == "cross_agent":
             user_content = f"**Scenario**: {scenario_desc}\n**Company**: {company or 'Generic startup'}\n\n"
             for agent_name, agent_output in (all_outputs or {}).items():
-                user_content += f"### {agent_name} output:\n{agent_output[:3000]}\n\n"
+                user_content += f"### {agent_name} output:\n{agent_output[:4000]}\n\n"
         else:
             user_content = (
                 f"**Scenario**: {scenario_desc}\n"
                 f"**Company**: {company or 'Generic startup'}\n\n"
-                f"**Agent output**:\n{output[:5000]}"
+                f"**Agent output**:\n{output[:8000]}"
             )
 
         try:
@@ -693,7 +693,7 @@ class EvalRunner:
                 ar.status = "skipped"
         else:
             content = arch_msg.get("content", "")
-            ar.content = content[:4000]
+            ar.content = content[:8000]
 
             if (expected.get("arch_has_mermaid")
                     and "mermaid" not in content.lower()
@@ -811,12 +811,16 @@ class EvalRunner:
                     ar.findings.append(Finding("warning", "roi",
                         f"Unexpected confidence level: '{conf}'"))
 
-                # Check ROI is positive
+                # Check ROI plausibility
                 roi_pct = dashboard.get("roiPercent")
+                roi_run_rate = dashboard.get("roiRunRate")
                 if roi_pct is not None:
-                    if expected.get("roi_positive") and roi_pct < 0:
+                    # Only warn if BOTH Year 1 AND steady-state are negative
+                    # (negative Year 1 alone is normal for complex projects with adoption ramp)
+                    if expected.get("roi_positive") and roi_pct < 0 and (roi_run_rate is None or roi_run_rate < 0):
                         ar.findings.append(Finding("warning", "roi",
-                            f"ROI is negative ({roi_pct}%) — may be unrealistic"))
+                            f"ROI is negative both Year 1 ({roi_pct:.1f}%) and "
+                            f"steady-state ({roi_run_rate:.1f}%) — project may not be viable"))
                     elif roi_pct > 10000:
                         ar.findings.append(Finding("warning", "roi",
                             f"ROI is extremely high ({roi_pct}%) — may lack credibility"))
