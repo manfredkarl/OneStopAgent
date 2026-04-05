@@ -125,7 +125,8 @@ class AutoRefreshCredential:
             self._inner_credential = cred
             logger.info("Token provider: using AzureCliCredential")
             return self._inner_credential
-        except Exception:
+        except Exception as e:
+            logger.warning("AzureCliCredential failed (%s), falling back to DefaultAzureCredential", e)
             self._inner_credential = DefaultAzureCredential()
             logger.info("Token provider: using DefaultAzureCredential")
             return self._inner_credential

@@ -260,39 +260,3 @@ Azure solution proposal presentation.
         if script.startswith("```"):
             script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         return script
-
-    def _refine_script(self, working_script: str, slide_data: dict, llm) -> str:
-        """LLM reviews a working script and polishes it for quality."""
-        data_summary = json.dumps({
-            "customer": slide_data.get("customer", ""),
-            "industry": slide_data.get("industry", ""),
-            "driverCount": len(slide_data.get("valueDrivers", [])),
-            "serviceCount": len(slide_data.get("services", [])),
-            "hasROI": bool(slide_data.get("roi")),
-        }, default=str)
-
-        response = llm.invoke([
-            {"role": "system", "content": (
-                "You are a PptxGenJS expert and presentation design critic. "
-                "Review this working script and improve it. Focus on:\n"
-                "1. Visual polish — ensure consistent spacing, alignment, margins\n"
-                "2. Text fitting — shorten any text that would overflow slide bounds\n"
-                "3. Data accuracy — verify all numbers from the DATA object are used correctly\n"
-                "4. Color consistency — ensure the Microsoft color palette is applied throughout\n"
-                "5. Professional feel — add subtle design touches (accent lines, card shadows)\n\n"
-                "Return the COMPLETE improved script. Do NOT return a diff or partial changes."
-            )},
-            {"role": "user", "content": (
-                f"Context: {data_summary}\n\n"
-                f"Review and improve this working PptxGenJS script:\n{working_script}"
-            )},
-        ])
-
-        script = response.content.strip()
-        if script.startswith("```"):
-            script = script.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-        if "pptxgenjs" not in script.lower() or "writefile" not in script.lower():
-            raise ValueError("Refined script missing required PptxGenJS structure")
-
-        return script

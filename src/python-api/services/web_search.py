@@ -1,4 +1,5 @@
 """Web search service for finding industry benchmarks and metrics."""
+import atexit
 import re
 import httpx
 import logging
@@ -11,6 +12,23 @@ AUTHORITATIVE_DOMAINS = {
     "microsoft.com", "gartner.com", "mckinsey.com", "forrester.com",
     "idc.com", "deloitte.com", "accenture.com", "pwc.com", "bcg.com",
 }
+
+# Pre-compiled regex patterns (avoids recompilation on every search_web() call)
+_LINK_RE = re.compile(
+    r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.+?)</a>'
+)
+_SNIPPET_RE = re.compile(r'<a class="result__snippet"[^>]*>(.+?)</a>')
+_HTML_TAG_RE = re.compile(r'<[^>]+>')
+_UDDG_RE = re.compile(r'uddg=([^&]+)')
+
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call).
+# atexit cleanup is best-effort; httpx also releases connections on GC.
+_http_client = httpx.Client(
+    timeout=10,
+    follow_redirects=True,
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+)
+atexit.register(_http_client.close)
 
 
 def _score_result(result: dict) -> int:
@@ -35,40 +53,33 @@ def search_web(query: str, num_results: int = 5) -> list[dict[str, str]]:
     try:
         url = "https://html.duckduckgo.com/html/"
         headers = {"User-Agent": "Mozilla/5.0 (compatible; OneStopAgent/1.0)"}
-        with httpx.Client(timeout=10, follow_redirects=True) as client:
-            resp = client.post(url, data={"q": query}, headers=headers)
-            if resp.status_code != 200:
-                return []
+        resp = _http_client.post(url, data={"q": query}, headers=headers)
+        if resp.status_code != 200:
+            return []
 
-            results = []
-            links = re.findall(
-                r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.+?)</a>',
-                resp.text,
-            )
-            snippets = re.findall(
-                r'<a class="result__snippet"[^>]*>(.+?)</a>',
-                resp.text,
-            )
+        results = []
+        links = _LINK_RE.findall(resp.text)
+        snippets = _SNIPPET_RE.findall(resp.text)
 
-            for i, (url_raw, title_raw) in enumerate(links[:num_results]):
-                title = re.sub(r'<[^>]+>', '', title_raw).strip()
-                snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
-                # Decode DuckDuckGo redirect URL
-                url_match = re.search(r'uddg=([^&]+)', url_raw)
-                try:
-                    clean_url = unquote(url_match.group(1)) if url_match else url_raw
-                except Exception:
-                    clean_url = url_raw
+        for i, (url_raw, title_raw) in enumerate(links[:num_results]):
+            title = _HTML_TAG_RE.sub('', title_raw).strip()
+            snippet = _HTML_TAG_RE.sub('', snippets[i]).strip() if i < len(snippets) else ""
+            # Decode DuckDuckGo redirect URL
+            url_match = _UDDG_RE.search(url_raw)
+            try:
+                clean_url = unquote(url_match.group(1)) if url_match else url_raw
+            except Exception:
+                clean_url = url_raw
 
-                results.append({
-                    "title": title,
-                    "snippet": snippet,
-                    "url": clean_url,
-                })
+            results.append({
+                "title": title,
+                "snippet": snippet,
+                "url": clean_url,
+            })
 
-            if results:
-                logger.info("Web search returned %d results for: %s", len(results), query[:50])
-            return results
+        if results:
+            logger.info("Web search returned %d results for: %s", len(results), query[:50])
+        return results
 
     except Exception as e:
         logger.warning("DuckDuckGo search failed: %s", e)

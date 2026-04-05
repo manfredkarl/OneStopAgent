@@ -9,7 +9,3 @@ sse-starlette>=2.0.0
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
-pytest>=7.0
-pytest-asyncio>=0.23
-pytest-bdd>=7.0
-pytest-cov>=4.1
