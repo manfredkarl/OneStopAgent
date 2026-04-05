@@ -64,6 +64,66 @@ class TestBuildSlideData:
         assert "costs" not in data
         assert "roi" not in data
 
+    def test_customer_challenges_extracted(self):
+        agent = PresentationAgent()
+        state = AgentState(
+            user_input="problem",
+            customer_name="Acme",
+            brainstorming={
+                "industry": "Retail",
+                "pain_points": ["Legacy ERP", "Manual forecasting"],
+                "market_drivers": ["AI adoption", "Supply chain disruption"],
+                "competitive_landscape": "Competitors investing in ML",
+            },
+        )
+        data = agent._build_slide_data(state)
+        assert data["customer_challenges"] == ["Legacy ERP", "Manual forecasting"]
+        assert data["market_drivers"] == ["AI adoption", "Supply chain disruption"]
+        assert data["competitive_context"] == "Competitors investing in ML"
+
+    def test_customer_challenges_empty_when_missing(self):
+        agent = PresentationAgent()
+        state = AgentState(
+            user_input="problem",
+            customer_name="Acme",
+            brainstorming={"industry": "Tech"},
+        )
+        data = agent._build_slide_data(state)
+        assert data["customer_challenges"] == []
+        assert data["market_drivers"] == []
+        assert data["competitive_context"] == ""
+
+    def test_existing_azure_services_extracted(self):
+        agent = PresentationAgent()
+        state = AgentState(
+            user_input="problem",
+            customer_name="Acme",
+            brainstorming={"industry": "Tech"},
+            company_profile={
+                "name": "Acme",
+                "knownAzureUsage": ["Azure AI", "Azure Data Factory"],
+                "cloudProvider": "AWS",
+                "erp": "SAP",
+            },
+        )
+        data = agent._build_slide_data(state)
+        assert data["existing_azure_services"] == ["Azure AI", "Azure Data Factory"]
+        assert data["cloud_provider"] == "AWS"
+        assert data["erp"] == "SAP"
+
+    def test_no_azure_fields_when_absent(self):
+        agent = PresentationAgent()
+        state = AgentState(
+            user_input="problem",
+            customer_name="Acme",
+            brainstorming={"industry": "Tech"},
+            company_profile={"name": "Acme"},
+        )
+        data = agent._build_slide_data(state)
+        assert "existing_azure_services" not in data
+        assert "cloud_provider" not in data
+        assert "erp" not in data
+
     def test_cost_confidence_high(self):
         agent = PresentationAgent()
         state = AgentState(

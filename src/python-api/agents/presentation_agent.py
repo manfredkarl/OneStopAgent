@@ -42,7 +42,8 @@ class PresentationAgent:
         3. Quick polish pass: fix formatting issues without full regeneration
         """
         slide_data = self._build_slide_data(state)
-        customer = state.customer_name or "Customer"
+        company_name = (state.company_profile or {}).get("name", "") if not state.customer_name else ""
+        customer = state.customer_name or company_name or "Customer"
 
         from agents.llm import llm
         from services.presentation import execute_pptxgenjs
@@ -69,7 +70,8 @@ class PresentationAgent:
 
     def _build_slide_data(self, state: AgentState) -> dict:
         """Extract all relevant data from state for slide generation."""
-        customer = state.customer_name or "Customer"
+        company_name = (state.company_profile or {}).get("name", "") if not state.customer_name else ""
+        customer = state.customer_name or company_name or "Customer"
 
         data: dict = {
             "customer": customer,
@@ -78,9 +80,16 @@ class PresentationAgent:
             "industry": state.brainstorming.get("industry", "Cross-Industry"),
         }
 
+        # Extract customer challenges/pain points from brainstorming
+        if state.brainstorming:
+            data["customer_challenges"] = state.brainstorming.get("pain_points", [])
+            data["market_drivers"] = state.brainstorming.get("market_drivers", [])
+            data["competitive_context"] = state.brainstorming.get("competitive_landscape", "")
+
         # Add company profile for branded slides
-        if state.company_profile:
-            p = state.company_profile
+        company = state.company_profile
+        if company:
+            p = company
             data["companyProfile"] = {
                 "name": p.get("name", customer),
                 "industry": p.get("industry", ""),
@@ -92,6 +101,13 @@ class PresentationAgent:
                 "knownAzureUsage": p.get("knownAzureUsage", []),
                 "cloudProvider": p.get("cloudProvider", ""),
             }
+            # Surface Azure usage and cloud context for "Why Azure?" slide
+            if company.get("knownAzureUsage"):
+                data["existing_azure_services"] = company.get("knownAzureUsage", [])
+            if company.get("cloudProvider"):
+                data["cloud_provider"] = company.get("cloudProvider", "")
+            if company.get("erp"):
+                data["erp"] = company.get("erp", "")
 
         if state.architecture:
             data["architecture"] = {
@@ -179,6 +195,34 @@ class PresentationAgent:
 
         data_json = json.dumps(slide_data, indent=2, default=str)
 
+        # Build dynamic context hints for the slide structure instructions
+        challenges = slide_data.get("customer_challenges", [])
+        challenges_hint = ", ".join(challenges) if challenges else "derive from the customer's stated problem"
+
+        drivers = slide_data.get("market_drivers", [])
+        drivers_hint = ", ".join(drivers) if drivers else "infer from the customer's industry and problem"
+
+        competitive_hint = slide_data.get("competitive_context", "") or "not specified"
+
+        # Build "Why Azure?" hint based on customer's existing cloud context
+        azure_parts: list[str] = []
+        existing_svcs = slide_data.get("existing_azure_services", [])
+        if existing_svcs:
+            azure_parts.append(
+                f"Customer already uses {', '.join(existing_svcs)} -- emphasize building on existing investments."
+            )
+        cloud_provider = slide_data.get("cloud_provider", "")
+        if cloud_provider and cloud_provider.lower() not in ("azure", "microsoft", ""):
+            azure_parts.append(
+                f"Customer currently uses {cloud_provider} -- frame Azure advantages specifically vs {cloud_provider}."
+            )
+        erp = slide_data.get("erp", "")
+        if erp:
+            azure_parts.append(f"Customer uses {erp} -- highlight Azure's native integration with {erp}.")
+        if not azure_parts:
+            azure_parts.append("3 capability cards: Enterprise scale, Security & Compliance, AI-first roadmap")
+        azure_hint = " ".join(azure_parts)
+
         prompt = f"""Generate a COMPLETE PptxGenJS script that creates a professional \
 Azure solution proposal presentation.
 
@@ -188,14 +232,18 @@ Azure solution proposal presentation.
 ```
 
 ## SLIDE STRUCTURE (12 slides):
-1. Title (dark bg) -- customer name, "Azure Solution Proposal", tagline, date
-2. Why Now? -- urgency/market shift: 2-3 bullets on the problem, industry trend, cost of inaction
+1. Title (dark bg) -- customer name, "Azure Solution Proposal", industry-specific tagline derived from the customer's use case (NOT generic), date
+2. Why Now? -- Reference the customer's SPECIFIC challenges from customer_challenges: {challenges_hint}. \
+Include market drivers: {drivers_hint}. \
+If competitive context exists, mention it: {competitive_hint}. \
+Do NOT use generic industry platitudes. Every point should be traceable to the customer's stated situation or problem.
 3. Proposed Solution -- architecture visual (narrative + "Based on" reference)
 4. Business Impact -- ROI, value drivers with big numbers (payback period, ROI %, annual value)
 5. Use Cases -- 2-3 scenario cards side-by-side with colored top borders
-6. 3-Year Total Cost -- monthly, annual, confidence; stat callout cards + bar chart
+6. 3-Year Total Cost -- monthly, annual, confidence level; stat callout cards + bar chart. \
+Add a small note explaining confidence: High = most prices from live Azure API, Moderate = mix of live and fallback, Estimated = based on public pricing estimates.
 7. Implementation Roadmap -- 3 phases: Foundation (M1-3), Pilot (M4-6), Scale (M7-12)
-8. Why Azure? -- 3 capability cards: Enterprise scale, Security & Compliance, AI-first roadmap
+8. Why Azure? -- {azure_hint}
 9. Next Steps (dark bg) -- numbered action items (typically 3-4 steps)
 10. Thank You (dark bg) -- customer name, "Powered by OneStopAgent"
 11. Appendix: Architecture Details -- component table with layer, service, role

@@ -106,7 +106,8 @@ Keep it to 3-5 questions max. Be concise.{shared_context_block}"""},
 
         # Phase 2: Calculate with real numbers
         industry = state.brainstorming.get("industry", "Cross-Industry")
-        customer = state.customer_name or "the customer"
+        company_name = (state.company_profile or {}).get("name", "") if not state.customer_name else ""
+        customer = state.customer_name or company_name or "the customer"
         description = state.user_input
         clarifications = state.clarifications
 

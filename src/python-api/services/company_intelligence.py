@@ -11,20 +11,11 @@ import asyncio
 import json
 import logging
 import re
-import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Thread-safe in-memory cache for company search results (TTL: 1 hour).
-# Cache is process-local — effective within a single worker process.
-# ---------------------------------------------------------------------------
-_COMPANY_CACHE_TTL = 3600  # seconds
-_company_cache: dict[str, tuple[float, list[dict]]] = {}  # key -> (expires_at, results)
-_company_cache_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Constants — industry IT spend ratios (Gartner 2024 benchmarks)
@@ -133,23 +124,21 @@ FALLBACK_PROFILES: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
-def _get_industry_ratio(industry: str) -> float:
-    """Return the IT spend ratio for the given industry string."""
-    industry_key = industry.lower()
-    ratio = IT_SPEND_RATIOS.get(industry_key)
-    if ratio is None:
-        for key, val in IT_SPEND_RATIOS.items():
-            if key != "default" and key in industry_key:
-                ratio = val
-                break
-    return ratio if ratio is not None else IT_SPEND_RATIOS["default"]
-
-
 def estimate_it_spend(annual_revenue: float | None, industry: str) -> float | None:
     """Derive IT spend estimate from annual revenue × industry IT spend ratio."""
     if not annual_revenue:
         return None
-    return round(annual_revenue * _get_industry_ratio(industry))
+    industry_key = industry.lower()
+    ratio = IT_SPEND_RATIOS.get(industry_key)
+    if ratio is None:
+        # Try partial match
+        for key, val in IT_SPEND_RATIOS.items():
+            if key != "default" and key in industry_key:
+                ratio = val
+                break
+    if ratio is None:
+        ratio = IT_SPEND_RATIOS["default"]
+    return round(annual_revenue * ratio)
 
 
 def estimate_labor_rate(headquarters: str, industry: str) -> float:
@@ -246,6 +235,33 @@ Rules:
 """
 
 
+# ---------------------------------------------------------------------------
+# In-memory cache for company profiles (TTL 30 min, max 100 entries)
+# ---------------------------------------------------------------------------
+_company_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_CACHE_TTL = 1800  # 30 minutes
+_CACHE_MAX = 100
+
+
+def _cache_get(key: str) -> list[dict[str, Any]] | None:
+    entry = _company_cache.get(key)
+    if entry is None:
+        return None
+    ts, value = entry
+    if time.monotonic() - ts > _CACHE_TTL:
+        del _company_cache[key]
+        return None
+    return value
+
+
+def _cache_put(key: str, value: list[dict[str, Any]]) -> None:
+    # Evict oldest entries when cache is full
+    if len(_company_cache) >= _CACHE_MAX and key not in _company_cache:
+        oldest_key = min(_company_cache, key=lambda k: _company_cache[k][0])
+        del _company_cache[oldest_key]
+    _company_cache[key] = (time.monotonic(), value)
+
+
 async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
     """Search for a company by name and extract structured profiles.
 
@@ -254,19 +270,18 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
     - Financial data for revenue
     - Technology stack info
 
+    Results are cached for 30 minutes (up to 100 entries).
     Returns up to 3 ranked CompanyProfile dicts. Returns empty list on failure.
-    Results are cached per query for 1 hour to avoid redundant searches.
     """
-    # Check cache first (thread-safe)
-    cache_key = query.strip().lower()
-    now = time.monotonic()
-    with _company_cache_lock:
-        cached = _company_cache.get(cache_key)
-        if cached is not None and now < cached[0]:
-            return cached[1]
-
     from services.web_search import search_web
     from agents.llm import llm
+
+    # Check cache first
+    cache_key = query.strip().lower()
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        logger.info("Company profile cache hit for %r", query)
+        return cached
 
     # Run multiple targeted searches in parallel for richer data
     search_queries = [
@@ -276,9 +291,13 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
     ]
     all_results: list[dict] = []
     try:
-        for sq in search_queries:
-            results = await asyncio.to_thread(search_web, sq, 5)
-            all_results.extend(results)
+        tasks = [asyncio.to_thread(search_web, sq, 5) for sq in search_queries]
+        results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results_lists:
+            if isinstance(result, list):
+                all_results.extend(result)
+            elif isinstance(result, Exception):
+                logger.warning("One search query failed: %s", result)
     except Exception as e:
         logger.warning("Company web search failed for %r: %s", query, e)
         return []
@@ -330,7 +349,14 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
                 p.get("annualRevenue"), p.get("industry") or ""
             )
         if p.get("annualRevenue") and p.get("industry"):
-            p["itSpendRatio"] = _get_industry_ratio(p["industry"] or "")
+            industry_key = (p["industry"] or "").lower()
+            matched_ratio = IT_SPEND_RATIOS.get(industry_key)
+            if not matched_ratio:
+                for key, val in IT_SPEND_RATIOS.items():
+                    if key != "default" and key in industry_key:
+                        matched_ratio = val
+                        break
+            p["itSpendRatio"] = matched_ratio or IT_SPEND_RATIOS["default"]
 
         p["enrichedAt"] = now_iso
         p["disambiguated"] = False
@@ -351,8 +377,5 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
 
         enriched.append(p)
 
-    # Populate cache (thread-safe)
-    with _company_cache_lock:
-        _company_cache[cache_key] = (time.monotonic() + _COMPANY_CACHE_TTL, enriched)
-
+    _cache_put(cache_key, enriched)
     return enriched

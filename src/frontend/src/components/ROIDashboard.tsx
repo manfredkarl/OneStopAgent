@@ -92,6 +92,16 @@ function fmt(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+/** Compact format for tight bar labels: 1200 → "1.2K", 4500000 → "$4.5M" */
+function fmtCompact(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString('en-US');
+}
+
 function ConfidenceBadge({ level }: { level: 'high' | 'moderate' | 'low' }) {
   const styles = {
     high:     'bg-green-500/20 text-green-400',
@@ -699,8 +709,10 @@ export default function ROIDashboard({ data }: Props) {
               const maxVal = Math.max(
                 ...projection.cumulative!.map(c => Math.max(c.azureCost, c.totalValue))
               ) || 1;
-              const costH = Math.max((yr.azureCost / maxVal) * 112, 8);
-              const valueH = Math.max((yr.totalValue / maxVal) * 112, 8);
+              const CHART_HEIGHT = 112;
+              const BAR_MAX = 88; // Reserve space for value labels below bars
+              const costH = Math.max((yr.azureCost / maxVal) * BAR_MAX, 8);
+              const valueH = Math.max((yr.totalValue / maxVal) * BAR_MAX, 8);
               return (
                 <div key={yr.year} className="text-center">
                   <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mb-2">
@@ -709,14 +721,14 @@ export default function ROIDashboard({ data }: Props) {
                       <span className="text-[var(--accent)] normal-case ml-1">({yr.adoption} adoption)</span>
                     )}
                   </p>
-                  <div className="flex items-end justify-center gap-3 mb-2" style={{ height: 112 }}>
+                  <div className="flex items-end justify-center gap-3 mb-2 overflow-hidden" style={{ height: CHART_HEIGHT }}>
                     <div className="text-center">
                       <div
                         style={{ height: costH, width: 40 }}
                         className="bg-blue-500 rounded-t-md mx-auto"
                         title={`Cumulative Azure cost: $${fmt(yr.azureCost)}`}
                       />
-                      <p className="text-[9px] text-blue-400 mt-1 whitespace-nowrap">${fmt(yr.azureCost)}</p>
+                      <p className="text-[9px] text-blue-400 mt-1 whitespace-nowrap">${fmtCompact(yr.azureCost)}</p>
                     </div>
                     <div className="text-center">
                       <div
@@ -724,11 +736,11 @@ export default function ROIDashboard({ data }: Props) {
                         className={`rounded-t-md mx-auto ${isEstimated ? 'bg-green-500/60' : 'bg-green-500'}`}
                         title={`Cumulative value: $${fmt(yr.totalValue)}`}
                       />
-                      <p className="text-[9px] text-green-400 mt-1 whitespace-nowrap">${fmt(yr.totalValue)}</p>
+                      <p className="text-[9px] text-green-400 mt-1 whitespace-nowrap">${fmtCompact(yr.totalValue)}</p>
                     </div>
                   </div>
                   <p className={`text-sm font-bold ${netPositive ? 'text-green-500' : 'text-red-500'}`}>
-                    {netPositive ? '+' : ''}${fmt(yr.netValue)}
+                    {netPositive ? '+' : ''}${fmtCompact(yr.netValue)}
                   </p>
                   <p className="text-[10px] text-[var(--text-muted)]">cumulative net</p>
                 </div>
