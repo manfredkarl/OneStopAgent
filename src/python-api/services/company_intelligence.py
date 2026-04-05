@@ -19,7 +19,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Thread-safe in-memory cache for company search results (TTL: 1 hour)
+# Thread-safe in-memory cache for company search results (TTL: 1 hour).
+# Cache is process-local — effective within a single worker process.
 # ---------------------------------------------------------------------------
 _COMPANY_CACHE_TTL = 3600  # seconds
 _company_cache: dict[str, tuple[float, list[dict]]] = {}  # key -> (expires_at, results)

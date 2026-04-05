@@ -15,7 +15,8 @@ from opentelemetry import trace
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
 
-# Module-level httpx client with connection pooling (avoids new TCP/TLS per call)
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call).
+# atexit cleanup is best-effort; httpx also releases connections on GC.
 _http_client = httpx.Client(
     timeout=15,
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -532,7 +533,11 @@ ESTIMATED_PRICES: dict[str, dict] = {
 
 @functools.lru_cache(maxsize=512)
 def _query_api(service_name: str, region: str) -> tuple[dict, ...]:
-    """Query the Retail Prices API. Returns tuple of price items (cached by service+region)."""
+    """Query the Retail Prices API. Returns tuple of price items (cached by service+region).
+
+    Cache is process-local — effective within a single worker process.
+    Returns a tuple (not list) to satisfy lru_cache hashability requirements.
+    """
     filter_str = f"serviceName eq '{service_name}' and armRegionName eq '{region}'"
     try:
         resp = _http_client.get(

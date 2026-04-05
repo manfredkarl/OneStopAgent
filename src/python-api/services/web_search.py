@@ -21,7 +21,8 @@ _SNIPPET_RE = re.compile(r'<a class="result__snippet"[^>]*>(.+?)</a>')
 _HTML_TAG_RE = re.compile(r'<[^>]+>')
 _UDDG_RE = re.compile(r'uddg=([^&]+)')
 
-# Module-level httpx client with connection pooling (avoids new TCP/TLS per call)
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call).
+# atexit cleanup is best-effort; httpx also releases connections on GC.
 _http_client = httpx.Client(
     timeout=10,
     follow_redirects=True,

@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 MCP_ENDPOINT = "https://learn.microsoft.com/api/mcp"
 
-# Module-level httpx client with connection pooling (avoids new TCP/TLS per call)
+# Module-level httpx client with connection pooling (avoids new TCP/TLS per call).
+# atexit cleanup is best-effort; httpx also releases connections on GC.
 _http_client = httpx.Client(
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
 )
