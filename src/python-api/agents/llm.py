@@ -179,4 +179,4 @@ llm = LLMClient()
 
 # Re-export shared JSON parsing utility so callers can use:
 #   from agents.llm import llm, parse_llm_json
-from utils import parse_llm_json as parse_llm_json  # noqa: E402, F401
+from utils import parse_llm_json  # noqa: F401

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def strip_markdown_fences(text: str) -> str:
     """Remove leading/trailing markdown code-fence lines from LLM output.
 
-    Handles both ````json`` and plain ```` ``` ```` delimiters.
+    Handles both ``json and plain `` delimiters.
     """
     text = text.strip()
     if text.startswith("```"):

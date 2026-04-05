@@ -32,21 +32,21 @@ class CompanyProfile(BaseModel):
     @classmethod
     def employee_count_must_be_positive(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v <= 0:
-            raise ValueError(f"employeeCount must be positive, got {v}")
+            raise ValueError(f"must be positive, got {v}")
         return v
 
     @field_validator("annualRevenue")
     @classmethod
     def annual_revenue_must_be_non_negative(cls, v: Optional[float]) -> Optional[float]:
         if v is not None and v < 0:
-            raise ValueError(f"annualRevenue must be non-negative, got {v}")
+            raise ValueError(f"must be non-negative, got {v}")
         return v
 
     @field_validator("itSpendRatio")
     @classmethod
     def it_spend_ratio_must_be_in_range(cls, v: Optional[float]) -> Optional[float]:
         if v is not None and not (0.0 <= v <= 1.0):
-            raise ValueError(f"itSpendRatio must be between 0.0 and 1.0, got {v}")
+            raise ValueError(f"must be between 0.0 and 1.0, got {v}")
         return v
 
     # Technology
