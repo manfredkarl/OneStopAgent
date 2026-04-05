@@ -76,12 +76,13 @@ class AssumptionsRequest:
 
 FAST_RUN_GATES = {"business_value", "architect", "presentation"}
 REQUIRED_STEPS = {"architect"}  # Pipeline cannot continue without these
+PIPELINE_TIMEOUT_SECONDS = 600  # 10 minutes max for entire pipeline
 
 
-def _should_pause(mode: str, step: str) -> bool:
+def _should_pause(mode: str, step: str, fast_run_gates: set[str] = FAST_RUN_GATES) -> bool:
     """Decide whether to pause for approval after a step."""
     if mode == "fast-run":
-        return step in FAST_RUN_GATES
+        return step in fast_run_gates
     return True  # guided mode: always pause
 
 
@@ -92,10 +93,14 @@ def _should_pause(mode: str, step: str) -> bool:
 class PipelineExecutor(Executor):
     """Base class for pipeline step executors."""
 
-    def __init__(self, id: str, step_name: str):
+    def __init__(self, id: str, step_name: str,
+                 fast_run_gates: set[str] | None = None,
+                 required_steps: set[str] | None = None):
         super().__init__(id=id)
         self.step_name = step_name
         self.pm = ProjectManager()
+        self._fast_run_gates = fast_run_gates if fast_run_gates is not None else FAST_RUN_GATES
+        self._required_steps = required_steps if required_steps is not None else REQUIRED_STEPS
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +108,8 @@ class PipelineExecutor(Executor):
 # ---------------------------------------------------------------------------
 
 class ArchitectExecutor(PipelineExecutor):
-    def __init__(self):
-        super().__init__(id="architect_executor", step_name="architect")
+    def __init__(self, **kwargs):
+        super().__init__(id="architect_executor", step_name="architect", **kwargs)
         self.agent = ArchitectAgent()
 
     @handler
@@ -149,7 +154,7 @@ class ArchitectExecutor(PipelineExecutor):
             })
 
             # Approval gate
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
                         step=self.step_name, summary=summary,
@@ -166,7 +171,7 @@ class ArchitectExecutor(PipelineExecutor):
                 "type": "agent_error", "step": self.step_name,
                 "error": str(e),
             })
-            if self.step_name in REQUIRED_STEPS:
+            if self.step_name in self._required_steps:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
                 return
             await ctx.send_message(msg)
@@ -195,8 +200,8 @@ class ArchitectExecutor(PipelineExecutor):
 # ---------------------------------------------------------------------------
 
 class CostExecutor(PipelineExecutor):
-    def __init__(self):
-        super().__init__(id="cost_executor", step_name="cost")
+    def __init__(self, **kwargs):
+        super().__init__(id="cost_executor", step_name="cost", **kwargs)
         self.agent = CostAgent()
 
     @handler
@@ -249,7 +254,7 @@ class CostExecutor(PipelineExecutor):
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
@@ -263,7 +268,7 @@ class CostExecutor(PipelineExecutor):
             await ctx.yield_output({
                 "type": "agent_error", "step": self.step_name, "error": str(e),
             })
-            if self.step_name in REQUIRED_STEPS:
+            if self.step_name in self._required_steps:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
                 return
             await ctx.send_message(msg)
@@ -316,7 +321,7 @@ class CostExecutor(PipelineExecutor):
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
@@ -343,8 +348,8 @@ class CostExecutor(PipelineExecutor):
 # ---------------------------------------------------------------------------
 
 class BusinessValueExecutor(PipelineExecutor):
-    def __init__(self):
-        super().__init__(id="bv_executor", step_name="business_value")
+    def __init__(self, **kwargs):
+        super().__init__(id="bv_executor", step_name="business_value", **kwargs)
         self.agent = BusinessValueAgent()
         self._architect_agent = ArchitectAgent()
 
@@ -400,7 +405,7 @@ class BusinessValueExecutor(PipelineExecutor):
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
                         step=self.step_name, summary=summary,
@@ -417,7 +422,7 @@ class BusinessValueExecutor(PipelineExecutor):
                 "type": "agent_error", "step": self.step_name,
                 "error": str(e),
             })
-            if self.step_name in REQUIRED_STEPS:
+            if self.step_name in self._required_steps:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
                 return
             await ctx.send_message(msg)
@@ -436,7 +441,7 @@ class BusinessValueExecutor(PipelineExecutor):
             output_text = self.pm.format_agent_output("architect", state)
             summary = self.pm.approval_summary("architect", state)
             await ctx.yield_output({"type": "agent_result", "step": "architect", "content": output_text})
-            if _should_pause(msg.execution_mode, "architect"):
+            if _should_pause(msg.execution_mode, "architect", self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(step="architect", summary=summary),
                     response_type=str,
@@ -447,7 +452,7 @@ class BusinessValueExecutor(PipelineExecutor):
             logger.exception("Architect agent failed (parallel path)")
             state.mark_step_failed("architect")
             await ctx.yield_output({"type": "agent_error", "step": "architect", "error": str(e)})
-            if "architect" in REQUIRED_STEPS:
+            if "architect" in self._required_steps:
                 await ctx.yield_output({"type": "pipeline_done", "content": "Pipeline stopped: architect failed."})
                 return
             await ctx.send_message(msg)
@@ -494,7 +499,7 @@ class BusinessValueExecutor(PipelineExecutor):
             return
 
         # ── Approval gate for BV — architect runs AFTER approval ──
-        if _should_pause(msg.execution_mode, "business_value"):
+        if _should_pause(msg.execution_mode, "business_value", self._fast_run_gates):
             summary = self.pm.approval_summary("business_value", state)
             await ctx.request_info(
                 request_data=ApprovalRequest(step="business_value", summary=summary),
@@ -560,7 +565,7 @@ class BusinessValueExecutor(PipelineExecutor):
                 "content": output_text,
             })
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
@@ -593,8 +598,8 @@ class BusinessValueExecutor(PipelineExecutor):
 # ---------------------------------------------------------------------------
 
 class ROIExecutor(PipelineExecutor):
-    def __init__(self):
-        super().__init__(id="roi_executor", step_name="roi")
+    def __init__(self, **kwargs):
+        super().__init__(id="roi_executor", step_name="roi", **kwargs)
         self.agent = ROIAgent()
 
     @handler
@@ -633,7 +638,7 @@ class ROIExecutor(PipelineExecutor):
                 "dashboard": dashboard,
             })
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(step=self.step_name, summary=summary),
                     response_type=str,
@@ -647,7 +652,7 @@ class ROIExecutor(PipelineExecutor):
             await ctx.yield_output({
                 "type": "agent_error", "step": self.step_name, "error": str(e),
             })
-            if self.step_name in REQUIRED_STEPS:
+            if self.step_name in self._required_steps:
                 await ctx.yield_output({"type": "pipeline_done", "content": f"Pipeline stopped: {self.step_name} is required but failed."})
                 return
             await ctx.send_message(msg)
@@ -676,8 +681,8 @@ class ROIExecutor(PipelineExecutor):
 # ---------------------------------------------------------------------------
 
 class PresentationExecutor(PipelineExecutor):
-    def __init__(self):
-        super().__init__(id="presentation_executor", step_name="presentation")
+    def __init__(self, **kwargs):
+        super().__init__(id="presentation_executor", step_name="presentation", **kwargs)
         self.agent = PresentationAgent()
 
     @handler
@@ -719,7 +724,7 @@ class PresentationExecutor(PipelineExecutor):
                 result_payload["presentation_path"] = state.presentation_path
             await ctx.yield_output(result_payload)
 
-            if _should_pause(msg.execution_mode, self.step_name):
+            if _should_pause(msg.execution_mode, self.step_name, self._fast_run_gates):
                 await ctx.request_info(
                     request_data=ApprovalRequest(
                         step=self.step_name,
@@ -772,17 +777,32 @@ class PresentationExecutor(PipelineExecutor):
 # Workflow factory
 # ---------------------------------------------------------------------------
 
-def create_pipeline_workflow() -> Workflow:
+def create_pipeline_workflow(
+    fast_run_gates: set[str] | None = None,
+    required_steps: set[str] | None = None,
+) -> Workflow:
     """Build the agent pipeline workflow.
 
     Graph: BV → architect → cost → ROI → presentation
     Each step has HITL approval gates and optional two-phase assumption input.
+
+    Args:
+        fast_run_gates: Steps that pause for approval even in fast-run mode.
+                        Defaults to FAST_RUN_GATES.
+        required_steps: Steps that must succeed for the pipeline to continue.
+                        Defaults to REQUIRED_STEPS.
     """
-    bv = BusinessValueExecutor()
-    architect = ArchitectExecutor()
-    cost = CostExecutor()
-    roi = ROIExecutor()
-    presentation = PresentationExecutor()
+    executor_kwargs: dict = {}
+    if fast_run_gates is not None:
+        executor_kwargs["fast_run_gates"] = fast_run_gates
+    if required_steps is not None:
+        executor_kwargs["required_steps"] = required_steps
+
+    bv = BusinessValueExecutor(**executor_kwargs)
+    architect = ArchitectExecutor(**executor_kwargs)
+    cost = CostExecutor(**executor_kwargs)
+    roi = ROIExecutor(**executor_kwargs)
+    presentation = PresentationExecutor(**executor_kwargs)
 
     workflow = (
         WorkflowBuilder(

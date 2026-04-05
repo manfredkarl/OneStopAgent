@@ -333,7 +333,13 @@ async def search_and_extract_company(query: str) -> list[dict[str, Any]]:
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         profiles = json.loads(text)
         if not isinstance(profiles, list):
-            profiles = [profiles]
+            if isinstance(profiles, dict):
+                profiles = [profiles]
+            else:
+                raise ValueError("Expected list or dict, got %s" % type(profiles).__name__)
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        logger.warning("LLM returned invalid company profile JSON: %s", e)
+        return []
     except Exception as e:
         logger.warning("Company profile LLM extraction failed for %r: %s", query, e)
         return []

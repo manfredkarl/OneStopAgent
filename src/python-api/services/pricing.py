@@ -8,6 +8,8 @@ import atexit
 import datetime
 import functools
 import logging
+import os
+from time import time as _time
 
 import httpx
 from opentelemetry import trace
@@ -23,7 +25,7 @@ _http_client = httpx.Client(
 )
 atexit.register(_http_client.close)
 
-PRICING_API = "https://prices.azure.com/api/retail/prices"
+PRICING_API = os.environ.get("AZURE_PRICING_API_URL", "https://prices.azure.com/api/retail/prices")
 
 # The Retail Prices API uses specific service names that differ from common names.
 SERVICE_NAME_MAP: dict[str, str] = {
@@ -531,6 +533,29 @@ ESTIMATED_PRICES: dict[str, dict] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# TTL cache for pricing results (24-hour expiry)
+# ---------------------------------------------------------------------------
+
+_price_cache: dict[str, tuple[float, dict]] = {}
+_CACHE_TTL = 86400  # 24 hours
+
+
+def _cached_price(cache_key: str) -> dict | None:
+    """Return cached pricing result if still within TTL, else None."""
+    if cache_key in _price_cache:
+        ts, value = _price_cache[cache_key]
+        if _time() - ts < _CACHE_TTL:
+            return value
+        del _price_cache[cache_key]
+    return None
+
+
+def _set_cache(cache_key: str, value: dict) -> None:
+    """Store a pricing result in the TTL cache."""
+    _price_cache[cache_key] = (_time(), value)
+
+
 @functools.lru_cache(maxsize=512)
 def _query_api(service_name: str, region: str) -> tuple[dict, ...]:
     """Query the Retail Prices API. Returns tuple of price items (cached by service+region).
@@ -610,8 +635,23 @@ def query_azure_pricing_sync(
 ) -> dict:
     """Query Azure Retail Prices API. Returns {price, source, note, unit}.
 
+    Results are cached for 24 hours by (service, sku, region).
     Sources: "live", "live-fallback", "estimated", "unavailable"
     """
+    cache_key = f"{service_name}|{sku}|{region}"
+    cached = _cached_price(cache_key)
+    if cached is not None:
+        return cached
+
+    result = _query_azure_pricing_uncached(service_name, sku, region)
+    _set_cache(cache_key, result)
+    return result
+
+
+def _query_azure_pricing_uncached(
+    service_name: str, sku: str, region: str = "eastus"
+) -> dict:
+    """Uncached pricing query implementation."""
     with _tracer.start_as_current_span("azure.pricing.query") as span:
         span.set_attribute("pricing.service_name", service_name)
         span.set_attribute("pricing.sku", sku)

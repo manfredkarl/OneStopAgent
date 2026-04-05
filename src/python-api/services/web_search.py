@@ -1,7 +1,9 @@
 """Web search service for finding industry benchmarks and metrics."""
+import os
 import re
 import httpx
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import unquote
 
@@ -33,7 +35,7 @@ def search_web(query: str, num_results: int = 5) -> list[dict[str, str]]:
     disambiguation pages.
     """
     try:
-        url = "https://html.duckduckgo.com/html/"
+        url = os.environ.get("WEB_SEARCH_URL", "https://html.duckduckgo.com/html/")
         headers = {"User-Agent": "Mozilla/5.0 (compatible; OneStopAgent/1.0)"}
         with httpx.Client(timeout=8, follow_redirects=True) as client:
             resp = client.post(url, data={"q": query}, headers=headers)
@@ -84,9 +86,14 @@ def search_industry_benchmarks(industry: str, use_case: str) -> list[dict[str, s
     ]
 
     all_results = []
-    for q in queries:
-        results = search_web(q, num_results=3)
-        all_results.extend(results)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(search_web, q, 3): q for q in queries}
+        for future in as_completed(futures):
+            try:
+                results = future.result(timeout=15)
+                all_results.extend(results)
+            except Exception as e:
+                logger.warning("Search query failed for %s: %s", futures[future][:50], e)
 
     # Deduplicate by URL
     seen_urls: set[str] = set()

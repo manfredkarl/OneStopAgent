@@ -16,10 +16,22 @@ from agents.state import AgentState
 from agents.pm_agent import ProjectManager, AGENT_INFO, Intent
 from agents.llm import llm
 from models.schemas import ChatMessage
-from workflow import create_pipeline_workflow, PipelineMessage, ApprovalRequest, AssumptionsRequest
+from workflow import (
+    create_pipeline_workflow, PipelineMessage, ApprovalRequest, AssumptionsRequest,
+    PIPELINE_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 pm = ProjectManager()
+
+# Agent name → AgentState field mapping (used for retry/iteration state resets)
+_AGENT_STATE_FIELDS = {
+    "architect": "architecture",
+    "cost": "costs",
+    "business_value": "business_value",
+    "roi": "roi",
+    "presentation": "presentation_path",
+}
 
 
 class MAFOrchestrator:
@@ -283,10 +295,7 @@ class MAFOrchestrator:
                 state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                 state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
-                AGENT_STATE_FIELDS = {
-                    "cost": "costs", "business_value": "business_value",
-                    "roi": "roi", "presentation": "presentation_path",
-                }
+                AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
                 for agent_name in agents_to_rerun:
                     # Clear stale phase markers
                     if agent_name == "cost" and "phase" in state.costs:
@@ -332,13 +341,7 @@ class MAFOrchestrator:
                         del state.business_value["phase"]
 
                 # H5: Reset agent output dicts so old results don't mix with new
-                AGENT_STATE_FIELDS = {
-                    "architect": "architecture",
-                    "cost": "costs",
-                    "business_value": "business_value",
-                    "roi": "roi",
-                    "presentation": "presentation_path",
-                }
+                AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
                 for agent_name in agents_to_rerun:
                     field = AGENT_STATE_FIELDS.get(agent_name)
                     if field:
@@ -593,95 +596,108 @@ class MAFOrchestrator:
     ) -> AsyncGenerator[ChatMessage, None]:
         """Convert MAF WorkflowEvents → ChatMessage SSE format."""
         try:
-            async for event in stream:
-                logger.info("WF event: type=%s executor=%s data_type=%s",
-                            event.type, getattr(event, 'executor_id', '?'),
-                            type(event.data).__name__)
+            async with asyncio.timeout(PIPELINE_TIMEOUT_SECONDS):
+                async for event in stream:
+                    logger.info("WF event: type=%s executor=%s data_type=%s",
+                                event.type, getattr(event, 'executor_id', '?'),
+                                type(event.data).__name__)
 
-                if event.type == "output" and isinstance(event.data, dict):
-                    data = event.data
-                    etype = data.get("type", "")
-                    step = data.get("step", "")
+                    if event.type == "output" and isinstance(event.data, dict):
+                        data = event.data
+                        etype = data.get("type", "")
+                        step = data.get("step", "")
 
-                    if etype == "agent_start":
-                        msg_id = data.get("msg_id", str(uuid.uuid4()))
-                        # Normalize step name for frontend (underscores → hyphens)
-                        agent_id = step.replace("_", "-")
-                        plan_text = pm.format_plan(self.get_state(project_id))
-                        yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id="pm",
-                            content=plan_text,
-                            metadata={"type": "plan_update", "step": step, "status": "running"},
-                        )
-                        # Signal sidebar to highlight this agent
-                        agent_info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
-                        label = f"{agent_info.get('emoji', '🔧')} {agent_info.get('name', step)} is working..."
-                        yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id=agent_id,
-                            content=label,
-                            metadata={"type": "agent_start", "agent": agent_id, "step": step},
-                        )
+                        if etype == "agent_start":
+                            msg_id = data.get("msg_id", str(uuid.uuid4()))
+                            # Normalize step name for frontend (underscores → hyphens)
+                            agent_id = step.replace("_", "-")
+                            plan_text = pm.format_plan(self.get_state(project_id))
+                            yield ChatMessage(
+                                project_id=project_id, role="agent", agent_id="pm",
+                                content=plan_text,
+                                metadata={"type": "plan_update", "step": step, "status": "running"},
+                            )
+                            # Signal sidebar to highlight this agent
+                            agent_info = AGENT_INFO.get(step, {"name": step, "emoji": "🔧"})
+                            label = f"{agent_info.get('emoji', '🔧')} {agent_info.get('name', step)} is working..."
+                            yield ChatMessage(
+                                project_id=project_id, role="agent", agent_id=agent_id,
+                                content=label,
+                                metadata={"type": "agent_start", "agent": agent_id, "step": step},
+                            )
 
-                    elif etype == "agent_result":
-                        agent_id = step.replace("_", "-")
-                        content = data.get("content", "")
-                        metadata: dict = {"type": "agent_result", "agent": agent_id, "step": step}
-                        if "dashboard" in data and data["dashboard"]:
-                            metadata["type"] = "roi_dashboard"
-                            metadata["dashboard"] = data["dashboard"]
-                        if "presentation_path" in data and data["presentation_path"]:
-                            metadata["type"] = "presentation_ready"
-                            metadata["presentation_path"] = data["presentation_path"]
-                        yield ChatMessage(
-                            project_id=project_id, role="agent",
-                            agent_id=agent_id, content=content, metadata=metadata,
-                        )
+                        elif etype == "agent_result":
+                            agent_id = step.replace("_", "-")
+                            content = data.get("content", "")
+                            metadata: dict = {"type": "agent_result", "agent": agent_id, "step": step}
+                            if "dashboard" in data and data["dashboard"]:
+                                metadata["type"] = "roi_dashboard"
+                                metadata["dashboard"] = data["dashboard"]
+                            if "presentation_path" in data and data["presentation_path"]:
+                                metadata["type"] = "presentation_ready"
+                                metadata["presentation_path"] = data["presentation_path"]
+                            yield ChatMessage(
+                                project_id=project_id, role="agent",
+                                agent_id=agent_id, content=content, metadata=metadata,
+                            )
 
-                    elif etype == "agent_error":
-                        agent_id_err = step.replace("_", "-")
-                        yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id=agent_id_err,
-                            content=f"\u26a0\ufe0f {step} failed: {data.get('error', 'unknown')}",
-                            metadata={"type": "agent_error", "agent": agent_id_err, "step": step},
-                        )
+                        elif etype == "agent_error":
+                            agent_id_err = step.replace("_", "-")
+                            yield ChatMessage(
+                                project_id=project_id, role="agent", agent_id=agent_id_err,
+                                content=f"\u26a0\ufe0f {step} failed: {data.get('error', 'unknown')}",
+                                metadata={"type": "agent_error", "agent": agent_id_err, "step": step},
+                            )
 
-                    elif etype == "assumptions_input":
-                        assumptions = data.get("assumptions", [])
-                        yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id=step,
-                            content=f"Please provide your assumptions for {step}:",
-                            metadata={
-                                "type": "assumptions_input",
-                                "step": step,
-                                "assumptions": assumptions,
-                            },
-                        )
+                        elif etype == "assumptions_input":
+                            assumptions = data.get("assumptions", [])
+                            yield ChatMessage(
+                                project_id=project_id, role="agent", agent_id=step,
+                                content=f"Please provide your assumptions for {step}:",
+                                metadata={
+                                    "type": "assumptions_input",
+                                    "step": step,
+                                    "assumptions": assumptions,
+                                },
+                            )
 
-                    elif etype == "pipeline_done":
-                        self.phases[project_id] = "done"
-                        self._cleanup_project(project_id)
-                        yield self._msg(
-                            project_id,
-                            "All steps complete! You can download the deck, ask follow-up questions, or request changes.",
-                            {"type": "pm_response"},
-                        )
+                        elif etype == "pipeline_done":
+                            self.phases[project_id] = "done"
+                            self._cleanup_project(project_id)
+                            yield self._msg(
+                                project_id,
+                                "All steps complete! You can download the deck, ask follow-up questions, or request changes.",
+                                {"type": "pm_response"},
+                            )
 
-                elif event.type == "request_info":
-                    # HITL pause — store pending request and emit approval prompt
-                    if project_id not in self.pending_requests:
-                        self.pending_requests[project_id] = {}
-                    self.pending_requests[project_id][event.request_id] = event.data
+                    elif event.type == "request_info":
+                        # HITL pause — store pending request and emit approval prompt
+                        if project_id not in self.pending_requests:
+                            self.pending_requests[project_id] = {}
+                        self.pending_requests[project_id][event.request_id] = event.data
 
-                    if isinstance(event.data, ApprovalRequest):
-                        summary = event.data.summary
-                        yield ChatMessage(
-                            project_id=project_id, role="agent", agent_id="pm",
-                            content=f"{summary}\n\nSay **proceed** to continue, **skip** to skip, or provide feedback to refine.",
-                            metadata={"type": "approval", "step": event.data.step},
-                        )
-                    elif isinstance(event.data, AssumptionsRequest):
-                        # Already emitted via assumptions_input above
-                        pass
+                        if isinstance(event.data, ApprovalRequest):
+                            summary = event.data.summary
+                            yield ChatMessage(
+                                project_id=project_id, role="agent", agent_id="pm",
+                                content=f"{summary}\n\nSay **proceed** to continue, **skip** to skip, or provide feedback to refine.",
+                                metadata={"type": "approval", "step": event.data.step},
+                            )
+                        elif isinstance(event.data, AssumptionsRequest):
+                            # Already emitted via assumptions_input above
+                            pass
+        except asyncio.TimeoutError:
+            logger.error(
+                "Pipeline timeout exceeded (%d seconds) for project %s",
+                PIPELINE_TIMEOUT_SECONDS, project_id,
+            )
+            self.phases[project_id] = "done"
+            self._cleanup_project(project_id)
+            yield ChatMessage(
+                project_id=project_id, role="agent", agent_id="pm",
+                content=f"⚠️ Pipeline timed out after {PIPELINE_TIMEOUT_SECONDS}s. Please try again or start fresh.",
+                metadata={"type": "error"},
+            )
         except Exception as e:
             logger.exception("Workflow execution failed for project %s", project_id)
             self.phases[project_id] = "done"

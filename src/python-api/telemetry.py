@@ -10,11 +10,14 @@ adds the exporter pipeline and exposes helpers for custom spans.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+logger = logging.getLogger(__name__)
 
 
 def setup_telemetry() -> None:
@@ -41,7 +44,7 @@ def setup_telemetry() -> None:
             otlp_exporter = OTLPSpanExporter()
             provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
         except ImportError:
-            pass  # OTLP exporter not installed — skip silently
+            logger.info("OTLP exporter not installed — telemetry export disabled")
 
     trace.set_tracer_provider(provider)
 

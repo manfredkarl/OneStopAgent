@@ -7,6 +7,7 @@ from __future__ import annotations
 import atexit
 import httpx
 import logging
+import os
 from typing import Any
 
 from opentelemetry import trace
@@ -15,7 +16,7 @@ _tracer = trace.get_tracer(__name__)
 
 logger = logging.getLogger(__name__)
 
-MCP_ENDPOINT = "https://learn.microsoft.com/api/mcp"
+MCP_ENDPOINT = os.environ.get("MCP_ENDPOINT", "https://learn.microsoft.com/api/mcp")
 
 # Module-level httpx client with connection pooling (avoids new TCP/TLS per call).
 # atexit cleanup is best-effort; httpx also releases connections on GC.
@@ -74,29 +75,32 @@ class MCPClient:
                 
                 if response.status_code == 200:
                     data = response.json()
+                    if not isinstance(data, dict) or "result" not in data:
+                        logger.warning("Malformed MCP response: %s", type(data))
+                        return []
                     results = data.get("result", data.get("results", []))
                     mapped = [self._map_result(r, query) for r in results[:top_k]]
                     span.set_attribute("mcp.result_count", len(mapped))
                     return mapped
                 else:
-                    logger.warning(f"MCP server returned {response.status_code}: {response.text[:200]}")
-                    span.set_attribute("mcp.error", f"HTTP {response.status_code}")
-                    raise MCPUnavailableError(f"MCP server returned {response.status_code}")
+                    logger.warning("MCP server returned %d: %s", response.status_code, response.text[:200])
+                    span.set_attribute("mcp.error", "HTTP %d" % response.status_code)
+                    raise MCPUnavailableError("MCP server returned %d" % response.status_code)
             
             except httpx.ConnectError as e:
-                logger.warning(f"MCP server unreachable: {e}")
+                logger.warning("MCP server unreachable: %s", e)
                 span.set_attribute("mcp.error", "connect_error")
-                raise MCPUnavailableError(f"MCP server unreachable: {e}")
+                raise MCPUnavailableError("MCP server unreachable: %s" % e)
             except httpx.TimeoutException as e:
-                logger.warning(f"MCP server timeout: {e}")
+                logger.warning("MCP server timeout: %s", e)
                 span.set_attribute("mcp.error", "timeout")
-                raise MCPUnavailableError(f"MCP server timeout: {e}")
+                raise MCPUnavailableError("MCP server timeout: %s" % e)
             except MCPUnavailableError:
                 raise
             except Exception as e:
-                logger.warning(f"MCP client error: {e}")
+                logger.warning("MCP client error: %s", e)
                 span.set_attribute("mcp.error", str(e))
-                raise MCPUnavailableError(f"MCP client error: {e}")
+                raise MCPUnavailableError("MCP client error: %s" % e)
 
     def _map_result(self, raw: dict, query: str) -> dict[str, Any]:
         """Map a raw MCP response to the standard pattern schema (ref FRD-02 §4.3)."""

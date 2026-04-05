@@ -5,19 +5,12 @@ import re
 from enum import Enum
 from agents.llm import llm
 from agents.state import AgentState
+from utils import strip_markdown_fences, parse_leading_int
 
 logger = logging.getLogger(__name__)
 
-
-def _safe_count(s: str) -> int:
-    """Parse leading integer from a pricing-source token like '3 live'.
-
-    Returns 0 if the token is malformed or empty.
-    """
-    try:
-        return int(s.strip().split()[0])
-    except (ValueError, IndexError):
-        return 0
+# M-5: Pre-compiled regex for streaming JSON response field extraction
+_RESPONSE_FIELD_RE = re.compile(r'"response"\s*:\s*"((?:[^"\\]|\\.)*)', re.DOTALL)
 
 
 def _extract_response_field_partial(partial_json: str) -> str:
@@ -27,7 +20,7 @@ def _extract_response_field_partial(partial_json: str) -> str:
     Returns the extracted text, or "" if the key hasn't appeared yet.
     """
     # re.DOTALL so the pattern matches across newlines in the response value
-    match = re.search(r'"response"\s*:\s*"((?:[^"\\]|\\.)*)', partial_json, re.DOTALL)
+    match = _RESPONSE_FIELD_RE.search(partial_json)
     return match.group(1) if match else ""
 
 
@@ -129,8 +122,9 @@ class IntentInterpreter:
             ])
             raw = response.content.strip().lower().replace("-", "_").replace(" ", "_")
             intent = Intent(raw)
-        except (ValueError, Exception):
+        except (ValueError, KeyError, TypeError):
             # LLM returned something unparseable or call failed — safe default
+            logger.warning("Intent classification failed, defaulting to INPUT intent")
             intent = Intent.INPUT
 
         return intent, self._build_meta(intent, message)
@@ -145,7 +139,8 @@ class IntentInterpreter:
             ])
             raw = response.content.strip().lower().replace("-", "_").replace(" ", "_")
             intent = Intent(raw)
-        except (ValueError, Exception):
+        except (ValueError, KeyError, TypeError):
+            logger.warning("Intent classification failed, defaulting to INPUT intent")
             intent = Intent.INPUT
 
         return intent, self._build_meta(intent, message)
@@ -218,8 +213,8 @@ RULES:
 - Be specific about Azure services"""},
                 {"role": "user", "content": user_input}
             ])
-        except Exception as e:
-            logger.error("Brainstorm LLM call failed: %s", e, exc_info=True)
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("Brainstorm LLM call failed: %s", e, exc_info=True)
             return {
                 "response": "I'd be happy to help design your Azure solution. Could you tell me more about your requirements?",
                 "azure_fit": "unclear",
@@ -229,14 +224,14 @@ RULES:
             }
 
         try:
-            text = response.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            text = strip_markdown_fences(response.content)
             result = json.loads(text)
 
             # Safety: the LLM may put the entire JSON blob as the response
             # field value — extract the conversational text if so
             resp = result.get("response", text)
+            # LLMs sometimes double-wrap responses: {"response": "{\"response\": \"...\"}" }
+            # This unwraps the inner JSON if detected.
             if isinstance(resp, str) and resp.strip().startswith("{"):
                 try:
                     inner = json.loads(resp)
@@ -252,7 +247,7 @@ RULES:
                 "industry": result.get("industry", "Cross-Industry"),
                 "scenarios": result.get("scenarios", []),
             }
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             # LLM returned plain text instead of JSON — still usable
             return {
                 "response": response.content,
@@ -337,12 +332,12 @@ RULES:
 
         # Parse accumulated full JSON (same logic as brainstorm_greeting)
         try:
-            text = full_text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            text = strip_markdown_fences(full_text)
             result = json.loads(text)
 
             resp = result.get("response", text)
+            # LLMs sometimes double-wrap responses: {"response": "{\"response\": \"...\"}" }
+            # This unwraps the inner JSON if detected.
             if isinstance(resp, str) and resp.strip().startswith("{"):
                 try:
                     inner = json.loads(resp)
@@ -358,7 +353,7 @@ RULES:
                 "industry": result.get("industry", "Cross-Industry"),
                 "scenarios": result.get("scenarios", []),
             }
-        except (json.JSONDecodeError, Exception):
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             return {
                 "response": full_text,
                 "azure_fit": "unclear",
@@ -550,7 +545,7 @@ RULES:
             if name and name != "N/A":
                 state.customer_name = name
                 return name
-        except Exception:
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
             pass
         return ""
 
@@ -631,12 +626,12 @@ RULES:
 
             # Confidence based on proportion of services with live pricing
             _live_count = sum(
-                _safe_count(p)
+                parse_leading_int(p)
                 for p in source.split(", ")
                 if any(p.endswith(s) for s in ("live", "live-fallback"))
             ) if isinstance(source, str) else 0
             _total_count = sum(
-                _safe_count(p) for p in source.split(", ")
+                parse_leading_int(p) for p in source.split(", ")
             ) if isinstance(source, str) else 1
             _live_pct = _live_count / max(_total_count, 1)
             confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"

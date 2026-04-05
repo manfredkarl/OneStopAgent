@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Literal, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 
@@ -61,7 +61,7 @@ class Project(BaseModel):
         ]
     )
     status: Literal["in_progress", "completed", "error"] = "in_progress"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatMessage(BaseModel):
@@ -71,7 +71,7 @@ class ChatMessage(BaseModel):
     agent_id: Optional[str] = None
     content: str
     metadata: Optional[dict] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CreateProjectRequest(BaseModel):

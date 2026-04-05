@@ -53,10 +53,7 @@ class StreamChunk:
 # LLM client wrapper
 # ---------------------------------------------------------------------------
 
-_endpoint = os.environ.get(
-    "AZURE_OPENAI_ENDPOINT",
-    "https://demopresentations.services.ai.azure.com",
-)
+_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
 _deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4")
 _api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21")
 
@@ -78,6 +75,8 @@ class LLMClient:
     """
 
     def __init__(self) -> None:
+        if not _endpoint:
+            raise ValueError("AZURE_OPENAI_ENDPOINT environment variable is required")
         self._async_client = AzureOpenAIChatClient(
             endpoint=_endpoint,
             deployment_name=_deployment,

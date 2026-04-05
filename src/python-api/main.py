@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
+import traceback
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from sse_starlette.sse import EventSourceResponse
 
 from models.schemas import (
@@ -15,11 +19,32 @@ from models.schemas import (
     CreateProjectRequest,
     SendMessageRequest,
 )
+from services.company_intelligence import (
+    build_fallback_profile,
+    FALLBACK_PROFILES,
+    search_and_extract_company,
+)
 from services.project_store import store
 from maf_orchestrator import MAFOrchestrator
 from telemetry import setup_telemetry
+from workflow import create_pipeline_workflow
 
 setup_telemetry()
+
+# ---------------------------------------------------------------------------
+# x-user-id header validation
+# ---------------------------------------------------------------------------
+
+_USER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _get_user_id(request: Request) -> str:
+    """Extract and validate the x-user-id header."""
+    user_id = request.headers.get("x-user-id", "")
+    if not _USER_ID_RE.match(user_id):
+        raise HTTPException(status_code=400, detail="Invalid or missing x-user-id header")
+    return user_id
+
 
 # ---------------------------------------------------------------------------
 # Security — allowed output directory for file downloads
@@ -34,12 +59,12 @@ OUTPUT_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "output"))
 app = FastAPI(title="OneStopAgent API", version="1.0.0")
 
 _cors_origins = os.environ.get("CORS_ORIGINS", "")
-_allow_origins = _cors_origins.split(",") if _cors_origins else ["*"]
+_allow_origins = _cors_origins.split(",") if _cors_origins else ["http://localhost:4200", "http://localhost:5173"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
-    allow_credentials="*" not in _allow_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -58,9 +83,6 @@ async def health():
 @app.get("/api/workflow")
 async def workflow_viz():
     """Interactive MAF workflow visualization."""
-    from fastapi.responses import HTMLResponse
-    from workflow import create_pipeline_workflow
-
     wf = create_pipeline_workflow()
     d = wf.to_dict()
     names = {
@@ -129,7 +151,6 @@ async def search_company(q: str):
     """Search for a company profile by name. Returns up to 3 ranked matches."""
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
-    from services.company_intelligence import search_and_extract_company
     results = await search_and_extract_company(q.strip())
     return results
 
@@ -137,14 +158,13 @@ async def search_company(q: str):
 @app.get("/api/company/fallback/{size}")
 async def company_fallback(size: str, name: str = ""):
     """Return a fallback company profile for unknown companies."""
-    from services.company_intelligence import build_fallback_profile, FALLBACK_PROFILES
     if size not in FALLBACK_PROFILES:
         raise HTTPException(status_code=400, detail=f"Unknown size tier '{size}'. Use: small, mid-market, enterprise")
     return build_fallback_profile(size, name or size.title())
 
 
 @app.post("/api/projects")
-async def create_project(req: CreateProjectRequest, x_user_id: str = Header()):
+async def create_project(req: CreateProjectRequest, x_user_id: str = Depends(_get_user_id)):
     project = store.create_project(
         x_user_id, req.description, req.customer_name,
         company_profile=req.company_profile,
@@ -156,7 +176,7 @@ async def create_project(req: CreateProjectRequest, x_user_id: str = Header()):
 
 
 @app.get("/api/projects")
-async def list_projects(x_user_id: str = Header()):
+async def list_projects(x_user_id: str = Depends(_get_user_id)):
     projects = store.list_projects(x_user_id)
     return [
         {
@@ -171,7 +191,7 @@ async def list_projects(x_user_id: str = Header()):
 
 
 @app.get("/api/projects/{project_id}")
-async def get_project(project_id: str, x_user_id: str = Header()):
+async def get_project(project_id: str, x_user_id: str = Depends(_get_user_id)):
     project = store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -183,7 +203,7 @@ async def send_message(
     project_id: str,
     req: SendMessageRequest,
     request: Request,
-    x_user_id: str = Header(),
+    x_user_id: str = Depends(_get_user_id),
 ):
     project = store.get_project(project_id, x_user_id)
     if not project:
@@ -207,7 +227,6 @@ async def send_message(
                         store.add_message(project_id, msg)
                     yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
             except Exception as e:
-                import logging
                 logging.getLogger(__name__).exception("SSE stream error")
                 error_msg = ChatMessage(
                     project_id=project_id, role="agent", agent_id="pm",
@@ -229,7 +248,6 @@ async def send_message(
                 store.add_message(project_id, msg)
             messages.append(msg.model_dump())
     except Exception as e:
-        import traceback
         traceback.print_exc()
         error_msg = ChatMessage(
             project_id=project_id, role="agent", agent_id="pm",
@@ -242,7 +260,7 @@ async def send_message(
 
 
 @app.get("/api/projects/{project_id}/chat")
-async def get_chat_history(project_id: str, x_user_id: str = Header()):
+async def get_chat_history(project_id: str, x_user_id: str = Depends(_get_user_id)):
     project = store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -255,7 +273,7 @@ async def get_chat_history(project_id: str, x_user_id: str = Header()):
 
 
 @app.get("/api/projects/{project_id}/agents")
-async def get_agents(project_id: str, x_user_id: str = Header()):
+async def get_agents(project_id: str, x_user_id: str = Depends(_get_user_id)):
     project = store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -277,7 +295,7 @@ async def toggle_agent(
     project_id: str,
     agent_id: str,
     request: Request,
-    x_user_id: str = Header(),
+    x_user_id: str = Depends(_get_user_id),
 ):
     project = store.get_project(project_id, x_user_id)
     if not project:
@@ -312,11 +330,8 @@ async def test_reset():
 # ---------------------------------------------------------------------------
 
 @app.get("/api/projects/{project_id}/export/pptx")
-async def download_pptx(project_id: str, x_user_id: str = Header()):
+async def download_pptx(project_id: str, x_user_id: str = Depends(_get_user_id)):
     """Download the generated PowerPoint deck."""
-    import os
-    from fastapi.responses import FileResponse
-
     project = store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -344,7 +359,6 @@ async def download_pptx(project_id: str, x_user_id: str = Header()):
     )
 
 if __name__ == "__main__":
-    import os
     import uvicorn
 
     dev_mode = os.environ.get("ENV", "production").lower() == "development"
