@@ -4,10 +4,10 @@ Drop-in replacement for the previous LangChain-based client.
 Exposes the same interface (invoke / ainvoke / astream) so that all
 consumer files (agents, orchestrator, approval) require zero changes.
 
-Supports two auth modes:
-1. Local dev: AZURE_OPENAI_TOKEN env var  → wrapped as a static credential
-2. Production: AZURE_CLIENT_ID env var    → ManagedIdentityCredential
-3. Fallback: AzureCliCredential / DefaultAzureCredential
+Auth is handled by ``services.token_provider.AutoRefreshCredential`` which:
+- Bootstraps from AZURE_OPENAI_TOKEN env var (backwards compatible)
+- Auto-refreshes tokens via azure-identity before they expire
+- Is thread-safe (shared singleton across all agents)
 """
 
 from __future__ import annotations
@@ -15,12 +15,13 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Sequence
+from typing import AsyncIterator, Sequence
 
 from agent_framework import Message as MAFMessage
 from agent_framework.azure import AzureOpenAIChatClient
+
+from services.token_provider import get_credential
 
 
 # ---------------------------------------------------------------------------
@@ -28,47 +29,8 @@ from agent_framework.azure import AzureOpenAIChatClient
 # ---------------------------------------------------------------------------
 
 def _build_credential():
-    """Return an Azure credential suitable for the current environment."""
-    token = os.environ.get("AZURE_OPENAI_TOKEN", "")
-    if token:
-        # Local dev — wrap pre-fetched token as a static credential
-        from azure.core.credentials import AccessToken
-
-        class _StaticTokenCredential:
-            """Credential that uses AZURE_OPENAI_TOKEN env var, re-reading on each call."""
-            def get_token(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                current_token = os.environ.get("AZURE_OPENAI_TOKEN", token)
-                return AccessToken(current_token, int(time.time()) + 3600)
-            async def get_token_async(self, *_scopes: str, **_kw: Any) -> AccessToken:
-                current_token = os.environ.get("AZURE_OPENAI_TOKEN", token)
-                return AccessToken(current_token, int(time.time()) + 3600)
-
-        return _StaticTokenCredential()
-
-    # Production / CI — use azure-identity
-    try:
-        from azure.identity import (
-            AzureCliCredential,
-            DefaultAzureCredential,
-            ManagedIdentityCredential,
-        )
-        client_id = os.environ.get("AZURE_CLIENT_ID")
-        if client_id:
-            return ManagedIdentityCredential(client_id=client_id)
-        # Try CLI first (fast for local dev), fall back to default chain
-        try:
-            cred = AzureCliCredential()
-            cred.get_token("https://cognitiveservices.azure.com/.default")
-            return cred
-        except Exception:
-            return DefaultAzureCredential()
-    except Exception as e:
-        raise RuntimeError(
-            f"No AZURE_OPENAI_TOKEN set and credential resolution failed: {e}\n"
-            "For local dev, run:\n"
-            "  $env:AZURE_OPENAI_TOKEN = az account get-access-token "
-            "--resource https://cognitiveservices.azure.com --query accessToken -o tsv"
-        ) from e
+    """Return the shared auto-refreshing Azure credential."""
+    return get_credential()
 
 
 # ---------------------------------------------------------------------------

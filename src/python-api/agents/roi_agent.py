@@ -884,16 +884,17 @@ class ROIAgent:
                 {
                     "year": yr + 1,
                     "adoption": f"{int(adoption_ramp[yr] * 100)}%",
-                    # Year 1 cost includes one-time impl + change; Year 2+ is run-rate only
+                    "annualValue": round(annual_total_value * adoption_ramp[yr]),
+                    # Cumulative cost: Azure run-rate × years + one-time impl & change
                     "azureCost": round(
                         azure_annual * (yr + 1)
-                        + (impl_cost + change_cost if yr == 0 else 0)
+                        + impl_cost + change_cost
                     ),
                     "totalValue": round(annual_total_value * sum(adoption_ramp[:yr + 1])),
                     "netValue": round(
                         annual_total_value * sum(adoption_ramp[:yr + 1])
                         - azure_annual * (yr + 1)
-                        - (impl_cost + change_cost if yr == 0 else 0)
+                        - impl_cost - change_cost
                     ),
                 }
                 for yr in range(3)
