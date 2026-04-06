@@ -171,6 +171,18 @@ class MAFOrchestrator:
         active_agents: list[str], description: str,
         company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
+        lock = self._get_lock(project_id)
+        async with lock:
+            async for msg in self._handle_message_inner(
+                project_id, message, active_agents, description, company_profile,
+            ):
+                yield msg
+
+    async def _handle_message_inner(
+        self, project_id: str, message: str,
+        active_agents: list[str], description: str,
+        company_profile: dict | None = None,
+    ) -> AsyncGenerator[ChatMessage, None]:
       try:
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")

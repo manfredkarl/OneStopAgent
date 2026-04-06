@@ -174,6 +174,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
 
   // Company intelligence state
   const [companySearching, setCompanySearching] = useState(false);
+  const [companySearchFailed, setCompanySearchFailed] = useState(false);
   const [companyResults, setCompanyResults] = useState<CompanyProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<CompanyProfile | null>(null);
   const [showDisambiguation, setShowDisambiguation] = useState(false);
@@ -200,6 +201,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
       setCompanySearching(true);
+      setCompanySearchFailed(false);
       setShowDisambiguation(false);
       setShowSizePicker(false);
       try {
@@ -224,8 +226,9 @@ export default function Landing({ agents, onProjectCreated }: Props) {
           setShowSizePicker(false);
         }
       } catch {
-        // Search failed silently — don't block UX
         setCompanyResults([]);
+        setCompanySearchFailed(true);
+        console.warn('Company search failed');
       } finally {
         setCompanySearching(false);
       }
@@ -307,9 +310,16 @@ export default function Landing({ agents, onProjectCreated }: Props) {
     setOppsLoaded(true);
   };
 
+  const [descError, setDescError] = useState('');
+
   const handleCreate = async (desc?: string, overrideCustomer?: string, overrideProfile?: CompanyProfile) => {
-    const text = desc || description.trim();
+    const text = (desc || description).trim();
     if (!text) return;
+    if (text.length < 10) {
+      setDescError('Please enter at least 10 characters.');
+      return;
+    }
+    setDescError('');
     // Synchronous guard prevents double-submission from fast double-click
     // (React's setLoading is async so the disabled check alone isn't sufficient).
     if (isSubmittingRef.current) return;
@@ -375,11 +385,13 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         <div className="bg-[var(--bg-input)] border border-[var(--border-light)] rounded-2xl p-6 space-y-4 shadow-[var(--shadow-float)]">
           <textarea
             value={description}
-            onChange={e => setDescription(e.target.value)}
+            onChange={e => { setDescription(e.target.value); if (descError) setDescError(''); }}
             placeholder="Describe your project requirements..."
             rows={4}
+            maxLength={5000}
             className="w-full resize-none rounded-xl border border-[var(--border-light)] bg-[var(--bg-subtle)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
           />
+          {descError && <p className="text-xs text-red-500 mt-1">{descError}</p>}
 
           {/* Customer name + search */}
           <div className="space-y-3">
@@ -423,6 +435,11 @@ export default function Landing({ agents, onProjectCreated }: Props) {
                 </div>
                 <CompanyCard profile={selectedProfile} onEdit={handleClearProfile} />
               </div>
+            )}
+
+            {/* Company search error */}
+            {companySearchFailed && !companySearching && (
+              <p className="text-xs text-red-500">Company search failed — please try again.</p>
             )}
 
             {/* Disambiguation popup */}

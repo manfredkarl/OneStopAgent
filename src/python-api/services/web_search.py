@@ -42,14 +42,15 @@ def search_web(query: str, num_results: int = 5) -> list[dict[str, str]]:
             if resp.status_code != 200:
                 return []
 
+            text = resp.text[:500_000]  # Cap at 500KB to prevent regex on huge pages
             results = []
             links = re.findall(
                 r'<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>(.+?)</a>',
-                resp.text,
+                text,
             )
             snippets = re.findall(
                 r'<a class="result__snippet"[^>]*>(.+?)</a>',
-                resp.text,
+                text,
             )
 
             for i, (url_raw, title_raw) in enumerate(links[:num_results]):

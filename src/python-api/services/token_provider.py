@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -156,3 +157,13 @@ def get_credential() -> AutoRefreshCredential:
 def get_token() -> str:
     """Convenience — return the current token string (auto-refreshing if needed)."""
     return get_credential().get_token(_SCOPE).token
+
+
+async def get_token_async() -> str:
+    """Async-safe token retrieval — runs sync get_token in thread pool.
+
+    Use this from async code (e.g. FastAPI handlers) to avoid blocking
+    the event loop with the threading.Lock inside get_token().
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, get_token)

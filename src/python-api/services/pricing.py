@@ -626,7 +626,7 @@ def _query_azure_pricing_uncached(
             return {
                 "price": price,
                 "source": source,
-                "confidence": "high",
+                "confidence": "high" if exact else "moderate",
                 "note": None if exact else f"Matched to {matched_sku}",
                 "unit": unit,
             }

@@ -56,6 +56,9 @@ class MCPClient:
         
         Raises MCPUnavailableError if the server is unreachable.
         """
+        if len(query) > 2000:
+            query = query[:2000]
+        top_k = max(1, min(top_k, 100))
         with _tracer.start_as_current_span("mcp.search") as span:
             span.set_attribute("mcp.query", query)
             span.set_attribute("mcp.top_k", top_k)

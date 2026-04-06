@@ -124,6 +124,7 @@ class CosmosProjectStore:
         items: list[dict] = []
         async for item in self._agent_state.query_items(
             query, parameters=[{"name": "@pid", "value": project_id}],
+            partition_key=project_id,
         ):
             items.append(item)
         return items
