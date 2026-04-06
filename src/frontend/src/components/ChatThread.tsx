@@ -42,6 +42,24 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
     return true;
   });
 
+  // Only the last approval/conversation message gets active buttons
+  const lastActiveActionMsgId = (() => {
+    let foundId: string | null = null;
+    let foundIdx = -1;
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const msg = visibleMessages[i];
+      if (msg.metadata?.type === 'approval' || msg.metadata?.type === 'agent_conversation') {
+        foundId = msg.id;
+        foundIdx = i;
+        break;
+      }
+    }
+    if (foundId === null) return null;
+    // If user already responded, disable all action buttons
+    const hasUserAfter = visibleMessages.slice(foundIdx + 1).some(m => m.role === 'user');
+    return hasUserAfter ? null : foundId;
+  })();
+
   if (visibleMessages.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
@@ -144,7 +162,7 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                   <ActionButtons
                     actions={actions}
                     onAction={(id) => onSend?.(id)}
-                    disabled={isThinking}
+                    disabled={isThinking || msg.id !== lastActiveActionMsgId}
                   />
                 </div>
               </div>
@@ -168,7 +186,7 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                   <ActionButtons
                     actions={actions}
                     onAction={(id) => onSend?.(id)}
-                    disabled={isThinking}
+                    disabled={isThinking || msg.id !== lastActiveActionMsgId}
                   />
                   {msg.metadata.suggestions && msg.metadata.suggestions.length > 0 && (
                     <div className="flex gap-2 mt-3 flex-wrap">
@@ -176,7 +194,7 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                         <button
                           key={i}
                           onClick={() => onSend?.(s)}
-                          disabled={isThinking}
+                          disabled={isThinking || msg.id !== lastActiveActionMsgId}
                           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           💡 {s}

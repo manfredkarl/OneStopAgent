@@ -23,6 +23,7 @@ export default function Chat({ agents, onAgentsChange }: Props) {
   const initialSent = useRef(false);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!projectId) return;
@@ -38,6 +39,7 @@ export default function Chat({ agents, onAgentsChange }: Props) {
 
   const handleSend = useCallback(async (message: string) => {
     if (!projectId || sending) return;
+    const thisRequestId = ++requestIdRef.current;
     setSending(true);
 
     const userMsg: ChatMessage = {
@@ -63,6 +65,11 @@ export default function Chat({ agents, onAgentsChange }: Props) {
               : metaType === 'agent_start' && a.status === 'working' ? { ...a, status: 'idle' as const } : a
             )
           );
+        }
+
+        // Unlock input when an approval/conversation gate arrives
+        if (metaType === 'approval' || metaType === 'agent_conversation' || metaType === 'approval_request') {
+          setSending(false);
         }
 
         if (metaType === 'agent_token') {
@@ -103,9 +110,13 @@ export default function Chat({ agents, onAgentsChange }: Props) {
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
-      setSending(false);
-      if (projectId) {
-        getAgents(projectId).then(onAgentsChange).catch(() => {});
+      // Only reset if this is still the active request (prevents stale finally
+      // from clobbering a newer request's sending=true after an approval gate)
+      if (requestIdRef.current === thisRequestId) {
+        setSending(false);
+        if (projectId) {
+          getAgents(projectId).then(onAgentsChange).catch(() => {});
+        }
       }
     }
   }, [projectId, sending]);
@@ -120,12 +131,24 @@ export default function Chat({ agents, onAgentsChange }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Detect if an approval gate is active (last non-user message has actions)
+  const approvalActive = !sending && messages.length > 0 && (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'user') return false;
+      if (msg.metadata?.type === 'approval' || msg.metadata?.type === 'agent_conversation' || msg.metadata?.actions) {
+        return true;
+      }
+    }
+    return false;
+  })();
+
   return (
     <div className="flex-1 flex min-w-0 overflow-hidden">
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--bg-main)]">
         <ChatThread messages={messages} onSend={handleSend} projectId={projectId} isThinking={sending} />
-        <ChatInput onSend={handleSend} disabled={sending} />
+        <ChatInput onSend={handleSend} disabled={sending} approvalActive={approvalActive} />
       </div>
 
       {/* Sticky company card — right panel */}

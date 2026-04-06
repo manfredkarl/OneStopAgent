@@ -78,6 +78,19 @@ FAST_RUN_GATES = {"business_value", "architect", "presentation"}
 REQUIRED_STEPS = {"architect"}  # Pipeline cannot continue without these
 PIPELINE_TIMEOUT_SECONDS = 600  # 10 minutes max for entire pipeline
 
+# Response classification for approval gates
+ADVANCE_RESPONSES = frozenset({"proceed", "yes", "ok", "continue", "approved", "looks good", ""})
+SKIP_RESPONSES = frozenset({"skip", "skip this", "next"})
+
+# Map step names to their AgentState output field (used when clearing for re-runs)
+_STEP_OUTPUT_FIELDS: dict[str, str] = {
+    "architect": "architecture",
+    "cost": "costs",
+    "business_value": "business_value",
+    "roi": "roi",
+    "presentation": "presentation_path",
+}
+
 
 def _should_pause(mode: str, step: str, fast_run_gates: set[str] = FAST_RUN_GATES) -> bool:
     """Decide whether to pause for approval after a step."""
@@ -101,6 +114,66 @@ class PipelineExecutor(Executor):
         self.pm = ProjectManager()
         self._fast_run_gates = fast_run_gates if fast_run_gates is not None else FAST_RUN_GATES
         self._required_steps = required_steps if required_steps is not None else REQUIRED_STEPS
+
+    async def _rerun_and_approve(self, ctx, msg, feedback):
+        """Re-run this executor's agent with feedback and request approval again.
+
+        Clears the step's output, re-runs the agent, and issues a new
+        ApprovalRequest so the user can review the updated result.
+        """
+        state = msg.state
+        state.clarifications += f"\nFeedback on {self.step_name}: {feedback}"
+
+        # Clear current output for this step
+        output_field = _STEP_OUTPUT_FIELDS.get(self.step_name)
+        if output_field:
+            default = "" if output_field == "presentation_path" else {}
+            setattr(state, output_field, default)
+
+        # Remove from completed so the step can re-run
+        state.completed_steps = [
+            s for s in state.completed_steps if s != self.step_name
+        ]
+        state.mark_step_running(self.step_name)
+
+        await ctx.yield_output({
+            "type": "agent_start", "step": self.step_name,
+            "msg_id": str(uuid.uuid4()),
+        })
+
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self.agent.run, state),
+                timeout=300,
+            )
+            state.mark_step_completed(self.step_name)
+
+            output_text = self.pm.format_agent_output(self.step_name, state)
+            summary = self.pm.approval_summary(self.step_name, state)
+
+            await ctx.yield_output({
+                "type": "agent_result", "step": self.step_name,
+                "content": output_text,
+            })
+            # Request approval again (loops until user approves or skips)
+            await ctx.request_info(
+                request_data=ApprovalRequest(step=self.step_name, summary=summary),
+                response_type=str,
+            )
+        except Exception as e:
+            logger.exception("Re-run of %s failed", self.step_name)
+            state.mark_step_failed(self.step_name)
+            await ctx.yield_output({
+                "type": "agent_error", "step": self.step_name, "error": str(e),
+            })
+            if self.step_name in self._required_steps:
+                await ctx.yield_output({
+                    "type": "pipeline_done",
+                    "content": f"Pipeline stopped: {self.step_name} is required but failed.",
+                })
+                return
+            await ctx.send_message(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -183,16 +256,14 @@ class ArchitectExecutor(PipelineExecutor):
         msg: PipelineMessage = ctx.get_state("pipeline")
         resp_lower = response.strip().lower()
 
-        if resp_lower in ("skip", "skip this", "next"):
+        if resp_lower in SKIP_RESPONSES:
             msg.state.mark_step_skipped(self.step_name)
-        elif resp_lower in ("refine", "redo", "again", "retry"):
-            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
-            await ctx.yield_output({
-                "type": "agent_result", "step": self.step_name,
-                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
-            })
-        # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
-        await ctx.send_message(msg)
+            await ctx.send_message(msg)
+        elif resp_lower in ADVANCE_RESPONSES:
+            await ctx.send_message(msg)
+        else:
+            # Refine: re-run agent with feedback, then request approval again
+            await self._rerun_and_approve(ctx, msg, response)
 
 
 # ---------------------------------------------------------------------------
@@ -332,15 +403,14 @@ class CostExecutor(PipelineExecutor):
 
         # ApprovalRequest path — check for skip or refine intent
         resp_lower = response.strip().lower()
-        if resp_lower in ("skip", "skip this", "next"):
+        if resp_lower in SKIP_RESPONSES:
             state.mark_step_skipped("cost")
-        elif resp_lower in ("refine", "redo", "again", "retry"):
-            state.clarifications += f"\nFeedback on {self.step_name}: {response}"
-            await ctx.yield_output({
-                "type": "agent_result", "step": self.step_name,
-                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
-            })
-        await ctx.send_message(msg)
+            await ctx.send_message(msg)
+        elif resp_lower in ADVANCE_RESPONSES:
+            await ctx.send_message(msg)
+        else:
+            # Refine: re-run agent with feedback, then request approval again
+            await self._rerun_and_approve(ctx, msg, response)
 
 
 # ---------------------------------------------------------------------------
@@ -576,21 +646,32 @@ class BusinessValueExecutor(PipelineExecutor):
 
         # ApprovalRequest path — check for skip or refine intent
         resp_lower = response.strip().lower()
-        if resp_lower in ("skip", "skip this", "next"):
-            state.mark_step_skipped("business_value")
-        elif resp_lower in ("refine", "redo", "again", "retry"):
-            state.clarifications += f"\nFeedback on {self.step_name}: {response}"
-            await ctx.yield_output({
-                "type": "agent_result", "step": self.step_name,
-                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
-            })
+        step = request.step  # may be "business_value" or "architect"
 
-        # After BV approval, run architect if it hasn't run yet
-        if request.step == "business_value" and "architect" in msg.active_agents and "architect" not in state.completed_steps:
-            await self._run_architect_only(msg, ctx)
-            return
-
-        await ctx.send_message(msg)
+        if resp_lower in SKIP_RESPONSES:
+            state.mark_step_skipped(step)
+            # After BV skip, run architect if it hasn't run yet
+            if step == "business_value" and "architect" in msg.active_agents and "architect" not in state.completed_steps:
+                await self._run_architect_only(msg, ctx)
+                return
+            await ctx.send_message(msg)
+        elif resp_lower in ADVANCE_RESPONSES:
+            # After BV approval, run architect if it hasn't run yet
+            if step == "business_value" and "architect" in msg.active_agents and "architect" not in state.completed_steps:
+                await self._run_architect_only(msg, ctx)
+                return
+            await ctx.send_message(msg)
+        else:
+            # Refine: re-run the relevant agent with feedback
+            if step == "architect":
+                state.clarifications += f"\nFeedback on architect: {response}"
+                state.architecture = {}
+                state.completed_steps = [
+                    s for s in state.completed_steps if s != "architect"
+                ]
+                await self._run_architect_only(msg, ctx)
+            else:
+                await self._rerun_and_approve(ctx, msg, response)
 
 
 # ---------------------------------------------------------------------------
@@ -664,16 +745,14 @@ class ROIExecutor(PipelineExecutor):
         msg: PipelineMessage = ctx.get_state("pipeline")
         resp_lower = response.strip().lower()
 
-        if resp_lower in ("skip", "skip this", "next"):
+        if resp_lower in SKIP_RESPONSES:
             msg.state.mark_step_skipped(self.step_name)
-        elif resp_lower in ("refine", "redo", "again", "retry"):
-            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
-            await ctx.yield_output({
-                "type": "agent_result", "step": self.step_name,
-                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
-            })
-        # Default: proceed (covers "proceed", "yes", "ok", "continue", etc.)
-        await ctx.send_message(msg)
+            await ctx.send_message(msg)
+        elif resp_lower in ADVANCE_RESPONSES:
+            await ctx.send_message(msg)
+        else:
+            # Refine: re-run agent with feedback, then request approval again
+            await self._rerun_and_approve(ctx, msg, response)
 
 
 # ---------------------------------------------------------------------------
@@ -756,21 +835,66 @@ class PresentationExecutor(PipelineExecutor):
         ctx: WorkflowContext,
     ) -> None:
         msg: PipelineMessage = ctx.get_state("pipeline")
+        state = msg.state
         resp_lower = response.strip().lower()
-        if resp_lower in ("skip", "skip this", "next"):
-            msg.state.mark_step_skipped("presentation")
-        elif resp_lower in ("refine", "redo", "again", "retry"):
-            msg.state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+
+        if resp_lower in SKIP_RESPONSES:
+            state.mark_step_skipped("presentation")
             await ctx.yield_output({
-                "type": "agent_result", "step": self.step_name,
-                "content": "Feedback noted. Use 'make it different' or 'iterate' after the pipeline completes to re-run this step with your feedback.",
+                "type": "pipeline_done",
+                "content": "Pipeline complete (presentation skipped).",
             })
-        # Presentation is the terminal executor — do NOT send_message
-        # (there is no next executor in the chain).
-        await ctx.yield_output({
-            "type": "pipeline_done",
-            "content": "Pipeline complete.",
-        })
+        elif resp_lower in ADVANCE_RESPONSES:
+            await ctx.yield_output({
+                "type": "pipeline_done",
+                "content": "Pipeline complete.",
+            })
+        else:
+            # Refine: re-run presentation with feedback
+            state.clarifications += f"\nFeedback on {self.step_name}: {response}"
+            state.presentation_path = ""
+            state.completed_steps = [
+                s for s in state.completed_steps if s != self.step_name
+            ]
+            state.mark_step_running(self.step_name)
+            await ctx.yield_output({
+                "type": "agent_start", "step": self.step_name,
+                "msg_id": str(uuid.uuid4()),
+            })
+
+            loop = asyncio.get_running_loop()
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self.agent.run, state),
+                    timeout=300,
+                )
+                state.mark_step_completed(self.step_name)
+                output_text = self.pm.format_agent_output(self.step_name, state)
+                result_payload: dict = {
+                    "type": "agent_result", "step": self.step_name,
+                    "content": output_text,
+                }
+                if state.presentation_path:
+                    result_payload["presentation_path"] = state.presentation_path
+                await ctx.yield_output(result_payload)
+                await ctx.request_info(
+                    request_data=ApprovalRequest(
+                        step=self.step_name,
+                        summary=self.pm.approval_summary(self.step_name, state),
+                    ),
+                    response_type=str,
+                )
+            except Exception as e:
+                logger.exception("Re-run of presentation failed")
+                state.mark_step_failed(self.step_name)
+                await ctx.yield_output({
+                    "type": "agent_error", "step": self.step_name,
+                    "error": str(e),
+                })
+                await ctx.yield_output({
+                    "type": "pipeline_done",
+                    "content": "Pipeline complete (presentation re-run failed).",
+                })
 
 
 # ---------------------------------------------------------------------------
