@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { marked } from 'marked';
-import MermaidDiagram from './MermaidDiagram';
+import MermaidDiagram from '../dashboard/MermaidDiagram';
 
 interface Props {
   content: string;

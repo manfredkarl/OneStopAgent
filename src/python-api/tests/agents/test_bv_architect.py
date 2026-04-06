@@ -16,7 +16,7 @@ import sys
 import os
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from agents.business_value_agent import BusinessValueAgent
 from agents.architect_agent import ArchitectAgent

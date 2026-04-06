@@ -40,7 +40,7 @@ jobs:
           python -c "
           import py_compile
           for f in [
-              'main.py', 'maf_orchestrator.py', 'workflow.py',
+              'main.py', 'orchestration/maf_orchestrator.py', 'orchestration/workflow.py',
               'agents/pm_agent.py', 'agents/architect_agent.py',
               'agents/business_value_agent.py', 'agents/cost_agent.py',
               'agents/roi_agent.py', 'agents/presentation_agent.py',
@@ -57,13 +57,13 @@ jobs:
         run: |
           cd src/python-api
           python -m pytest tests/ -v \
-            --ignore=tests/test_mermaid_cap.py \
+            --ignore=tests/agents/test_mermaid_cap.py \
             -m "not integration" \
             --tb=short \
             --junitxml=../../test-results/unit-results.xml \
             --co -q 2>/dev/null || true
           python -m pytest tests/ -v \
-            --ignore=tests/test_mermaid_cap.py \
+            --ignore=tests/agents/test_mermaid_cap.py \
             -m "not integration" \
             --tb=short \
             --junitxml=../../test-results/unit-results.xml \

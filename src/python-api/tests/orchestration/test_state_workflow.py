@@ -3,11 +3,11 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pytest
 from agents.state import AgentState, SharedAssumptions
-from workflow import _should_pause, REQUIRED_STEPS, FAST_RUN_GATES
+from orchestration.workflow import _should_pause, REQUIRED_STEPS, FAST_RUN_GATES
 
 
 # ═══════════════════════════════════════════════════════════════════════════

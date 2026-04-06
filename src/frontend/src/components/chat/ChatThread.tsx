@@ -1,11 +1,11 @@
 import { useRef, useEffect } from 'react';
-import type { ChatMessage, PlanStep } from '../types';
-import { AGENT_REGISTRY } from '../types';
-import { downloadPptx } from '../api';
+import type { ChatMessage, PlanStep } from '../../types';
+import { AGENT_REGISTRY } from '../../types';
+import { downloadPptx } from '../../api';
 import MessageContent from './MessageContent';
-import ExecutionPlan from './ExecutionPlan';
+import ExecutionPlan from '../dashboard/ExecutionPlan';
 import AssumptionsInput from './AssumptionsInput';
-import ROIDashboard from './ROIDashboard';
+import ROIDashboard from '../dashboard/ROIDashboard';
 import ActionButtons from './ActionButtons';
 
 interface Props {

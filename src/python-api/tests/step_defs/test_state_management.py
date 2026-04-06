@@ -9,7 +9,7 @@ import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
 
 from agents.state import AgentState, SharedAssumptions
-from workflow import _should_pause
+from orchestration.workflow import _should_pause
 
 scenarios("../features/state_management.feature")
 

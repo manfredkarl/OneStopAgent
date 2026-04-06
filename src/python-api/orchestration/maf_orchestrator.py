@@ -19,13 +19,15 @@ from agents.state import AgentState
 from agents.pm_agent import ProjectManager, AGENT_INFO, Intent
 from agents.llm import llm
 from models.schemas import ChatMessage
-from workflow import (
+from .workflow import (
     create_pipeline_workflow, PipelineMessage, ApprovalRequest, AssumptionsRequest,
     PIPELINE_TIMEOUT_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
-pm = ProjectManager()
+
+# Maximum number of projects to keep in memory before evicting oldest
+_MAX_PROJECTS = 200
 
 # Agent name → AgentState field mapping (used for retry/iteration state resets)
 _AGENT_STATE_FIELDS = {
@@ -46,7 +48,7 @@ _AGENT_MENTION_RE = re.compile(
 _NUMERIC_UPDATE_RE = re.compile(
     r'(?:actually|changed?\s+to|now|updated?\s+to|correct(?:ion)?:?|should\s+be)\s+'
     r'(\d[\d,]*(?:\.\d+)?)\s*'
-    r'(users?|employees?|spend|budget|gb|tb|months?|revenue)',
+    r'(users?|employees?|spend|budget|gb|terabytes?|tb|months?|revenue)',
     re.IGNORECASE,
 )
 
@@ -57,6 +59,7 @@ _ASSUMPTION_FIELD_MAP: dict[str, str] = {
     "spend": "current_annual_spend",
     "budget": "current_annual_spend",
     "gb": "data_volume_gb",
+    "terabyte": "data_volume_gb",
     "tb": "data_volume_gb",
     "month": "timeline_months",
     "revenue": "monthly_revenue",
@@ -68,6 +71,13 @@ _ASSUMPTION_AGENT_IMPACT: dict[str, list[str]] = {
     "concurrent_users": ["cost", "roi", "presentation"],
     "current_annual_spend": ["business_value", "roi", "presentation"],
     "monthly_revenue": ["business_value", "roi", "presentation"],
+    "data_volume_gb": ["cost", "roi", "presentation"],
+    "hourly_labor_rate": ["business_value", "roi", "presentation"],
+    "affected_employees": ["business_value", "roi", "presentation"],
+    "timeline_months": ["roi", "presentation"],
+    "adoption_year1": ["roi", "presentation"],
+    "adoption_year2": ["roi", "presentation"],
+    "adoption_year3": ["roi", "presentation"],
 }
 
 # Conversational mode entry regex
@@ -91,8 +101,10 @@ class MAFOrchestrator:
     FAST_RUN_GATES = {"business_value", "architect", "presentation"}
 
     def __init__(self, store=None):
+        self.pm = ProjectManager()
         self.states: dict[str, AgentState] = {}
         self.phases: dict[str, str] = {}
+        self._project_order: list[str] = []  # insertion-order for LRU eviction
         self.workflows: dict[str, object] = {}  # MAF Workflow per project
         self.pending_requests: dict[str, dict] = {}  # project_id → {request_id: ...}
         self._pending_assumptions: dict[str, list] = {}  # project_id → generated assumptions
@@ -102,11 +114,11 @@ class MAFOrchestrator:
         self._store = store  # optional persistence store (CosmosProjectStore)
 
     def _cleanup_project(self, project_id: str) -> None:
-        """Remove workflow and pending requests for completed project.
+        """Remove workflow and transient data for a completed project.
 
         Clears all per-project dicts except states/phases (user may query
-        state after pipeline is done) and _chat_histories (post-completion
-        context).
+        state after pipeline is done).  Chat histories are also cleared
+        since the conversation is complete.
         """
         self.workflows.pop(project_id, None)
         self.pending_requests.pop(project_id, None)
@@ -121,9 +133,7 @@ class MAFOrchestrator:
         return history[-count:]
 
     def _get_lock(self, project_id: str) -> asyncio.Lock:
-        if project_id not in self._locks:
-            self._locks[project_id] = asyncio.Lock()
-        return self._locks[project_id]
+        return self._locks.setdefault(project_id, asyncio.Lock())
 
     def get_state(self, project_id: str) -> AgentState:
         if project_id not in self.states:
@@ -1117,7 +1127,8 @@ class MAFOrchestrator:
             # If so, answer it via LLM with agent context — don't re-run the agent.
             msg_lower = message.strip().lower()
             target_agent, cleaned = self._parse_agent_mention(message)
-            is_question = any(w in msg_lower for w in ("what", "why", "how", "which", "explain", "show", "tell", "?"))
+            _QUESTION_RE = re.compile(r'\b(?:what|why|how|which|explain|show|tell)\b|\?')
+            is_question = bool(_QUESTION_RE.search(msg_lower))
 
             if is_question:
                 # Answer the question using agent context, keep approval gate open

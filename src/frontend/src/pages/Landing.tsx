@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createProject, searchCompany, getCompanyFallback } from '../api';
 import type { AgentStatus, CompanyProfile } from '../types';
-import CompanyCard from '../components/CompanyCard';
+import CompanyCard from '../components/company/CompanyCard';
 
 interface Props {
   agents: AgentStatus[];

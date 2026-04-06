@@ -12,11 +12,11 @@ Covers:
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import pytest
 from agents.state import AgentState, SharedAssumptions
-from maf_orchestrator import MAFOrchestrator, _NUMERIC_UPDATE_RE
+from orchestration.maf_orchestrator import MAFOrchestrator, _NUMERIC_UPDATE_RE
 
 
 # ═══════════════════════════════════════════════════════════════════════════

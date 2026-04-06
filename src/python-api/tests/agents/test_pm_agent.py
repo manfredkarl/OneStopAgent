@@ -9,7 +9,7 @@ from copy import deepcopy
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from agents.pm_agent import (  # noqa: E402
     ProjectManager,

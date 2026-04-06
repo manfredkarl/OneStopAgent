@@ -226,4 +226,4 @@ llm: LLMClient = _LazyLLMProxy()  # type: ignore[assignment]
 
 # Re-export shared JSON parsing utility so callers can use:
 #   from agents.llm import llm, parse_llm_json
-from utils import parse_llm_json  # noqa: F401
+from core.utils import parse_llm_json  # noqa: F401

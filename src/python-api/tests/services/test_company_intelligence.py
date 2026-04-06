@@ -5,7 +5,7 @@ Pure-function tests — no Azure credentials, LLM calls, or web search required.
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from services.company_intelligence import (
     estimate_it_spend,

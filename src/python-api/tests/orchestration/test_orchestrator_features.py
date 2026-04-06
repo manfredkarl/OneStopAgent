@@ -3,7 +3,7 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 class TestAgentMentionParsing:
@@ -11,7 +11,7 @@ class TestAgentMentionParsing:
 
     @pytest.fixture(autouse=True)
     def _orch(self):
-        from maf_orchestrator import MAFOrchestrator
+        from orchestration.maf_orchestrator import MAFOrchestrator
         self.orch = MAFOrchestrator.__new__(MAFOrchestrator)
 
     def test_parse_architect_mention(self):
@@ -53,23 +53,23 @@ class TestConversationMode:
     """Test conversation mode regex matching."""
 
     def test_chat_with_architect(self):
-        from maf_orchestrator import _CHAT_WITH_RE
+        from orchestration.maf_orchestrator import _CHAT_WITH_RE
         match = _CHAT_WITH_RE.search("chat with architect")
         assert match is not None
         assert match.group(1).lower() == "architect"
 
     def test_talk_to_cost(self):
-        from maf_orchestrator import _CHAT_WITH_RE
+        from orchestration.maf_orchestrator import _CHAT_WITH_RE
         match = _CHAT_WITH_RE.search("talk to cost")
         assert match is not None
 
     def test_discuss_with_roi(self):
-        from maf_orchestrator import _CHAT_WITH_RE
+        from orchestration.maf_orchestrator import _CHAT_WITH_RE
         match = _CHAT_WITH_RE.search("discuss with roi")
         assert match is not None
 
     def test_no_match_regular_text(self):
-        from maf_orchestrator import _CHAT_WITH_RE
+        from orchestration.maf_orchestrator import _CHAT_WITH_RE
         match = _CHAT_WITH_RE.search("I want to discuss the architecture")
         assert match is None
 
@@ -79,10 +79,10 @@ class TestApprovalGateKeywords:
 
     @pytest.fixture(autouse=True)
     def _orch(self):
-        from maf_orchestrator import MAFOrchestrator
+        from orchestration.maf_orchestrator import MAFOrchestrator
         self.orch = MAFOrchestrator.__new__(MAFOrchestrator)
 
-    # ── Approval keywords ───────────────────────────────────────────────────
+    # ── Approval keywords───────────────────────────────────────────────────
 
     def test_proceed_is_approval(self):
         assert self.orch._is_approval_keyword("proceed") is True

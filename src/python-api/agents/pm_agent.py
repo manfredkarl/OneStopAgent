@@ -5,7 +5,7 @@ import re
 from enum import Enum
 from agents.llm import llm
 from agents.state import AgentState
-from utils import strip_markdown_fences, parse_leading_int
+from core.utils import strip_markdown_fences, parse_leading_int
 
 logger = logging.getLogger(__name__)
 

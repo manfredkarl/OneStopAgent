@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { AgentStatus } from '../types';
-import { AGENT_REGISTRY } from '../types';
-import { toggleAgent } from '../api';
+import type { AgentStatus } from '../../types';
+import { AGENT_REGISTRY } from '../../types';
+import { toggleAgent } from '../../api';
 
 interface Props {
   projectId: string;

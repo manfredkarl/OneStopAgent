@@ -1,4 +1,4 @@
-import MermaidDiagram from '../components/MermaidDiagram';
+import MermaidDiagram from '../components/dashboard/MermaidDiagram';
 
 const ARCHITECTURE_DIAGRAM = `graph TD
     subgraph Frontend["React SPA (Vite + TypeScript)"]

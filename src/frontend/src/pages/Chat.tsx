@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import type { ChatMessage, AgentStatus, CompanyProfile, Project } from '../types';
 import { getChatHistory, getAgents, sendMessageStreaming, getProject } from '../api';
-import ChatThread from '../components/ChatThread';
-import ChatInput from '../components/ChatInput';
-import CompanyCard from '../components/CompanyCard';
-import CompanyDetailModal from '../components/CompanyDetailModal';
+import ChatThread from '../components/chat/ChatThread';
+import ChatInput from '../components/chat/ChatInput';
+import CompanyCard from '../components/company/CompanyCard';
+import CompanyDetailModal from '../components/company/CompanyDetailModal';
 
 interface Props {
   agents: AgentStatus[];

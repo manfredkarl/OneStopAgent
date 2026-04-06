@@ -1,4 +1,4 @@
-import type { PlanStep } from '../types';
+import type { PlanStep } from '../../types';
 
 interface Props {
   steps: PlanStep[];

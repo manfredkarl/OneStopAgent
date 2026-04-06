@@ -1,4 +1,4 @@
-import type { CompanyProfile } from '../types';
+import type { CompanyProfile } from '../../types';
 
 interface Props {
   profile: CompanyProfile;

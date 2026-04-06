@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from agents.state import AgentState
-from utils import strip_markdown_fences
+from core.utils import strip_markdown_fences
 
 logger = logging.getLogger(__name__)
 

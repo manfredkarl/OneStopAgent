@@ -24,9 +24,9 @@ from services.company_intelligence import (
     FALLBACK_PROFILES,
     search_and_extract_company,
 )
-from maf_orchestrator import MAFOrchestrator
-from telemetry import setup_telemetry
-from workflow import create_pipeline_workflow
+from orchestration.maf_orchestrator import MAFOrchestrator
+from core.telemetry import setup_telemetry
+from orchestration.workflow import create_pipeline_workflow
 
 setup_telemetry()
 

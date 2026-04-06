@@ -15,7 +15,7 @@ sys.modules.setdefault("services.mcp", MagicMock())
 sys.modules.setdefault("services.web_search", MagicMock())
 sys.modules.setdefault("data.knowledge_base", MagicMock())
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from agents.architect_agent import ArchitectAgent  # noqa: E402
 

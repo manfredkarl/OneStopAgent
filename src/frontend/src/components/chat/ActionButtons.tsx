@@ -1,4 +1,4 @@
-import type { ActionItem } from '../types';
+import type { ActionItem } from '../../types';
 
 interface Props {
   actions: ActionItem[];
