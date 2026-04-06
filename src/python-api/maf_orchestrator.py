@@ -1060,14 +1060,23 @@ class MAFOrchestrator:
                 yield msg
 
     _APPROVAL_KEYWORDS = frozenset({
-        "proceed", "skip", "refine", "yes", "ok", "continue",
-        "skip this", "next", "redo", "again", "retry",
+        "proceed", "skip", "yes", "ok", "continue",
+        "skip this", "next",
+    })
+
+    _REFINE_KEYWORDS = frozenset({
+        "refine", "redo", "again", "retry",
     })
 
     @classmethod
     def _is_approval_keyword(cls, message: str) -> bool:
         """Check if message is a known approval action keyword."""
         return message.strip().lower() in cls._APPROVAL_KEYWORDS
+
+    @classmethod
+    def _is_refine_keyword(cls, message: str) -> bool:
+        """Check if message is a bare refine keyword (no details)."""
+        return message.strip().lower() in cls._REFINE_KEYWORDS
 
     async def _resume_workflow(
         self, project_id: str, state: AgentState, message: str,
@@ -1087,17 +1096,45 @@ class MAFOrchestrator:
         first_request_data = pending[first_req_id]
 
         # Suggestion routing: if user responds with free-text (not an approval
-        # keyword) while an approval gate is active, treat it as refinement
-        # feedback for the current agent and re-run it.
+        # keyword) while an approval gate is active, check intent.
         if (
             isinstance(first_request_data, ApprovalRequest)
             and not self._is_approval_keyword(message)
         ):
             agent_step = first_request_data.step
+
+            # Bare "refine" button clicked — ask what to change before re-running
+            if self._is_refine_keyword(message):
+                agent_label = AGENT_INFO.get(agent_step, {"name": agent_step})["name"]
+                yield self._msg(
+                    project_id,
+                    f"What would you like to change about the **{agent_label}** output? Describe your feedback and I'll refine it.",
+                    {"type": "pm_response"},
+                )
+                return  # Keep approval gate open — wait for actual feedback
+
+            # Check if this is a question (e.g., "@business_value what were the assumptions?")
+            # If so, answer it via LLM with agent context — don't re-run the agent.
+            msg_lower = message.strip().lower()
+            target_agent, cleaned = self._parse_agent_mention(message)
+            is_question = any(w in msg_lower for w in ("what", "why", "how", "which", "explain", "show", "tell", "?"))
+
+            if is_question:
+                # Answer the question using agent context, keep approval gate open
+                context = state.to_context_string()
+                agent_label = AGENT_INFO.get(target_agent or agent_step, {"name": agent_step})["name"]
+                try:
+                    answer = await asyncio.wait_for(llm.ainvoke([
+                        {"role": "system", "content": f"You are the {agent_label} specialist. Answer the user's question based on the project context. Be specific and concise."},
+                        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {cleaned or message}"},
+                    ]), timeout=30)
+                    yield self._msg(project_id, answer.content, {"type": "agent_conversation", "agent": target_agent or agent_step})
+                except asyncio.TimeoutError:
+                    yield self._msg(project_id, "Sorry, I couldn't process that question right now. Please try again.")
+                return  # Keep approval gate open — don't consume the pending request
+
+            # Specific feedback provided — treat as refinement and re-run
             state.clarifications += f"\nRefinement for {agent_step}: {message}"
-            # Translate free-text feedback into a "refine" action so the
-            # workflow's response_handler records the feedback and re-sends
-            # the pipeline message to re-run the same step.
             message = "refine"
             yield self._msg(
                 project_id,
