@@ -241,3 +241,47 @@ class TestSecurityGuards:
         assert client.get("/api/projects/any-id/chat").status_code == 400
         # GET /api/projects/{id}/agents
         assert client.get("/api/projects/any-id/agents").status_code == 400
+        # GET /api/projects/{id}/iterations
+        assert client.get("/api/projects/any-id/iterations").status_code == 400
+
+    def test_iterations_wrong_user_gets_404(self, client):
+        """Iterations endpoint is user-scoped — another user gets 404."""
+        pid = _create_project(client).json()["projectId"]
+        resp = client.get(
+            f"/api/projects/{pid}/iterations",
+            headers={"x-user-id": "other-user"},
+        )
+        assert resp.status_code == 404
+
+    def test_pptx_download_wrong_user_gets_404(self, client):
+        """PPTX download is user-scoped — another user gets 404."""
+        pid = _create_project(client).json()["projectId"]
+        resp = client.get(
+            f"/api/projects/{pid}/export/pptx",
+            headers={"x-user-id": "other-user"},
+        )
+        assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Iteration History
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestIterationHistory:
+    def test_iterations_empty_for_new_project(self, client):
+        pid = _create_project(client).json()["projectId"]
+        resp = client.get(f"/api/projects/{pid}/iterations", headers=USER_HEADER)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "iterations" in data
+        assert data["iterations"] == []
+
+    def test_iterations_requires_user_header(self, client):
+        pid = _create_project(client).json()["projectId"]
+        resp = client.get(f"/api/projects/{pid}/iterations")
+        assert resp.status_code == 400
+
+    def test_iterations_not_found_for_unknown_project(self, client):
+        resp = client.get("/api/projects/nonexistent-id/iterations", headers=USER_HEADER)
+        assert resp.status_code == 404
