@@ -344,6 +344,9 @@ async def test_reset():
 @app.get("/api/projects/{project_id}/iterations")
 async def get_iterations(project_id: str, x_user_id: str = Depends(_get_user_id)):
     """Return the iteration history (before/after snapshots) for a project."""
+    project = await store.get_project(project_id, x_user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     state = orchestrator.get_state(project_id)
     return {"iterations": state.iteration_history if state else []}
 

@@ -664,7 +664,7 @@ def _query_api_with_term(service_name: str, region: str, reservation_term: str) 
     api_name = SERVICE_NAME_MAP.get(service_name, service_name)
     filter_str = (
         f"serviceName eq '{api_name}' and armRegionName eq '{region}' "
-        f"and reservationTerm eq '{reservation_term}'"
+        f"and priceType eq 'Reservation'"
     )
     try:
         resp = _http_client.get(
@@ -673,10 +673,12 @@ def _query_api_with_term(service_name: str, region: str, reservation_term: str) 
         )
         if resp.status_code == 200:
             items = resp.json().get("Items", [])
-            # Find the cheapest non-zero reservation price
-            non_zero = [i for i in items if i.get("retailPrice", 0) > 0]
-            if non_zero:
-                best = min(non_zero, key=lambda i: i["retailPrice"])
+            # Filter by reservation term in results (not supported as API filter)
+            matching = [i for i in items
+                        if i.get("reservationTerm") == reservation_term
+                        and i.get("retailPrice", 0) > 0]
+            if matching:
+                best = min(matching, key=lambda i: i["retailPrice"])
                 return {
                     "price": best["retailPrice"],
                     "unit": best.get("unitOfMeasure", "1 Month"),

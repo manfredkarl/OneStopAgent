@@ -230,19 +230,19 @@ class MAFOrchestrator:
                 state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                 state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
-            for agent_name in agents_to_rerun:
-                if agent_name == "cost" and "phase" in state.costs:
-                    del state.costs["phase"]
-                if agent_name == "business_value" and "phase" in state.business_value:
-                    del state.business_value["phase"]
-                field = _AGENT_STATE_FIELDS.get(agent_name)
-                if field:
-                    if field == "presentation_path":
-                        state.presentation_path = ""
-                    elif field == "architecture" and "architect" not in rerun_set:
-                        pass
-                    else:
-                        setattr(state, field, {})
+                for agent_name in agents_to_rerun:
+                    if agent_name == "cost" and "phase" in state.costs:
+                        del state.costs["phase"]
+                    if agent_name == "business_value" and "phase" in state.business_value:
+                        del state.business_value["phase"]
+                    field = _AGENT_STATE_FIELDS.get(agent_name)
+                    if field:
+                        if field == "presentation_path":
+                            state.presentation_path = ""
+                        elif field == "architecture" and "architect" not in rerun_set:
+                            pass
+                        else:
+                            setattr(state, field, {})
 
             names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
             yield self._msg(project_id, f"Targeting {names[0]} ({', '.join(names)}) with your feedback...")
@@ -494,17 +494,17 @@ class MAFOrchestrator:
                     state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
                     state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                     state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
-                for agent_name in rerun_set:
-                    if agent_name == "cost" and "phase" in state.costs:
-                        del state.costs["phase"]
-                    if agent_name == "business_value" and "phase" in state.business_value:
-                        del state.business_value["phase"]
-                    field_key = _AGENT_STATE_FIELDS.get(agent_name)
-                    if field_key:
-                        if field_key == "presentation_path":
-                            state.presentation_path = ""
-                        else:
-                            setattr(state, field_key, {})
+                    for agent_name in rerun_set:
+                        if agent_name == "cost" and "phase" in state.costs:
+                            del state.costs["phase"]
+                        if agent_name == "business_value" and "phase" in state.business_value:
+                            del state.business_value["phase"]
+                        field_key = _AGENT_STATE_FIELDS.get(agent_name)
+                        if field_key:
+                            if field_key == "presentation_path":
+                                state.presentation_path = ""
+                            else:
+                                setattr(state, field_key, {})
 
                 ordered = [a for a in self._PIPELINE_ORDER if a in rerun_set]
                 names = [AGENT_INFO.get(a, {"name": a})["name"] for a in ordered]
@@ -552,23 +552,23 @@ class MAFOrchestrator:
                     state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                     state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
-                AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
-                for agent_name in agents_to_rerun:
-                    # Clear stale phase markers
-                    if agent_name == "cost" and "phase" in state.costs:
-                        del state.costs["phase"]
-                    if agent_name == "business_value" and "phase" in state.business_value:
-                        del state.business_value["phase"]
-                    # Reset output state — but preserve architecture when cost re-runs without architect
-                    field = AGENT_STATE_FIELDS.get(agent_name)
-                    if field:
-                        if field == "presentation_path":
-                            state.presentation_path = ""
-                        elif field == "architecture" and "architect" not in rerun_set:
-                            # Cost agent needs the existing architecture components — don't clear it
-                            pass
-                        else:
-                            setattr(state, field, {})
+                    AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
+                    for agent_name in agents_to_rerun:
+                        # Clear stale phase markers
+                        if agent_name == "cost" and "phase" in state.costs:
+                            del state.costs["phase"]
+                        if agent_name == "business_value" and "phase" in state.business_value:
+                            del state.business_value["phase"]
+                        # Reset output state — but preserve architecture when cost re-runs without architect
+                        field = AGENT_STATE_FIELDS.get(agent_name)
+                        if field:
+                            if field == "presentation_path":
+                                state.presentation_path = ""
+                            elif field == "architecture" and "architect" not in rerun_set:
+                                # Cost agent needs the existing architecture components — don't clear it
+                                pass
+                            else:
+                                setattr(state, field, {})
 
                 names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
                 if not names:
@@ -606,25 +606,25 @@ class MAFOrchestrator:
                     state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
                     state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
 
-                # H4: Clear agent-specific phase markers to avoid stale "needs_input"
-                for agent_name in agents_to_rerun:
-                    if agent_name == "cost" and "phase" in state.costs:
-                        del state.costs["phase"]
-                    if agent_name == "business_value" and "phase" in state.business_value:
-                        del state.business_value["phase"]
+                    # H4: Clear agent-specific phase markers to avoid stale "needs_input"
+                    for agent_name in agents_to_rerun:
+                        if agent_name == "cost" and "phase" in state.costs:
+                            del state.costs["phase"]
+                        if agent_name == "business_value" and "phase" in state.business_value:
+                            del state.business_value["phase"]
 
-                # H5: Reset agent output dicts so old results don't mix with new
-                AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
-                for agent_name in agents_to_rerun:
-                    field = AGENT_STATE_FIELDS.get(agent_name)
-                    if field:
-                        if field == "presentation_path":
-                            state.presentation_path = ""
-                        elif field == "architecture" and "architect" not in rerun_set:
-                            # Cost agent needs the existing architecture components — don't clear it
-                            pass
-                        else:
-                            setattr(state, field, {})
+                    # H5: Reset agent output dicts so old results don't mix with new
+                    AGENT_STATE_FIELDS = _AGENT_STATE_FIELDS
+                    for agent_name in agents_to_rerun:
+                        field = AGENT_STATE_FIELDS.get(agent_name)
+                        if field:
+                            if field == "presentation_path":
+                                state.presentation_path = ""
+                            elif field == "architecture" and "architect" not in rerun_set:
+                                # Cost agent needs the existing architecture components — don't clear it
+                                pass
+                            else:
+                                setattr(state, field, {})
 
                 names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
                 yield self._msg(project_id, f"Re-running {len(agents_to_rerun)} agents ({', '.join(names)}) with your feedback...")
@@ -963,22 +963,26 @@ class MAFOrchestrator:
 
         return "\n".join(parts)
 
-    async def _drain_queue(self, project_id: str, state: AgentState):
-        """Process queued messages after a step completes."""
+    async def _drain_queue(self, project_id: str, state: AgentState) -> list[str]:
+        """Process queued messages. Returns list of agents needing re-run."""
         if not state.queued_messages:
-            return
+            return []
+
         queued = state.queued_messages.copy()
         state.queued_messages.clear()
+        agents_to_rerun: set[str] = set()
 
         for item in queued:
             message = item["message"]
             state.clarifications += f"\nQueued feedback: {message}"
             if "iteration" in item.get("intents", []):
                 agents = item.get("meta", {}).get("agents_to_rerun", [])
-                if agents:
-                    for agent in agents:
-                        if agent in state.completed_steps:
-                            state.completed_steps.remove(agent)
+                for agent in agents:
+                    if agent in state.completed_steps:
+                        state.completed_steps.remove(agent)
+                        agents_to_rerun.add(agent)
+
+        return list(agents_to_rerun)
 
     async def _run_workflow(
         self, project_id: str, state: AgentState, active_agents: list[str],
@@ -1118,7 +1122,9 @@ class MAFOrchestrator:
                                 agent_id=agent_id, content=content, metadata=metadata,
                             )
                             # Drain queued messages after each agent completes
-                            await self._drain_queue(project_id, self.get_state(project_id))
+                            drained_agents = await self._drain_queue(project_id, self.get_state(project_id))
+                            if drained_agents:
+                                logger.info("Drain queue flagged agents for re-run: %s", drained_agents)
                             # Persist state after each agent completes
                             await self._persist_state(project_id)
 

@@ -48,6 +48,26 @@ class ProjectStore:
         with self._lock:
             return self.chat_histories.get(project_id, [])
 
+    async def save_state(self, project_id: str, state) -> None:
+        """No-op for in-memory store — state is already in memory."""
+        pass
+
+    async def load_state(self, project_id: str):
+        """In-memory store doesn't persist state separately."""
+        return None
+
+    async def save_checkpoint(self, project_id: str, step_name: str, state) -> None:
+        """No-op for in-memory store — no checkpoint persistence."""
+        pass
+
+    async def list_checkpoints(self, project_id: str) -> list:
+        """In-memory store has no persisted checkpoints."""
+        return []
+
+    async def restore_checkpoint(self, project_id: str, checkpoint_id: str):
+        """In-memory store cannot restore checkpoints."""
+        return None
+
     async def clear(self) -> None:
         """Reset all data (for testing)."""
         with self._lock:
