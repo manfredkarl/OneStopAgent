@@ -79,7 +79,7 @@ REQUIRED_STEPS = {"architect"}  # Pipeline cannot continue without these
 PIPELINE_TIMEOUT_SECONDS = 600  # 10 minutes max for entire pipeline
 
 # Response classification for approval gates
-ADVANCE_RESPONSES = frozenset({"proceed", "yes", "ok", "continue", "approved", "looks good", ""})
+ADVANCE_RESPONSES = frozenset({"proceed", "yes", "ok", "continue", "approved", "looks good"})
 SKIP_RESPONSES = frozenset({"skip", "skip this", "next"})
 
 # Map step names to their AgentState output field (used when clearing for re-runs)
@@ -107,11 +107,14 @@ class PipelineExecutor(Executor):
     """Base class for pipeline step executors."""
 
     def __init__(self, id: str, step_name: str,
+                 pm: "ProjectManager | None" = None,
+                 timeout: int = 300,
                  fast_run_gates: set[str] | None = None,
                  required_steps: set[str] | None = None):
         super().__init__(id=id)
         self.step_name = step_name
-        self.pm = ProjectManager()
+        self.pm = pm or ProjectManager()
+        self._timeout = timeout
         self._fast_run_gates = fast_run_gates if fast_run_gates is not None else FAST_RUN_GATES
         self._required_steps = required_steps if required_steps is not None else REQUIRED_STEPS
 
@@ -145,17 +148,26 @@ class PipelineExecutor(Executor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
             state.mark_step_completed(self.step_name)
 
             output_text = self.pm.format_agent_output(self.step_name, state)
             summary = self.pm.approval_summary(self.step_name, state)
 
-            await ctx.yield_output({
+            result_payload = {
                 "type": "agent_result", "step": self.step_name,
                 "content": output_text,
-            })
+            }
+            # Include step-specific data so the UI updates correctly
+            if self.step_name == "roi":
+                dashboard = state.roi.get("dashboard")
+                if dashboard:
+                    result_payload["dashboard"] = dashboard
+            elif self.step_name == "presentation" and state.presentation_path:
+                result_payload["presentation_path"] = state.presentation_path
+
+            await ctx.yield_output(result_payload)
             # Request approval again (loops until user approves or skips)
             await ctx.request_info(
                 request_data=ApprovalRequest(step=self.step_name, summary=summary),
@@ -181,9 +193,9 @@ class PipelineExecutor(Executor):
 # ---------------------------------------------------------------------------
 
 class ArchitectExecutor(PipelineExecutor):
-    def __init__(self, **kwargs):
+    def __init__(self, agent: ArchitectAgent | None = None, **kwargs):
         super().__init__(id="architect_executor", step_name="architect", **kwargs)
-        self.agent = ArchitectAgent()
+        self.agent = agent or ArchitectAgent()
 
     @handler
     async def run_architect(
@@ -214,7 +226,7 @@ class ArchitectExecutor(PipelineExecutor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
             state.mark_step_completed(self.step_name)
 
@@ -298,7 +310,7 @@ class CostExecutor(PipelineExecutor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
 
             # Check for two-phase input needed
@@ -375,7 +387,7 @@ class CostExecutor(PipelineExecutor):
             try:
                 await asyncio.wait_for(
                     loop.run_in_executor(None, self.agent.run, state),
-                    timeout=300,
+                    timeout=self._timeout,
                 )
                 state.mark_step_completed(self.step_name)
             except Exception as e:
@@ -418,10 +430,10 @@ class CostExecutor(PipelineExecutor):
 # ---------------------------------------------------------------------------
 
 class BusinessValueExecutor(PipelineExecutor):
-    def __init__(self, **kwargs):
+    def __init__(self, architect_agent: ArchitectAgent | None = None, **kwargs):
         super().__init__(id="bv_executor", step_name="business_value", **kwargs)
         self.agent = BusinessValueAgent()
-        self._architect_agent = ArchitectAgent()
+        self._architect_agent = architect_agent or ArchitectAgent()
 
     @handler
     async def run_bv(
@@ -449,7 +461,7 @@ class BusinessValueExecutor(PipelineExecutor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
 
             if state.business_value.get("phase") == "needs_input":
@@ -506,7 +518,7 @@ class BusinessValueExecutor(PipelineExecutor):
         await ctx.yield_output({"type": "agent_start", "step": "architect", "msg_id": str(uuid.uuid4())})
         loop = asyncio.get_running_loop()
         try:
-            await asyncio.wait_for(loop.run_in_executor(None, self._architect_agent.run, state), timeout=300)
+            await asyncio.wait_for(loop.run_in_executor(None, self._architect_agent.run, state), timeout=self._timeout)
             state.mark_step_completed("architect")
             output_text = self.pm.format_agent_output("architect", state)
             summary = self.pm.approval_summary("architect", state)
@@ -537,7 +549,7 @@ class BusinessValueExecutor(PipelineExecutor):
         await ctx.yield_output({"type": "agent_start", "step": "business_value", "msg_id": str(uuid.uuid4())})
         bv_error: Exception | None = None
         try:
-            await asyncio.wait_for(loop.run_in_executor(None, self.agent.run, state), timeout=300)
+            await asyncio.wait_for(loop.run_in_executor(None, self.agent.run, state), timeout=self._timeout)
         except Exception as e:
             bv_error = e
 
@@ -618,7 +630,7 @@ class BusinessValueExecutor(PipelineExecutor):
             try:
                 await asyncio.wait_for(
                     loop.run_in_executor(None, self.agent.run, state),
-                    timeout=300,
+                    timeout=self._timeout,
                 )
                 state.mark_step_completed(self.step_name)
             except Exception as e:
@@ -705,7 +717,7 @@ class ROIExecutor(PipelineExecutor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
             state.mark_step_completed(self.step_name)
 
@@ -789,7 +801,7 @@ class PresentationExecutor(PipelineExecutor):
         try:
             await asyncio.wait_for(
                 loop.run_in_executor(None, self.agent.run, state),
-                timeout=300,
+                timeout=self._timeout,
             )
             state.mark_step_completed(self.step_name)
 
@@ -866,7 +878,7 @@ class PresentationExecutor(PipelineExecutor):
             try:
                 await asyncio.wait_for(
                     loop.run_in_executor(None, self.agent.run, state),
-                    timeout=300,
+                    timeout=self._timeout,
                 )
                 state.mark_step_completed(self.step_name)
                 output_text = self.pm.format_agent_output(self.step_name, state)
@@ -922,11 +934,18 @@ def create_pipeline_workflow(
     if required_steps is not None:
         executor_kwargs["required_steps"] = required_steps
 
-    bv = BusinessValueExecutor(**executor_kwargs)
-    architect = ArchitectExecutor(**executor_kwargs)
+    # Share a single ProjectManager across all executors (stateless, safe to reuse)
+    pm = ProjectManager()
+    executor_kwargs["pm"] = pm
+
+    # Share one ArchitectAgent between BV (parallel path) and Architect executors
+    architect_agent = ArchitectAgent()
+
+    bv = BusinessValueExecutor(architect_agent=architect_agent, **executor_kwargs)
+    architect = ArchitectExecutor(agent=architect_agent, **executor_kwargs)
     cost = CostExecutor(**executor_kwargs)
     roi = ROIExecutor(**executor_kwargs)
-    presentation = PresentationExecutor(**executor_kwargs)
+    presentation = PresentationExecutor(timeout=480, **executor_kwargs)
 
     workflow = (
         WorkflowBuilder(
