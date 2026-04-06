@@ -535,6 +535,62 @@ class ROIAgent:
 
         return bv_confidence, warnings
 
+    # ── Estimate impact range from available data ────────────────────
+    def _estimate_impact_range(self, state: AgentState, annual_cost: float,
+                               drivers: list[dict]) -> dict:
+        """Estimate annual impact range when BV agent didn't compute one.
+
+        Uses company profile (revenue, employees), shared assumptions,
+        or falls back to a cost-based multiplier.
+        """
+        revenue = 0.0
+        employees = 0.0
+
+        # Pull from company profile
+        if state.company_profile:
+            revenue = float(state.company_profile.get("annualRevenue") or 0)
+            employees = float(state.company_profile.get("employeeCount") or 0)
+
+        # Override with shared assumptions if available
+        if state.sa.monthly_revenue:
+            revenue = state.sa.monthly_revenue * 12
+        if state.sa.affected_employees:
+            employees = state.sa.affected_employees
+        elif state.sa.total_users and state.sa.total_users < 50000:
+            employees = state.sa.total_users
+
+        hourly_rate = state.sa.hourly_labor_rate or 75.0
+
+        # Try to build estimate from available data
+        estimated_low = 0.0
+        estimated_high = 0.0
+
+        if employees > 0:
+            # Productivity savings: 2-5 hours/week saved per affected employee
+            weekly_savings_low = employees * 2 * hourly_rate
+            weekly_savings_high = employees * 5 * hourly_rate
+            annual_prod_low = weekly_savings_low * 50  # 50 work weeks
+            annual_prod_high = weekly_savings_high * 50
+            estimated_low += annual_prod_low
+            estimated_high += annual_prod_high
+
+        if revenue > 0:
+            # Revenue uplift: 0.5-2% revenue improvement
+            estimated_low += revenue * 0.005
+            estimated_high += revenue * 0.02
+
+        # If we have driver names but no numbers, use cost multiplier
+        if estimated_low <= 0:
+            num_drivers = max(len(drivers), 1)
+            estimated_low = annual_cost * (1.0 + 0.5 * num_drivers)
+            estimated_high = annual_cost * (1.5 + 0.5 * num_drivers)
+
+        return {
+            "low": round(estimated_low),
+            "high": round(estimated_high),
+            "is_estimated": True,
+        }
+
     # ── Main entry point ─────────────────────────────────────────────
     def run(self, state: AgentState) -> AgentState:
         annual_cost = state.costs.get("estimate", {}).get("totalAnnual", 0)
@@ -551,26 +607,18 @@ class ROIAgent:
             return state
 
         if not impact_range or not isinstance(impact_range, dict):
-            driver_names = [d.get("name", "") for d in drivers]
-            state.roi = self._needs_info(
-                reason="Value drivers identified but no dollar range computed yet.",
-                questions=assumptions if assumptions else [
-                    "Could you share approximate headcount, revenue, or current spend so we can estimate dollar impact?"
-                ],
-                qualitative=driver_names,
-            )
-            return state
+            # Estimate impact range from available data instead of giving up
+            impact_range = self._estimate_impact_range(state, annual_cost, drivers)
+            logger.info("ROI: estimated impact range from available data: %s", impact_range)
 
         val_low = float(impact_range.get("low") or 0)
         val_high = float(impact_range.get("high") or 0)
 
         if val_low <= 0 and val_high <= 0:
-            state.roi = self._needs_info(
-                reason="Impact range is zero — need more inputs.",
-                questions=assumptions or ["Please share headcount or revenue figures to refine."],
-                qualitative=[d.get("name", "") for d in drivers],
-            )
-            return state
+            # Last resort: use cost multiplier (typical Azure ROI is 2-4x)
+            val_low = round(annual_cost * 1.5)
+            val_high = round(annual_cost * 3.0)
+            logger.info("ROI: using cost-multiplier fallback: low=%s high=%s", val_low, val_high)
 
         # ── Core ROI math ────────────────────────────────────────────
         val_mid = (val_low + val_high) / 2

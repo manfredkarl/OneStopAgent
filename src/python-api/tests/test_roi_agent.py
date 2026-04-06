@@ -144,16 +144,17 @@ class TestROICalculation:
         assert result.roi.get("needs_info") is not None
 
     def test_roi_needs_info_when_no_impact_range(self, agent):
-        """ROI agent should request info when BV impact range is missing."""
+        """ROI agent should estimate impact range when BV data is missing."""
         state = AgentState(user_input="test")
         state.business_value = {"drivers": [{"name": "Test"}]}
         state.costs = {"estimate": {"totalAnnual": 100000, "totalMonthly": 8333}}
         result = agent.run(state)
-        needs = result.roi.get("needs_info")
-        assert needs is not None
+        # Should produce a result (estimated) instead of needs_info
+        assert result.roi.get("needs_info") is None
+        assert result.roi.get("dashboard") is not None or result.roi.get("annual_cost", 0) > 0
 
     def test_roi_handles_zero_impact_range(self, agent):
-        """Zero impact range should trigger needs_info, not division by zero."""
+        """Zero impact range should use cost-multiplier fallback, not division by zero."""
         state = AgentState(user_input="test")
         state.business_value = {
             "drivers": [],
@@ -161,7 +162,8 @@ class TestROICalculation:
         }
         state.costs = {"estimate": {"totalAnnual": 100000, "totalMonthly": 8333}}
         result = agent.run(state)
-        assert result.roi.get("needs_info") is not None
+        # Should produce estimated result via fallback, no crash
+        assert result.roi.get("needs_info") is None
 
     def test_roi_extreme_values_are_flagged(self, agent, state_ready):
         """Extremely high ROI should set roi_capped or produce a display text."""

@@ -277,13 +277,20 @@ class MAFOrchestrator:
                 yield self._msg(project_id, diff_summary, {"type": "iteration_diff"})
             return
         elif target_agent and phase == "executing":
-            state.queued_messages.append({
-                "message": cleaned_message,
-                "intents": ["iteration"],
-                "meta": {"agents_to_rerun": self._retry_agents_for(target_agent)},
-            })
-            yield self._msg(project_id, f"📝 Noted for {target_agent} — will apply after current step.")
-            return
+            # Only queue if an agent is actively running (no pending approval gate)
+            pending = self.pending_requests.get(project_id, {})
+            if pending:
+                # Approval gate active — treat @mention as feedback for the current step
+                # Fall through to the phase handler which will route via _resume_workflow
+                pass
+            else:
+                state.queued_messages.append({
+                    "message": cleaned_message,
+                    "intents": ["iteration"],
+                    "meta": {"agents_to_rerun": self._retry_agents_for(target_agent)},
+                })
+                yield self._msg(project_id, f"📝 Noted for {target_agent} — will apply after current step.")
+                return
 
         # ── Phase: new ──────────────────────────────────────────────
         if phase == "new":
