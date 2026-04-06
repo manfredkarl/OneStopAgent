@@ -264,10 +264,10 @@
 | `/api/projects/{id}/chat` | GET | Returns chat history |
 | `/api/projects/{id}/chat` | POST | Sends message, returns SSE stream |
 | `/api/projects/{id}/agents` | GET | Returns agent statuses |
-| `/api/projects/{id}/agents` | PATCH | Toggles agent active state |
+| `/api/projects/{id}/agents/{agent_id}` | PATCH | Toggles individual agent active state |
 | `/api/projects/{id}/iterations` | GET | Returns iteration history (user-scoped) |
 | `/api/company/search?q=X` | GET | Returns company search results |
-| `/api/download/{id}` | GET | Downloads PPTX file |
+| `/api/projects/{id}/export/pptx` | GET | Downloads PPTX file |
 
 ### Security Checks
 - [ ] All endpoints require `x-user-id` header (400 without)
