@@ -9,6 +9,7 @@ needs zero changes.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import AsyncGenerator
 
@@ -33,6 +34,12 @@ _AGENT_STATE_FIELDS = {
     "presentation": "presentation_path",
 }
 
+# @mention regex for targeting specific agents
+_AGENT_MENTION_RE = re.compile(
+    r'@(architect|cost|business[_\s]?value|bv|roi|presentation|pm)\b',
+    re.IGNORECASE,
+)
+
 
 class MAFOrchestrator:
     """Phase-based orchestrator backed by Microsoft Agent Framework Workflow.
@@ -47,13 +54,15 @@ class MAFOrchestrator:
 
     FAST_RUN_GATES = {"business_value", "architect", "presentation"}
 
-    def __init__(self):
+    def __init__(self, store=None):
         self.states: dict[str, AgentState] = {}
         self.phases: dict[str, str] = {}
         self.workflows: dict[str, object] = {}  # MAF Workflow per project
         self.pending_requests: dict[str, dict] = {}  # project_id → {request_id: ...}
         self._pending_assumptions: dict[str, list] = {}  # project_id → generated assumptions
         self._locks: dict[str, asyncio.Lock] = {}  # per-project concurrency guard (for future use)
+        self._chat_histories: dict[str, list[str]] = {}  # project_id → user messages
+        self._store = store  # optional persistence store (CosmosProjectStore)
 
     def _cleanup_project(self, project_id: str) -> None:
         """Remove workflow and pending requests for completed project."""
@@ -61,6 +70,12 @@ class MAFOrchestrator:
         self.pending_requests.pop(project_id, None)
         self._pending_assumptions.pop(project_id, None)
         self._locks.pop(project_id, None)
+        # Keep _chat_histories for post-completion context
+
+    def _recent_messages(self, project_id: str, count: int = 3) -> list[str]:
+        """Return the last ``count`` user messages for a project."""
+        history = self._chat_histories.get(project_id, [])
+        return history[-count:]
 
     def _get_lock(self, project_id: str) -> asyncio.Lock:
         if project_id not in self._locks:
@@ -71,6 +86,14 @@ class MAFOrchestrator:
         if project_id not in self.states:
             self.states[project_id] = AgentState()
         return self.states[project_id]
+
+    async def _persist_state(self, project_id: str) -> None:
+        """Save agent state to Cosmos DB if a store is configured."""
+        if self._store and hasattr(self._store, "save_state"):
+            try:
+                await self._store.save_state(project_id, self.get_state(project_id))
+            except Exception:
+                logger.warning("Failed to persist state for %s", project_id, exc_info=True)
 
     def _msg(self, project_id: str, content: str, metadata: dict | None = None,
              agent_id: str = "pm") -> ChatMessage:
@@ -87,17 +110,70 @@ class MAFOrchestrator:
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
 
+        # Track user messages for context-aware classification
+        self._chat_histories.setdefault(project_id, []).append(message)
+
         # Attach company profile to state on first message (phase == "new")
         if phase == "new" and company_profile and not state.company_profile:
             state.company_profile = company_profile
 
         try:
-            intent, meta = await asyncio.wait_for(
-                pm.intent_interpreter.aclassify(message), timeout=30
+            intents, meta = await asyncio.wait_for(
+                pm.intent_interpreter.aclassify(
+                    message,
+                    phase=phase,
+                    current_step=state.current_step,
+                    recent_messages=self._recent_messages(project_id),
+                ),
+                timeout=30,
             )
         except asyncio.TimeoutError:
-            logger.warning("Intent classification timed out, defaulting to INPUT")
-            intent, meta = Intent.INPUT, {}
+            logger.warning("Intent classification timed out, defaulting to [INPUT]")
+            intents, meta = [Intent.INPUT], {}
+
+        # Primary intent is the first in the array
+        intent = intents[0]
+
+        # ── @agent mention routing ──────────────────────────────────
+        target_agent, cleaned_message = self._parse_agent_mention(message)
+        if target_agent and phase == "done":
+            agents_to_rerun = self._retry_agents_for(target_agent)
+            state.clarifications += f"\nDirect request for {target_agent}: {cleaned_message}"
+
+            rerun_set = set(agents_to_rerun)
+            with state._lock:
+                state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
+                state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
+                state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+
+            for agent_name in agents_to_rerun:
+                if agent_name == "cost" and "phase" in state.costs:
+                    del state.costs["phase"]
+                if agent_name == "business_value" and "phase" in state.business_value:
+                    del state.business_value["phase"]
+                field = _AGENT_STATE_FIELDS.get(agent_name)
+                if field:
+                    if field == "presentation_path":
+                        state.presentation_path = ""
+                    elif field == "architecture" and "architect" not in rerun_set:
+                        pass
+                    else:
+                        setattr(state, field, {})
+
+            names = [AGENT_INFO.get(a, {"name": a})["name"] for a in agents_to_rerun]
+            yield self._msg(project_id, f"Targeting {names[0]} ({', '.join(names)}) with your feedback...")
+            self.phases[project_id] = "executing"
+            async for msg in self._run_workflow(project_id, state, list(rerun_set)):
+                yield msg
+            return
+        elif target_agent and phase == "executing":
+            state.queued_messages.append({
+                "message": cleaned_message,
+                "intents": ["iteration"],
+                "meta": {"agents_to_rerun": self._retry_agents_for(target_agent)},
+            })
+            yield self._msg(project_id, f"📝 Noted for {target_agent} — will apply after current step.")
+            return
 
         # ── Phase: new ──────────────────────────────────────────────
         if phase == "new":
@@ -268,7 +344,8 @@ class MAFOrchestrator:
                 # Feed user response to the paused workflow
                 async for msg in self._resume_workflow(project_id, state, message, pending):
                     yield msg
-            elif intent == Intent.QUESTION:
+            elif Intent.QUESTION in intents:
+                # Answer the question first
                 try:
                     follow_up = await asyncio.wait_for(llm.ainvoke([
                         {"role": "system", "content": "You are a project manager. The solution is being built. Answer briefly."},
@@ -278,8 +355,28 @@ class MAFOrchestrator:
                 except asyncio.TimeoutError:
                     follow_up_text = "I'm still working on it. Please hold on."
                 yield self._msg(project_id, follow_up_text)
+                # Process secondary intents (e.g., iteration alongside question)
+                secondary = [i for i in intents if i != Intent.QUESTION]
+                if secondary:
+                    target_agent, cleaned = self._parse_agent_mention(message)
+                    state.queued_messages.append({
+                        "message": cleaned if target_agent else message,
+                        "intents": [i.value for i in secondary],
+                        "meta": {"agents_to_rerun": self._retry_agents_for(target_agent)} if target_agent else meta,
+                    })
+                    yield self._msg(project_id, "📝 Noted — I'll also apply your feedback after the current step finishes.")
             else:
-                yield self._msg(project_id, "I'll address that after the current step completes.")
+                # Queue the message for processing after current step
+                target_agent, cleaned = self._parse_agent_mention(message)
+                state.queued_messages.append({
+                    "message": cleaned if target_agent else message,
+                    "intents": [intent.value],
+                    "meta": {"agents_to_rerun": self._retry_agents_for(target_agent)} if target_agent else meta,
+                })
+                if target_agent:
+                    yield self._msg(project_id, f"📝 Noted for {target_agent} — will apply after current step.")
+                else:
+                    yield self._msg(project_id, "📝 Noted — I'll apply that after the current step finishes.")
 
         # ── Phase: done ─────────────────────────────────────────────
         elif phase == "done":
@@ -328,7 +425,10 @@ class MAFOrchestrator:
                 async for msg in self._run_workflow(project_id, state, list(rerun_set)):
                     yield msg
 
-            elif intent == Intent.ITERATION:
+            elif Intent.ITERATION in intents:
+                # Multi-intent: if PROCEED is also present, acknowledge approval first
+                if Intent.PROCEED in intents:
+                    yield self._msg(project_id, "✅ Current step approved. Now applying your iteration feedback...")
                 agents_to_rerun = meta.get("agents_to_rerun") or pm.get_agents_to_rerun(message)
                 state.clarifications += f"\nIteration: {message}"
 
@@ -548,6 +648,34 @@ class MAFOrchestrator:
             return [agent]
         return cls._PIPELINE_ORDER[start_idx:]
 
+    def _parse_agent_mention(self, message: str) -> tuple[str | None, str]:
+        """Extract @agent mention and return (agent_name, cleaned_message)."""
+        match = _AGENT_MENTION_RE.search(message)
+        if not match:
+            return None, message
+        agent = match.group(1).lower().replace(" ", "_")
+        if agent == "bv":
+            agent = "business_value"
+        cleaned = message[:match.start()] + message[match.end():]
+        return agent, cleaned.strip()
+
+    async def _drain_queue(self, project_id: str, state: AgentState):
+        """Process queued messages after a step completes."""
+        if not state.queued_messages:
+            return
+        queued = state.queued_messages.copy()
+        state.queued_messages.clear()
+
+        for item in queued:
+            message = item["message"]
+            state.clarifications += f"\nQueued feedback: {message}"
+            if "iteration" in item.get("intents", []):
+                agents = item.get("meta", {}).get("agents_to_rerun", [])
+                if agents:
+                    for agent in agents:
+                        if agent in state.completed_steps:
+                            state.completed_steps.remove(agent)
+
     async def _run_workflow(
         self, project_id: str, state: AgentState, active_agents: list[str],
     ) -> AsyncGenerator[ChatMessage, None]:
@@ -575,6 +703,16 @@ class MAFOrchestrator:
         async for chat_msg in self._process_workflow_events(project_id, stream):
             yield chat_msg
 
+    _APPROVAL_KEYWORDS = frozenset({
+        "proceed", "skip", "refine", "yes", "ok", "continue",
+        "skip this", "next", "redo", "again", "retry",
+    })
+
+    @classmethod
+    def _is_approval_keyword(cls, message: str) -> bool:
+        """Check if message is a known approval action keyword."""
+        return message.strip().lower() in cls._APPROVAL_KEYWORDS
+
     async def _resume_workflow(
         self, project_id: str, state: AgentState, message: str,
         pending: dict,
@@ -590,6 +728,27 @@ class MAFOrchestrator:
             yield self._msg(project_id, "No pending request to respond to.")
             return
         first_req_id = next(iter(pending))
+        first_request_data = pending[first_req_id]
+
+        # Suggestion routing: if user responds with free-text (not an approval
+        # keyword) while an approval gate is active, treat it as refinement
+        # feedback for the current agent and re-run it.
+        if (
+            isinstance(first_request_data, ApprovalRequest)
+            and not self._is_approval_keyword(message)
+        ):
+            agent_step = first_request_data.step
+            state.clarifications += f"\nRefinement for {agent_step}: {message}"
+            # Translate free-text feedback into a "refine" action so the
+            # workflow's response_handler records the feedback and re-sends
+            # the pipeline message to re-run the same step.
+            message = "refine"
+            yield self._msg(
+                project_id,
+                f"Got it — refining **{AGENT_INFO.get(agent_step, {'name': agent_step})['name']}** with your feedback...",
+                {"type": "pm_response"},
+            )
+
         responses = {first_req_id: message}
 
         # Keep remaining requests pending
@@ -649,6 +808,10 @@ class MAFOrchestrator:
                                 project_id=project_id, role="agent",
                                 agent_id=agent_id, content=content, metadata=metadata,
                             )
+                            # Drain queued messages after each agent completes
+                            await self._drain_queue(project_id, self.get_state(project_id))
+                            # Persist state after each agent completes
+                            await self._persist_state(project_id)
 
                         elif etype == "agent_error":
                             agent_id_err = step.replace("_", "-")
@@ -671,6 +834,7 @@ class MAFOrchestrator:
                             )
 
                         elif etype == "pipeline_done":
+                            await self._persist_state(project_id)
                             self.phases[project_id] = "done"
                             self._cleanup_project(project_id)
                             yield self._msg(
@@ -687,10 +851,19 @@ class MAFOrchestrator:
 
                         if isinstance(event.data, ApprovalRequest):
                             summary = event.data.summary
+                            step = event.data.step
                             yield ChatMessage(
                                 project_id=project_id, role="agent", agent_id="pm",
                                 content=f"{summary}\n\nSay **proceed** to continue, **skip** to skip, or provide feedback to refine.",
-                                metadata={"type": "approval", "step": event.data.step},
+                                metadata={
+                                    "type": "approval",
+                                    "step": step,
+                                    "actions": [
+                                        {"id": "proceed", "label": "✅ Proceed", "variant": "primary"},
+                                        {"id": "refine", "label": "✏️ Refine", "variant": "secondary"},
+                                        {"id": "skip", "label": "⏭️ Skip", "variant": "ghost"},
+                                    ],
+                                },
                             )
                         elif isinstance(event.data, AssumptionsRequest):
                             # Already emitted via assumptions_input above

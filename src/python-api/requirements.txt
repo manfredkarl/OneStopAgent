@@ -9,3 +9,4 @@ sse-starlette>=2.0.0
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
+azure-cosmos>=4.7.0

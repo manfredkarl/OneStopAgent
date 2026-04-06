@@ -24,12 +24,24 @@ from services.company_intelligence import (
     FALLBACK_PROFILES,
     search_and_extract_company,
 )
-from services.project_store import store
 from maf_orchestrator import MAFOrchestrator
 from telemetry import setup_telemetry
 from workflow import create_pipeline_workflow
 
 setup_telemetry()
+
+# ---------------------------------------------------------------------------
+# Project store — Cosmos DB when configured, in-memory otherwise
+# ---------------------------------------------------------------------------
+
+_cosmos_endpoint = os.environ.get("COSMOS_ENDPOINT")
+if _cosmos_endpoint:
+    from services.cosmos_store import CosmosProjectStore
+    store = CosmosProjectStore(_cosmos_endpoint)
+    logging.getLogger(__name__).info("Using Cosmos DB store: %s", _cosmos_endpoint)
+else:
+    from services.project_store import store  # noqa: F811 — module-level singleton
+    logging.getLogger(__name__).info("COSMOS_ENDPOINT not set — using in-memory store")
 
 # ---------------------------------------------------------------------------
 # x-user-id header validation
@@ -69,7 +81,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "x-user-id", "Accept"],
 )
 
-orchestrator = MAFOrchestrator()
+orchestrator = MAFOrchestrator(store=store)
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -165,7 +177,7 @@ async def company_fallback(size: str, name: str = ""):
 
 @app.post("/api/projects")
 async def create_project(req: CreateProjectRequest, x_user_id: str = Depends(_get_user_id)):
-    project = store.create_project(
+    project = await store.create_project(
         x_user_id, req.description, req.customer_name,
         company_profile=req.company_profile,
     )
@@ -177,7 +189,7 @@ async def create_project(req: CreateProjectRequest, x_user_id: str = Depends(_ge
 
 @app.get("/api/projects")
 async def list_projects(x_user_id: str = Depends(_get_user_id)):
-    projects = store.list_projects(x_user_id)
+    projects = await store.list_projects(x_user_id)
     return [
         {
             "projectId": p.id,
@@ -192,7 +204,7 @@ async def list_projects(x_user_id: str = Depends(_get_user_id)):
 
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str, x_user_id: str = Depends(_get_user_id)):
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project.model_dump()
@@ -205,13 +217,13 @@ async def send_message(
     request: Request,
     x_user_id: str = Depends(_get_user_id),
 ):
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Store user message
     user_msg = ChatMessage(project_id=project_id, role="user", content=req.message)
-    store.add_message(project_id, user_msg)
+    await store.add_message(project_id, user_msg)
 
     # SSE streaming
     accept = request.headers.get("accept", "")
@@ -224,7 +236,7 @@ async def send_message(
                 ):
                     # Don't persist individual streaming tokens — only final messages
                     if msg.metadata is None or msg.metadata.get("type") != "agent_token":
-                        store.add_message(project_id, msg)
+                        await store.add_message(project_id, msg)
                     yield {"event": "message", "data": json.dumps(msg.model_dump(), default=str)}
             except Exception as e:
                 logging.getLogger(__name__).exception("SSE stream error")
@@ -245,7 +257,7 @@ async def send_message(
             company_profile=project.company_profile,
         ):
             if not (msg.metadata and msg.metadata.get("type") == "agent_token"):
-                store.add_message(project_id, msg)
+                await store.add_message(project_id, msg)
             messages.append(msg.model_dump())
     except Exception as e:
         traceback.print_exc()
@@ -254,17 +266,17 @@ async def send_message(
             content=f"An error occurred: {str(e)}",
             metadata={"type": "error"},
         )
-        store.add_message(project_id, error_msg)
+        await store.add_message(project_id, error_msg)
         messages.append(error_msg.model_dump())
     return messages
 
 
 @app.get("/api/projects/{project_id}/chat")
 async def get_chat_history(project_id: str, x_user_id: str = Depends(_get_user_id)):
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    messages = store.get_messages(project_id)
+    messages = await store.get_messages(project_id)
     return {
         "messages": [m.model_dump() for m in messages],
         "hasMore": False,
@@ -274,7 +286,7 @@ async def get_chat_history(project_id: str, x_user_id: str = Depends(_get_user_i
 
 @app.get("/api/projects/{project_id}/agents")
 async def get_agents(project_id: str, x_user_id: str = Depends(_get_user_id)):
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     # Normalize for comparison (frontend sends hyphens, backend uses underscores)
@@ -297,7 +309,7 @@ async def toggle_agent(
     request: Request,
     x_user_id: str = Depends(_get_user_id),
 ):
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -321,7 +333,7 @@ async def toggle_agent(
 @app.post("/api/test/reset")
 async def test_reset():
     """Clear all data (for testing)."""
-    store.clear()
+    await store.clear()
     return {"message": "Store cleared"}
 
 
@@ -332,7 +344,7 @@ async def test_reset():
 @app.get("/api/projects/{project_id}/export/pptx")
 async def download_pptx(project_id: str, x_user_id: str = Depends(_get_user_id)):
     """Download the generated PowerPoint deck."""
-    project = store.get_project(project_id, x_user_id)
+    project = await store.get_project(project_id, x_user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
