@@ -234,8 +234,8 @@ class MAFOrchestrator:
         active_agents: list[str], description: str,
         company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
-        try:
-            state = self.get_state(project_id)
+      try:
+        state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
 
         # Track user messages for context-aware classification
@@ -679,9 +679,9 @@ class MAFOrchestrator:
                     follow_up_text = "I'm having trouble processing that right now. Could you try again?"
                 yield self._msg(project_id, follow_up_text)
 
-        except Exception:
-            logger.exception("Unhandled error in handle_message for project %s", project_id)
-            yield self._msg(project_id, "⚠️ An unexpected error occurred. Please try again.")
+      except Exception:
+        logger.exception("Unhandled error in handle_message for project %s", project_id)
+        yield self._msg(project_id, "⚠️ An unexpected error occurred. Please try again.")
 
     # ── Shared assumption generation ───────────────────────────────
 

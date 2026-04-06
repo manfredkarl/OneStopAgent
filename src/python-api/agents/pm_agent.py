@@ -38,6 +38,7 @@ class Intent(Enum):
 # ── Single source of truth for iteration keyword → agent mapping ────────
 ITERATION_MAPPING: dict[str, list[str]] = {
     "cheaper": ["cost", "roi", "presentation"],
+    "cost": ["cost", "roi", "presentation"],
     "expensive": ["cost", "roi", "presentation"],
     "high availability": ["architect", "cost", "roi", "presentation"],
     "ha": ["architect", "cost", "roi", "presentation"],
@@ -68,6 +69,30 @@ ITERATION_MAPPING: dict[str, list[str]] = {
     "reduce": ["architect", "cost", "roi"],
     "fewer": ["architect", "cost", "roi"],
 }
+
+# Pre-compiled word-boundary regexes for each keyword (avoids substring false positives)
+_ITERATION_RE: list[tuple[re.Pattern, list[str]]] = [
+    (re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE), agents)
+    for kw, agents in ITERATION_MAPPING.items()
+]
+
+
+def _resolve_iteration_agents(message: str) -> list[str]:
+    """Collect agents from ALL matching iteration keywords using word-boundary regex.
+
+    Returns a de-duplicated list preserving SOLUTIONING_PLAN order,
+    or an empty list if no keywords matched.
+    """
+    matched: set[str] = set()
+    for pattern, agents in _ITERATION_RE:
+        if pattern.search(message):
+            matched.update(agents)
+    if not matched:
+        return []
+    # Return in canonical plan order (+ any extras at the end)
+    ordered = [a for a in SOLUTIONING_PLAN if a in matched]
+    ordered.extend(a for a in matched if a not in ordered)
+    return ordered
 
 
 class IntentInterpreter:
@@ -137,12 +162,8 @@ class IntentInterpreter:
         meta: dict = {}
         if intent == Intent.ITERATION:
             meta["feedback"] = message
-            msg_lower = message.lower()
-            for keyword, agents in ITERATION_MAPPING.items():
-                if keyword in msg_lower:
-                    meta["agents_to_rerun"] = agents
-                    return meta
-            meta["agents_to_rerun"] = list(self.DEFAULT_RERUN_AGENTS)
+            agents = _resolve_iteration_agents(message)
+            meta["agents_to_rerun"] = agents if agents else list(self.DEFAULT_RERUN_AGENTS)
         elif intent == Intent.REFINE:
             meta["feedback"] = message
         return meta
@@ -248,6 +269,42 @@ class ProjectManager:
     def __init__(self):
         self.intent_interpreter = IntentInterpreter()
 
+    @staticmethod
+    def _parse_brainstorm_json(raw_text: str) -> dict:
+        """Parse brainstorm LLM output into a structured dict.
+
+        Handles markdown fences, double-wrapped JSON, and plain-text fallback.
+        """
+        try:
+            text = strip_markdown_fences(raw_text)
+            result = json.loads(text)
+
+            resp = result.get("response", text)
+            # LLMs sometimes double-wrap: {"response": "{\"response\": \"...\"}"}
+            if isinstance(resp, str) and resp.strip().startswith("{"):
+                try:
+                    inner = json.loads(resp)
+                    if isinstance(inner, dict) and "response" in inner:
+                        result["response"] = inner["response"]
+                except json.JSONDecodeError:
+                    pass
+
+            return {
+                "response": result.get("response", text),
+                "azure_fit": result.get("azure_fit", "unclear"),
+                "azure_fit_explanation": result.get("azure_fit_explanation", ""),
+                "industry": result.get("industry", "Cross-Industry"),
+                "scenarios": result.get("scenarios", []),
+            }
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            return {
+                "response": raw_text,
+                "azure_fit": "unclear",
+                "azure_fit_explanation": "Could not assess Azure fit from the response.",
+                "industry": "Cross-Industry",
+                "scenarios": [],
+            }
+
     def brainstorm_greeting(self, user_input: str) -> dict:
         """Brainstorm + classify Azure fit in one LLM call.
 
@@ -284,7 +341,7 @@ RULES:
 - Be specific about Azure services"""},
                 {"role": "user", "content": user_input}
             ])
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError, RuntimeError) as e:
+        except Exception as e:
             logger.warning("Brainstorm LLM call failed: %s", e, exc_info=True)
             return {
                 "response": "I'd be happy to help design your Azure solution. Could you tell me more about your requirements?",
@@ -294,39 +351,7 @@ RULES:
                 "scenarios": [],
             }
 
-        try:
-            text = strip_markdown_fences(response.content)
-            result = json.loads(text)
-
-            # Safety: the LLM may put the entire JSON blob as the response
-            # field value — extract the conversational text if so
-            resp = result.get("response", text)
-            # LLMs sometimes double-wrap responses: {"response": "{\"response\": \"...\"}" }
-            # This unwraps the inner JSON if detected.
-            if isinstance(resp, str) and resp.strip().startswith("{"):
-                try:
-                    inner = json.loads(resp)
-                    if isinstance(inner, dict) and "response" in inner:
-                        result["response"] = inner["response"]
-                except json.JSONDecodeError:
-                    pass
-
-            return {
-                "response": result.get("response", text),
-                "azure_fit": result.get("azure_fit", "unclear"),
-                "azure_fit_explanation": result.get("azure_fit_explanation", ""),
-                "industry": result.get("industry", "Cross-Industry"),
-                "scenarios": result.get("scenarios", []),
-            }
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-            # LLM returned plain text instead of JSON — still usable
-            return {
-                "response": response.content,
-                "azure_fit": "unclear",
-                "azure_fit_explanation": "Could not assess Azure fit from the response.",
-                "industry": "Cross-Industry",
-                "scenarios": [],
-            }
+        return self._parse_brainstorm_json(response.content)
 
     async def brainstorm_greeting_streaming(
         self, user_input: str, on_token, company_profile: dict | None = None,
@@ -401,37 +426,8 @@ RULES:
                     on_token(new_text)
                     extracted_len = len(response_so_far)
 
-        # Parse accumulated full JSON (same logic as brainstorm_greeting)
-        try:
-            text = strip_markdown_fences(full_text)
-            result = json.loads(text)
-
-            resp = result.get("response", text)
-            # LLMs sometimes double-wrap responses: {"response": "{\"response\": \"...\"}" }
-            # This unwraps the inner JSON if detected.
-            if isinstance(resp, str) and resp.strip().startswith("{"):
-                try:
-                    inner = json.loads(resp)
-                    if isinstance(inner, dict) and "response" in inner:
-                        result["response"] = inner["response"]
-                except json.JSONDecodeError:
-                    pass
-
-            return {
-                "response": result.get("response", text),
-                "azure_fit": result.get("azure_fit", "unclear"),
-                "azure_fit_explanation": result.get("azure_fit_explanation", ""),
-                "industry": result.get("industry", "Cross-Industry"),
-                "scenarios": result.get("scenarios", []),
-            }
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-            return {
-                "response": full_text,
-                "azure_fit": "unclear",
-                "azure_fit_explanation": "Could not assess Azure fit from the response.",
-                "industry": "Cross-Industry",
-                "scenarios": [],
-            }
+        # Parse accumulated full JSON (shared logic with brainstorm_greeting)
+        return self._parse_brainstorm_json(full_text)
 
     def build_plan(self, active_agents: list[str]) -> list[str]:
         """Build solutioning execution plan respecting agent toggles. Architect is always included."""
@@ -615,18 +611,14 @@ RULES:
             if name and name != "N/A":
                 state.customer_name = name
                 return name
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        except Exception:
             pass
         return ""
 
     def get_agents_to_rerun(self, user_message: str) -> list[str]:
         """Determine which agents need to re-run based on user's iteration request."""
-        msg = user_message.lower()
-        for keyword, agents in ITERATION_MAPPING.items():
-            if keyword in msg:
-                return agents
-        # Default: re-run from business_value onward
-        return ["business_value", "architect", "cost", "roi", "presentation"]
+        agents = _resolve_iteration_agents(user_message)
+        return agents if agents else ["business_value", "architect", "cost", "roi", "presentation"]
 
     def format_agent_output(self, step: str, state: AgentState) -> str:
         """Format an agent's output as markdown for the chat."""
