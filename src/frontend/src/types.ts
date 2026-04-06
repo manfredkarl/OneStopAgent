@@ -49,13 +49,26 @@ export interface CompanyProfile {
   disambiguated: boolean;
 }
 
+export interface ActionItem {
+  id: string;
+  label: string;
+  variant: 'primary' | 'secondary' | 'ghost';
+}
+
 export interface ChatMessage {
   id: string;
   projectId: string;
   role: 'user' | 'agent';
   agentId?: string;
   content: string;
-  metadata?: Record<string, any>;
+  metadata?: {
+    type?: string;
+    step?: string;
+    actions?: ActionItem[];
+    suggestions?: string[];
+    agent?: string;
+    [key: string]: any;
+  };
   timestamp: string;
 }
 

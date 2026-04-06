@@ -6,6 +6,7 @@ import MessageContent from './MessageContent';
 import ExecutionPlan from './ExecutionPlan';
 import AssumptionsInput from './AssumptionsInput';
 import ROIDashboard from './ROIDashboard';
+import ActionButtons from './ActionButtons';
 
 interface Props {
   messages: ChatMessage[];
@@ -127,6 +128,11 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
           }
 
           if (msg.metadata?.type === 'approval') {
+            const actions = msg.metadata.actions ?? [
+              { id: 'proceed', label: '✅ Proceed', variant: 'primary' as const },
+              { id: 'refine', label: '✏️ Refine', variant: 'secondary' as const },
+              { id: 'skip', label: '⏭️ Skip', variant: 'ghost' as const },
+            ];
             return (
               <div key={msg.id} className="flex gap-3 items-start">
                 <span className="text-xl shrink-0 mt-0.5">{EMOJIS['pm']}</span>
@@ -135,20 +141,25 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                   <div className="prose-content">
                     <MessageContent content={msg.content} />
                   </div>
-                  <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() => onSend?.('proceed')}
-                      className="px-4 py-2 rounded-xl bg-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent-hover)] transition-colors cursor-pointer"
-                    >
-                      Proceed
-                    </button>
-                    <button
-                      onClick={() => onSend?.('skip')}
-                      className="px-4 py-2 rounded-xl bg-[var(--bg-subtle)] text-[var(--text-secondary)] text-sm font-medium hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                    >
-                      Skip
-                    </button>
-                  </div>
+                  <ActionButtons
+                    actions={actions}
+                    onAction={(id) => onSend?.(id)}
+                    disabled={isThinking}
+                  />
+                  {msg.metadata.suggestions && msg.metadata.suggestions.length > 0 && (
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      {msg.metadata.suggestions.map((s: string, i: number) => (
+                        <button
+                          key={i}
+                          onClick={() => onSend?.(s)}
+                          disabled={isThinking}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          💡 {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -195,6 +206,20 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
                 <div className="prose-content">
                   <MessageContent content={msg.content} />
                 </div>
+                {msg.metadata?.suggestions && msg.metadata.suggestions.length > 0 && (
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {msg.metadata.suggestions.map((s: string, i: number) => (
+                      <button
+                        key={i}
+                        onClick={() => onSend?.(s)}
+                        disabled={isThinking}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        💡 {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {agentId === 'presentation' && projectId && (
                   <button
                     onClick={() => downloadPptx(projectId).catch(console.error)}

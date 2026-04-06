@@ -41,7 +41,7 @@ export default function ChatInput({ onSend, disabled }: Props) {
             value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message OneStopAgent..."
+            placeholder="Message OneStopAgent... (use @agent to target specific agent)"
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none bg-transparent px-5 py-3.5 text-[15px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none leading-relaxed"

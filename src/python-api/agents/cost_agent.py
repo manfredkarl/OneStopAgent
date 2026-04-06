@@ -15,7 +15,7 @@ from threading import Lock
 from agents.llm import llm, parse_llm_json
 from agents.state import AgentState
 from agents.assumption_catalog import filter_already_answered
-from services.pricing import query_azure_pricing_sync
+from services.pricing import query_azure_pricing_sync, query_reservation_pricing
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         selections = self._llm_map_services(components, users, primary_region, industry, state, usage_dict)
 
         # ── Step 2: Pricing API — validate SKUs + get prices ─────────
-        items, worst_source, assumptions = self._price_selections(selections, users, usage_dict)
+        items, worst_source, assumptions, confidence_summary = self._price_selections(selections, users, usage_dict)
 
         # ── Step 3: Multi-region handling ────────────────────────────
         # Extract HA pattern from user text
@@ -354,6 +354,7 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
                 "totalAnnual": total_annual,
                 "assumptions": assumptions,
                 "pricingSource": worst_source,
+                "confidenceSummary": confidence_summary,
                 "insights": insights,
             },
             "user_assumptions": user_assumptions,
@@ -556,6 +557,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
             source = result.get("source", "unknown")
             note = result.get("note")
             unit = result.get("unit", "1 Hour")
+            item_confidence = result.get("confidence", "low" if source not in ("live", "live-fallback") else "high")
 
             if source not in ("live", "live-fallback"):
                 existing_note = sel.get("skuNote") or ""
@@ -588,6 +590,7 @@ Return ONLY valid JSON (no markdown fences) as an array:
                 "region": region,
                 "monthlyCost": round(monthly, 2),
                 "pricingNote": cost_note,
+                "confidence": item_confidence,
             })
 
             source_counts[source] = source_counts.get(source, 0) + 1
@@ -603,7 +606,13 @@ Return ONLY valid JSON (no markdown fences) as an array:
         parts = [f"{source_counts[s]} {s}" for s in label_order if s in source_counts]
         pricing_source_label = ", ".join(parts) if parts else "unavailable"
 
-        return items, pricing_source_label, assumptions
+        # Compute overall confidence summary from per-item confidence labels
+        high_count = sum(1 for i in items if i.get("confidence") == "high")
+        total_count = len(items) or 1
+        high_pct = high_count / total_count
+        confidence_summary = "high" if high_pct > 0.8 else "moderate" if high_pct > 0.5 else "low"
+
+        return items, pricing_source_label, assumptions, confidence_summary
 
     # ── Helpers ──────────────────────────────────────────────────────
 
@@ -729,13 +738,43 @@ Return ONLY valid JSON (no markdown fences) as an array:
             for i in sorted_items[:3]
         ]
 
-        # Reservation savings estimate (1-year reserved is ~30-40% cheaper for compute)
-        compute_monthly = sum(
-            i.get("monthlyCost", 0) for i in items
-            if any(kw in i.get("serviceName", "").lower()
-                   for kw in ("app service", "virtual machine", "kubernetes", "container apps"))
-        )
-        reservation_savings_annual = round(compute_monthly * 12 * 0.35) if compute_monthly > 0 else 0
+        # Identify compute services eligible for reservations
+        compute_keywords = ("app service", "virtual machine", "kubernetes", "container apps")
+        compute_items = [
+            i for i in items
+            if any(kw in i.get("serviceName", "").lower() for kw in compute_keywords)
+        ]
+        compute_monthly = sum(i.get("monthlyCost", 0) for i in compute_items)
+
+        # Query reservation pricing for top compute service (best-effort, non-blocking)
+        reservation_details: list[dict] = []
+        for ci in compute_items[:3]:
+            try:
+                ri = query_reservation_pricing(
+                    ci.get("serviceName", ""),
+                    ci.get("sku", ""),
+                    ci.get("region", "eastus"),
+                )
+                sp = ri.get("savings_potential", {})
+                if sp.get("1yr_pct") is not None or sp.get("3yr_pct") is not None:
+                    reservation_details.append({
+                        "service": ci.get("serviceName", ""),
+                        "paygo_monthly": round(ci.get("monthlyCost", 0)),
+                        "savings_1yr_pct": sp.get("1yr_pct"),
+                        "savings_3yr_pct": sp.get("3yr_pct"),
+                    })
+            except Exception:
+                pass
+
+        # Estimate reservation savings (fallback to 35% if no live data)
+        if reservation_details:
+            avg_1yr_pct = sum(
+                d["savings_1yr_pct"] for d in reservation_details
+                if d.get("savings_1yr_pct") is not None
+            ) / max(sum(1 for d in reservation_details if d.get("savings_1yr_pct") is not None), 1)
+            reservation_savings_annual = round(compute_monthly * 12 * avg_1yr_pct / 100) if avg_1yr_pct > 0 else 0
+        else:
+            reservation_savings_annual = round(compute_monthly * 12 * 0.35) if compute_monthly > 0 else 0
 
         # Cost per user per month
         cost_per_user = round(total_monthly / users, 2) if users > 0 else None
@@ -753,10 +792,16 @@ Return ONLY valid JSON (no markdown fences) as an array:
             elif "app service" in svc.lower():
                 tips.append("Use App Service reserved instances (1-yr) for ~35% cost reduction")
 
-        return {
+        result = {
             "top3Drivers": top3,
             "reservationSavingsAnnual": reservation_savings_annual,
             "reservationNote": f"~${reservation_savings_annual:,}/yr savings with 1-yr reserved pricing on compute" if reservation_savings_annual > 0 else None,
             "costPerUserMonthly": cost_per_user,
             "optimizationTips": list(dict.fromkeys(tips))[:3],  # deduplicate, max 3
         }
+
+        # Include reservation details if available
+        if reservation_details:
+            result["reservationDetails"] = reservation_details
+
+        return result

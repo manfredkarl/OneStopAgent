@@ -48,9 +48,33 @@ class ROIAgent:
         "complex": [0.30, 0.65, 0.90],
     }
 
+    # ── Implementation cost categories (% of Year 1 Azure annual spend) ──
+    IMPLEMENTATION_COSTS = {
+        "migration": {"pct_of_annual": 0.15, "label": "Migration & Setup"},
+        "training": {"pct_of_annual": 0.05, "label": "Training & Enablement"},
+        "change_mgmt": {"pct_of_annual": 0.03, "label": "Change Management"},
+    }
+
     @classmethod
     def _select_adoption_ramp(cls, state: AgentState) -> list[float]:
-        """Select adoption ramp based on architecture complexity."""
+        """Select adoption ramp based on user overrides or architecture complexity.
+
+        User-provided adoption_year1/2/3 from shared assumptions take priority.
+        Falls back to complexity-based ramp.
+        """
+        sa = state.sa
+        if sa.adoption_year1 is not None or sa.adoption_year2 is not None or sa.adoption_year3 is not None:
+            # User-specified values — normalize to 0-1 range if given as percentages
+            def _norm(v: float | None, default: float) -> float:
+                if v is None:
+                    return default
+                return v / 100 if v > 1 else v
+            return [
+                _norm(sa.adoption_year1, 0.50),
+                _norm(sa.adoption_year2, 0.85),
+                _norm(sa.adoption_year3, 1.00),
+            ]
+
         n = len(state.architecture.get("components", []))
         if n <= 3:
             return cls.ADOPTION_RAMPS["simple"]
@@ -574,9 +598,37 @@ class ROIAgent:
         # ── Investment = NET NEW spending ────────────────────────────
         azure_annual = azure_monthly * 12
         timeline_months = state.sa.timeline_months or 0
-        impl_cost = round(azure_monthly * timeline_months) if timeline_months > 0 else round(azure_annual * 0.5)
-        change_cost = round(impl_cost * 0.10)
-        year1_investment = round(azure_annual + impl_cost + change_cost)
+
+        # Implementation costs: compute from categorized percentages of Year 1 spend
+        impl_line_items: list[dict] = []
+        impl_cost_total = 0.0
+        for cat_key, cat_info in self.IMPLEMENTATION_COSTS.items():
+            amount = round(azure_annual * cat_info["pct_of_annual"])
+            impl_line_items.append({
+                "category": cat_key,
+                "label": cat_info["label"],
+                "amount": amount,
+                "pct_of_annual": cat_info["pct_of_annual"],
+            })
+            impl_cost_total += amount
+
+        # If user provided a timeline, scale migration cost proportionally
+        if timeline_months > 0:
+            migration_scaled = round(azure_monthly * timeline_months)
+            if migration_scaled > impl_cost_total:
+                # Use timeline-based estimate if larger
+                scale_factor = migration_scaled / max(impl_cost_total, 1)
+                for item in impl_line_items:
+                    item["amount"] = round(item["amount"] * scale_factor)
+                impl_cost_total = sum(i["amount"] for i in impl_line_items)
+
+        impl_cost = round(impl_cost_total)
+        # Change cost is included in IMPLEMENTATION_COSTS now; keep
+        # change_cost as the change_mgmt line item for backward compat
+        change_cost = next(
+            (i["amount"] for i in impl_line_items if i["category"] == "change_mgmt"), 0
+        )
+        year1_investment = round(azure_annual + impl_cost)
         year2_run_rate = round(azure_annual)
 
         # ── Driver amounts & waterfall (caps applied here) ───────────
@@ -729,6 +781,7 @@ class ROIAgent:
             year2_run_rate=year2_run_rate,
             impl_cost=impl_cost,
             change_cost=change_cost,
+            impl_line_items=impl_line_items,
             assumptions_dict=assumptions_dict,
             driver_amounts=driver_amounts,
             adjusted_confidence=adjusted_confidence,
@@ -752,6 +805,7 @@ class ROIAgent:
             "year1_investment": year1_investment,
             "year1_total_cost": year1_investment,
             "year2_run_rate": year2_run_rate,
+            "implementation_costs": impl_line_items,
             "future_annual_opex": round(future_annual),
             "roi_percent": round(roi_mid, 1),
             "roi_year1": round(roi_year1, 1),
@@ -805,6 +859,7 @@ class ROIAgent:
         year2_run_rate: float,
         impl_cost: float,
         change_cost: float,
+        impl_line_items: list[dict] | None = None,
         assumptions_dict: dict,
         driver_amounts: list[float],
         adjusted_confidence: str,
@@ -880,21 +935,24 @@ class ROIAgent:
             "annualCostReduction": round(hard_savings),
             "annualRevenueUplift": round(revenue_uplift),
             "annualNetValue": round(annual_total_value - azure_annual),
+            "implementationCosts": impl_line_items or [],
+            "implementationTotal": impl_cost,
             "cumulative": [
                 {
                     "year": yr + 1,
                     "adoption": f"{int(adoption_ramp[yr] * 100)}%",
                     "annualValue": round(annual_total_value * adoption_ramp[yr]),
-                    # Cumulative cost: Azure run-rate × years + one-time impl & change
+                    # Cumulative cost: Azure run-rate × years + one-time implementation
                     "azureCost": round(
                         azure_annual * (yr + 1)
-                        + impl_cost + change_cost
+                        + impl_cost
                     ),
+                    "implementationCost": impl_cost if yr == 0 else 0,
                     "totalValue": round(annual_total_value * sum(adoption_ramp[:yr + 1])),
                     "netValue": round(
                         annual_total_value * sum(adoption_ramp[:yr + 1])
                         - azure_annual * (yr + 1)
-                        - impl_cost - change_cost
+                        - impl_cost
                     ),
                 }
                 for yr in range(3)
@@ -971,6 +1029,7 @@ class ROIAgent:
             risk_reduction=risk_reduction,
             impl_cost=impl_cost,
             change_cost=change_cost,
+            impl_line_items=impl_line_items or [],
             year1_investment=year1_investment,
             year1_total_cost=year1_total_cost,
             year2_run_rate=year2_run_rate,
@@ -1169,6 +1228,7 @@ class ROIAgent:
         risk_reduction: float,
         impl_cost: float,
         change_cost: float,
+        impl_line_items: list[dict] | None = None,
         year1_investment: float,
         year1_total_cost: float,
         year2_run_rate: float,
@@ -1223,6 +1283,7 @@ class ROIAgent:
         future_state = {
             "azurePlatformAnnual": round(azure_annual),
             "implementationCost": impl_cost,
+            "implementationBreakdown": impl_line_items or [],
             "changeCost": change_cost,
             "futureAnnualOpex": round(future_annual),
         }

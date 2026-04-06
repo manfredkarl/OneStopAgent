@@ -125,25 +125,29 @@ class PresentationAgent:
 
         if state.costs.get("estimate"):
             est = state.costs["estimate"]
-            # Compute confidence from pricing source breakdown
-            source_str = est.get("pricingSource", "")
-            if "live" in source_str:
-                def _safe_leading_int(text: str) -> int:
-                    """Extract leading integer from a string like '5 live', return 0 on failure."""
-                    try:
-                        return int(text.split()[0])
-                    except (ValueError, IndexError):
-                        return 0
-
-                parts = [p.strip() for p in source_str.split(",") if p.strip()]
-                live_count = sum(
-                    _safe_leading_int(p) for p in parts
-                    if "live" in p and "fallback" not in p
-                )
-                total_items = sum(_safe_leading_int(p) for p in parts)
-                confidence = "High" if live_count / max(total_items, 1) > 0.7 else "Moderate"
+            # Compute confidence from pricing source breakdown or per-item confidence
+            confidence_summary = est.get("confidenceSummary")
+            if isinstance(confidence_summary, str) and confidence_summary in ("High", "Moderate", "Estimated", "high", "moderate", "low"):
+                confidence = confidence_summary.capitalize() if confidence_summary.islower() else confidence_summary
             else:
-                confidence = "Estimated"
+                source_str = est.get("pricingSource", "")
+                if "live" in source_str:
+                    def _safe_leading_int(text: str) -> int:
+                        """Extract leading integer from a string like '5 live', return 0 on failure."""
+                        try:
+                            return int(text.split()[0])
+                        except (ValueError, IndexError):
+                            return 0
+
+                    parts = [p.strip() for p in source_str.split(",") if p.strip()]
+                    live_count = sum(
+                        _safe_leading_int(p) for p in parts
+                        if "live" in p and "fallback" not in p
+                    )
+                    total_items = sum(_safe_leading_int(p) for p in parts)
+                    confidence = "High" if live_count / max(total_items, 1) > 0.7 else "Moderate"
+                else:
+                    confidence = "Estimated"
 
             data["costs"] = {
                 "totalMonthly": est.get("totalMonthly", 0),

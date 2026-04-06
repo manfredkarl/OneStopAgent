@@ -58,6 +58,21 @@ _FIELD_MATCHERS: list[tuple[str, list[list[str]]]] = [
         ["revenue"],
         ["monthly", "income"],
     ]),
+    ("adoption_year1", [
+        ["adoption", "year", "1"],
+        ["year", "1", "adoption"],
+        ["adoption", "y1"],
+    ]),
+    ("adoption_year2", [
+        ["adoption", "year", "2"],
+        ["year", "2", "adoption"],
+        ["adoption", "y2"],
+    ]),
+    ("adoption_year3", [
+        ["adoption", "year", "3"],
+        ["year", "3", "adoption"],
+        ["adoption", "y3"],
+    ]),
 ]
 
 
@@ -78,6 +93,9 @@ class SharedAssumptions:
     data_volume_gb: float | None = None
     timeline_months: float | None = None
     monthly_revenue: float | None = None
+    adoption_year1: float | None = None   # e.g., 0.6 (60%)
+    adoption_year2: float | None = None   # e.g., 0.8 (80%)
+    adoption_year3: float | None = None   # e.g., 0.95 (95%)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -142,6 +160,9 @@ class SharedAssumptions:
             data_volume_gb=resolved.get("data_volume_gb"),
             timeline_months=resolved.get("timeline_months"),
             monthly_revenue=resolved.get("monthly_revenue"),
+            adoption_year1=resolved.get("adoption_year1"),
+            adoption_year2=resolved.get("adoption_year2"),
+            adoption_year3=resolved.get("adoption_year3"),
             raw=dict(raw),
         )
 
@@ -189,6 +210,9 @@ class AgentState:
     failed_steps: list[str] = field(default_factory=list)
     awaiting_approval: bool = False
     current_step: str = ""
+
+    # ── Message queue (messages received during execution) ────────
+    queued_messages: list[dict[str, Any]] = field(default_factory=list)
 
     # ── Helpers ───────────────────────────────────────────────────────
 

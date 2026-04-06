@@ -76,11 +76,14 @@ class IntentInterpreter:
     Uses an LLM call as the primary classifier for natural language understanding.
     The ITERATION_MAPPING dict is used only to resolve *which agents* to re-run
     once the LLM has identified an iteration intent — that routing is deterministic.
+
+    Supports multi-intent classification: a single message like "looks good but
+    make it cheaper" can return ``[Intent.PROCEED, Intent.ITERATION]``.
     """
 
-    SYSTEM_PROMPT = (
+    SYSTEM_PROMPT_BASE = (
         "You are an intent classifier for an Azure solution copilot. "
-        "Classify the user's message into exactly ONE of these intents:\n\n"
+        "Classify the user's message into ONE OR MORE of these intents:\n\n"
         "- proceed: User wants to move forward (e.g. 'yes', 'ok', 'let's go', 'approved', 'continue')\n"
         "- refine: User wants to adjust the current step's output (e.g. 'change X', 'make it more detailed', 'tweak the architecture')\n"
         "- skip: User wants to skip the current step (e.g. 'skip', 'next', 'don't need this')\n"
@@ -90,13 +93,44 @@ class IntentInterpreter:
         "(e.g. 'make it cheaper', 'add high availability', 'change region to Europe', 'add AI capabilities')\n"
         "- question: User is asking a question (e.g. 'why did you pick this?', 'what does this cost?', 'can you explain?')\n"
         "- input: User is providing new information or context that doesn't fit the above categories\n\n"
-        "Return ONLY the intent word, nothing else."
+        "A message may express multiple intents. For example, 'looks good but make it cheaper' "
+        "is both 'proceed' and 'iteration'.\n\n"
+        "Return a JSON array of intent strings, e.g. [\"proceed\"] or [\"proceed\", \"iteration\"]. "
+        "Return ONLY the JSON array, nothing else."
     )
+
+    # Keep backward-compatible single-intent prompt for reference
+    SYSTEM_PROMPT = SYSTEM_PROMPT_BASE
 
     # Default agents to re-run when iteration intent has no keyword match
     DEFAULT_RERUN_AGENTS: list[str] = [
         "architect", "cost", "business_value", "roi", "presentation",
     ]
+
+    def _build_system_prompt(self, phase: str = "", current_step: str = "",
+                             recent_messages: list[str] | None = None) -> str:
+        """Build a context-aware system prompt including phase and step info."""
+        prompt = self.SYSTEM_PROMPT_BASE
+
+        context_parts: list[str] = []
+        if phase:
+            context_parts.append(f"Current phase: {phase}")
+        if current_step:
+            context_parts.append(f"Current step: {current_step}")
+        if recent_messages:
+            recent_text = " | ".join(recent_messages[-3:])
+            context_parts.append(f"Recent context: {recent_text}")
+
+        if context_parts:
+            context_block = "\n".join(context_parts)
+            prompt += (
+                f"\n\n{context_block}\n\n"
+                "Given the phase context, classify the user's message. In the \"executing\" phase, "
+                "users often want to provide feedback to the current agent. In the \"done\" phase, "
+                "users often want to iterate on specific parts of the solution."
+            )
+
+        return prompt
 
     def _build_meta(self, intent: Intent, message: str) -> dict:
         """Build the metadata dict for a resolved intent."""
@@ -113,37 +147,83 @@ class IntentInterpreter:
             meta["feedback"] = message
         return meta
 
-    def classify(self, message: str) -> tuple[Intent, dict]:
-        """Classify a message into an intent using an LLM call. Returns (intent, metadata)."""
+    def _build_multi_meta(self, intents: list[Intent], message: str) -> dict:
+        """Build combined metadata dict for multiple intents."""
+        combined: dict = {}
+        for intent in intents:
+            single = self._build_meta(intent, message)
+            combined.update(single)
+        return combined
+
+    def _parse_intents(self, raw_text: str) -> list[Intent]:
+        """Parse LLM response into a list of Intent enums.
+
+        Handles both JSON array format and single-word fallback.
+        """
+        cleaned = raw_text.strip()
+        # Strip markdown fences if present
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        # Try JSON array first
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, list):
+                intents = []
+                for item in parsed:
+                    normalized = str(item).strip().lower().replace("-", "_").replace(" ", "_")
+                    intents.append(Intent(normalized))
+                return intents if intents else [Intent.INPUT]
+            elif isinstance(parsed, str):
+                normalized = parsed.strip().lower().replace("-", "_").replace(" ", "_")
+                return [Intent(normalized)]
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+            pass
+
+        # Fallback: single word (backward compat with old prompt format)
+        try:
+            normalized = cleaned.lower().replace("-", "_").replace(" ", "_")
+            return [Intent(normalized)]
+        except (ValueError, KeyError):
+            pass
+
+        return [Intent.INPUT]
+
+    def classify(self, message: str, phase: str = "", current_step: str = "",
+                 recent_messages: list[str] | None = None) -> tuple[list[Intent], dict]:
+        """Classify a message into one or more intents using an LLM call.
+
+        Returns (intents_list, metadata).
+        """
+        system_prompt = self._build_system_prompt(phase, current_step, recent_messages)
         try:
             response = llm.invoke([
-                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message},
             ])
-            raw = response.content.strip().lower().replace("-", "_").replace(" ", "_")
-            intent = Intent(raw)
-        except (ValueError, KeyError, TypeError):
-            # LLM returned something unparseable or call failed — safe default
-            logger.warning("Intent classification failed, defaulting to INPUT intent")
-            intent = Intent.INPUT
+            intents = self._parse_intents(response.content)
+        except Exception:
+            logger.warning("Intent classification failed, defaulting to [INPUT]")
+            intents = [Intent.INPUT]
 
-        return intent, self._build_meta(intent, message)
+        return intents, self._build_multi_meta(intents, message)
 
-    async def aclassify(self, message: str) -> tuple[Intent, dict]:
+    async def aclassify(self, message: str, phase: str = "", current_step: str = "",
+                        recent_messages: list[str] | None = None) -> tuple[list[Intent], dict]:
         """Async version of :meth:`classify` — uses ``ainvoke`` to avoid
         blocking the event loop.  Drop-in replacement for async contexts."""
+        system_prompt = self._build_system_prompt(phase, current_step, recent_messages)
         try:
             response = await llm.ainvoke([
-                {"role": "system", "content": self.SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message},
             ])
-            raw = response.content.strip().lower().replace("-", "_").replace(" ", "_")
-            intent = Intent(raw)
-        except (ValueError, KeyError, TypeError):
-            logger.warning("Intent classification failed, defaulting to INPUT intent")
-            intent = Intent.INPUT
+            intents = self._parse_intents(response.content)
+        except Exception:
+            logger.warning("Intent classification failed, defaulting to [INPUT]")
+            intents = [Intent.INPUT]
 
-        return intent, self._build_meta(intent, message)
+        return intents, self._build_multi_meta(intents, message)
 
 
 AGENT_INFO = {
@@ -614,17 +694,22 @@ RULES:
             parts.append(f"| **Annual** | **${annual:,.0f}** |")
             parts.append(f"| **Pricing source** | {source} |")
 
-            # Confidence based on proportion of services with live pricing
-            _live_count = sum(
-                parse_leading_int(p)
-                for p in source.split(", ")
-                if any(p.endswith(s) for s in ("live", "live-fallback"))
-            ) if isinstance(source, str) else 0
-            _total_count = sum(
-                parse_leading_int(p) for p in source.split(", ")
-            ) if isinstance(source, str) else 1
-            _live_pct = _live_count / max(_total_count, 1)
-            confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"
+            # Confidence based on proportion of services with live/high-confidence pricing
+            # Uses per-item confidence field when available, falls back to source string parsing
+            _confidence_field = est.get("confidenceSummary")
+            if isinstance(_confidence_field, str) and _confidence_field in ("high", "moderate", "low"):
+                confidence = _confidence_field
+            else:
+                _live_count = sum(
+                    parse_leading_int(p)
+                    for p in source.split(", ")
+                    if any(p.endswith(s) for s in ("live", "live-fallback"))
+                ) if isinstance(source, str) else 0
+                _total_count = sum(
+                    parse_leading_int(p) for p in source.split(", ")
+                ) if isinstance(source, str) else 1
+                _live_pct = _live_count / max(_total_count, 1)
+                confidence = "high" if _live_pct > 0.8 else "moderate" if _live_pct > 0.5 else "low"
             parts.append(f"| **Confidence** | {confidence} |\n")
 
             # ── Section 2: Top Cost Drivers (per-service breakdown) ──

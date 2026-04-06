@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from agents.pm_agent import (  # noqa: E402
     ProjectManager,
+    IntentInterpreter,
+    Intent,
     AGENT_INFO,
     SOLUTIONING_PLAN,
     ITERATION_MAPPING,
@@ -596,3 +598,194 @@ class TestAgentInfo:
                 assert agent in valid, (
                     f"ITERATION_MAPPING['{keyword}'] contains invalid agent '{agent}'"
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TestIntentInterpreterMultiIntent
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestIntentInterpreterMultiIntent:
+    """Tests for multi-intent classification and phase-aware prompts."""
+
+    @pytest.fixture
+    def interpreter(self):
+        return IntentInterpreter()
+
+    # ── _parse_intents unit tests ──────────────────────────────────
+
+    def test_parse_single_intent_json_array(self, interpreter):
+        """Single intent in JSON array format."""
+        result = interpreter._parse_intents('["proceed"]')
+        assert result == [Intent.PROCEED]
+
+    def test_parse_multi_intent_json_array(self, interpreter):
+        """Multiple intents in JSON array → [PROCEED, ITERATION]."""
+        result = interpreter._parse_intents('["proceed", "iteration"]')
+        assert result == [Intent.PROCEED, Intent.ITERATION]
+
+    def test_parse_single_word_fallback(self, interpreter):
+        """Old-style single word response still works."""
+        result = interpreter._parse_intents("proceed")
+        assert result == [Intent.PROCEED]
+
+    def test_parse_invalid_returns_input(self, interpreter):
+        """Unparseable response falls back to [INPUT]."""
+        result = interpreter._parse_intents("totally_unknown_garbage_xyz")
+        assert result == [Intent.INPUT]
+
+    def test_parse_empty_array_returns_input(self, interpreter):
+        """Empty JSON array falls back to [INPUT]."""
+        result = interpreter._parse_intents("[]")
+        assert result == [Intent.INPUT]
+
+    def test_parse_markdown_fenced_json(self, interpreter):
+        """JSON wrapped in markdown code fences."""
+        result = interpreter._parse_intents('```json\n["question", "iteration"]\n```')
+        assert result == [Intent.QUESTION, Intent.ITERATION]
+
+    def test_parse_json_string_not_array(self, interpreter):
+        """JSON string (not array) is handled."""
+        result = interpreter._parse_intents('"skip"')
+        assert result == [Intent.SKIP]
+
+    # ── classify method (sync) with mocked LLM ────────────────────
+
+    def test_classify_returns_list(self, interpreter, mock_llm):
+        """classify() now returns (list[Intent], dict)."""
+        mock_llm.invoke.side_effect = None
+        mock_llm.invoke.return_value = type("R", (), {"content": '["input"]'})()
+        intents, meta = interpreter.classify("hello world")
+        assert isinstance(intents, list)
+        assert all(isinstance(i, Intent) for i in intents)
+
+    def test_classify_multi_intent_proceed_iteration(self, interpreter, mock_llm):
+        """'looks good but cheaper' → [PROCEED, ITERATION]."""
+        mock_llm.invoke.side_effect = None
+        mock_llm.invoke.return_value = type("R", (), {"content": '["proceed", "iteration"]'})()
+        intents, meta = interpreter.classify("looks good but make it cheaper")
+        assert Intent.PROCEED in intents
+        assert Intent.ITERATION in intents
+        assert "agents_to_rerun" in meta
+        assert "cost" in meta["agents_to_rerun"]
+
+    def test_classify_single_intent_backward_compat(self, interpreter, mock_llm):
+        """Single intent still wrapped in list."""
+        mock_llm.invoke.side_effect = None
+        mock_llm.invoke.return_value = type("R", (), {"content": '["proceed"]'})()
+        intents, meta = interpreter.classify("yes let's go")
+        assert intents == [Intent.PROCEED]
+
+    def test_classify_fallback_on_error(self, interpreter, mock_llm):
+        """LLM failure falls back to [INPUT]."""
+        mock_llm.invoke.side_effect = RuntimeError("API down")
+        intents, meta = interpreter.classify("anything")
+        assert intents == [Intent.INPUT]
+
+    # ── Phase-aware prompt building ───────────────────────────────
+
+    def test_build_system_prompt_no_phase(self, interpreter):
+        """Without phase info, prompt is the base prompt."""
+        prompt = interpreter._build_system_prompt()
+        assert "JSON array" in prompt
+        assert "Current phase" not in prompt
+
+    def test_build_system_prompt_with_phase(self, interpreter):
+        """With phase info, prompt includes phase context."""
+        prompt = interpreter._build_system_prompt(phase="executing", current_step="cost")
+        assert "Current phase: executing" in prompt
+        assert "Current step: cost" in prompt
+        assert "executing" in prompt
+
+    def test_build_system_prompt_with_recent_messages(self, interpreter):
+        """Recent messages appear in the prompt."""
+        prompt = interpreter._build_system_prompt(
+            phase="done",
+            recent_messages=["msg1", "msg2", "msg3"],
+        )
+        assert "msg1" in prompt
+        assert "msg3" in prompt
+
+    def test_phase_done_hint_in_prompt(self, interpreter):
+        """Done phase prompt includes iteration hint."""
+        prompt = interpreter._build_system_prompt(phase="done")
+        assert "done" in prompt
+        assert "iterate" in prompt
+
+    def test_classify_with_phase_passes_to_llm(self, interpreter, mock_llm):
+        """Phase and step are passed through to the LLM call."""
+        mock_llm.invoke.side_effect = None
+        mock_llm.invoke.return_value = type("R", (), {"content": '["iteration"]'})()
+        intents, meta = interpreter.classify(
+            "make it cheaper",
+            phase="done",
+            current_step="presentation",
+            recent_messages=["show me the deck"],
+        )
+        # Verify the system prompt sent to LLM includes phase info
+        call_args = mock_llm.invoke.call_args[0][0]
+        system_msg = call_args[0]["content"]
+        assert "Current phase: done" in system_msg
+        assert "Current step: presentation" in system_msg
+
+    # ── Multi-meta building ───────────────────────────────────────
+
+    def test_build_multi_meta_iteration_plus_proceed(self, interpreter):
+        """Combined metadata from multiple intents."""
+        meta = interpreter._build_multi_meta(
+            [Intent.PROCEED, Intent.ITERATION], "looks good but cheaper"
+        )
+        assert "agents_to_rerun" in meta
+        assert "feedback" in meta
+
+    def test_build_multi_meta_single_intent(self, interpreter):
+        """Single intent metadata works as before."""
+        meta = interpreter._build_multi_meta([Intent.PROCEED], "yes")
+        assert meta == {}
+
+    def test_build_multi_meta_question(self, interpreter):
+        """Question intent has no special metadata."""
+        meta = interpreter._build_multi_meta([Intent.QUESTION], "what does this cost?")
+        assert meta == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TestIntentInterpreterAsync
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestIntentInterpreterAsync:
+    """Async variant tests for multi-intent classification."""
+
+    @pytest.fixture
+    def interpreter(self):
+        return IntentInterpreter()
+
+    @pytest.mark.asyncio
+    async def test_aclassify_returns_list(self, interpreter, mock_llm):
+        """aclassify() returns (list[Intent], dict)."""
+        mock_llm.ainvoke.side_effect = None
+        mock_llm.ainvoke.return_value = type("R", (), {"content": '["input"]'})()
+        intents, meta = await interpreter.aclassify("hello")
+        assert isinstance(intents, list)
+        assert intents == [Intent.INPUT]
+
+    @pytest.mark.asyncio
+    async def test_aclassify_multi_intent(self, interpreter, mock_llm):
+        """aclassify() supports multi-intent."""
+        mock_llm.ainvoke.side_effect = None
+        mock_llm.ainvoke.return_value = type("R", (), {"content": '["proceed", "iteration"]'})()
+        intents, meta = await interpreter.aclassify(
+            "looks good but add HA",
+            phase="done",
+            current_step="",
+        )
+        assert Intent.PROCEED in intents
+        assert Intent.ITERATION in intents
+
+    @pytest.mark.asyncio
+    async def test_aclassify_fallback_on_error(self, interpreter, mock_llm):
+        """aclassify() falls back to [INPUT] on error."""
+        mock_llm.ainvoke.side_effect = RuntimeError("boom")
+        intents, meta = await interpreter.aclassify("anything")
+        assert intents == [Intent.INPUT]

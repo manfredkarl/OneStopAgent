@@ -46,6 +46,36 @@ SERVICE_NAME_MAP: dict[str, str] = {
     "Azure IoT Hub": "IoT Hub",
     # AI Foundry is built on Azure ML — use ML pricing as closest proxy
     "Azure AI Foundry": "Azure Machine Learning",
+    # ── Aliases: short names → canonical estimated-price keys ──────────
+    "Logic Apps": "Azure Logic Apps",
+    "Cosmos DB": "Azure Cosmos DB",
+    "Functions": "Azure Functions",
+    "Bot Service": "Azure Bot Service",
+    "SQL Database": "Azure SQL Database",
+    "App Service": "Azure App Service",
+    "Synapse Analytics": "Azure Synapse Analytics",
+    "Event Hubs": "Azure Event Hubs",
+    "IoT Hub": "Azure IoT Hub",
+    "Stream Analytics": "Azure Stream Analytics",
+    "Front Door": "Azure Front Door",
+    "Databricks": "Azure Databricks",
+    "Redis Cache": "Azure Cache for Redis",
+    "API Management": "Azure API Management",
+    "Azure Purview": "Microsoft Purview",
+    "Azure Spring Cloud": "Azure Spring Apps",
+    "Entra ID": "Microsoft Entra ID",
+    "Azure OpenAI": "Azure OpenAI Service",
+    "Azure Application Insights": "Application Insights",
+    "Azure Database for MySQL Flexible Server": "Azure Database for MySQL",
+    "Azure Database for PostgreSQL Flexible Server": "Azure Database for PostgreSQL",
+    "Azure Cognitive Search": "Azure AI Search",
+    "Power BI Premium": "Power BI",
+    "Azure Data Lake Storage Gen2": "Azure Data Lake Storage",
+    # ── Services that need exact API names for lookup ─────────────────
+    "Azure DDoS Protection": "Azure DDoS Protection",
+    "Microsoft Defender for Cloud": "Microsoft Defender for Cloud",
+    "Azure Spring Apps": "Azure Spring Apps",
+    "Microsoft Purview": "Microsoft Purview",
 }
 
 # ── Configurable AI model pricing (FRD-006 Fix N) ────────────────────
@@ -79,12 +109,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Microsoft Entra ID": {
         "price": 6.0,
         "source": "estimated",
-        "note": "Entra ID P1: $6/user/month (Microsoft 365 licensing)",
-        "unit": "1/Month per user",
-    },
-    "Entra ID": {
-        "price": 6.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Entra ID P1: $6/user/month (Microsoft 365 licensing)",
         "unit": "1/Month per user",
     },
@@ -93,6 +118,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Communication Services": {
         "price": 0.004,
         "source": "estimated",
+        "confidence": "low",
         "note": "Blended per-minute rate for mixed voice/chat (voice ~$0.05/min, chat messages ~$0.001/msg, weighted average for typical retail mix).",
         "unit": "1/Minute",
     },
@@ -100,6 +126,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure CycleCloud": {
         "price": 0.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "CycleCloud is free — compute cost from underlying VMs (see Virtual Machines line item)",
         "unit": "1/Month",
     },
@@ -107,6 +134,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Batch": {
         "price": 0.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Batch is free — compute cost from underlying VMs (see Virtual Machines line item)",
         "unit": "1/Month",
     },
@@ -114,18 +142,14 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure OpenAI Service": {
         "price": None,  # lazy — computed at query time
         "source": "calculated",
-        "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
-        "unit": "1/Request",
-    },
-    "Azure OpenAI": {
-        "price": None,  # lazy — computed at query time
-        "source": "calculated",
+        "confidence": "low",
         "note": "GPT-4o: computed from AI_MODEL_PRICING config (~$0.006/req)",
         "unit": "1/Request",
     },
     "Azure AI Foundry": {
         "price": None,  # lazy — computed at query time
         "source": "calculated",
+        "confidence": "low",
         "note": "AI Foundry uses Azure OpenAI pricing, computed from AI_MODEL_PRICING config",
         "unit": "1/Request",
     },
@@ -134,25 +158,15 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure SQL Database": {
         "price": 183.96,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure SQL DB General Purpose 2 vCores: ~$184/mo (Microsoft pricing page, 2025)",
-        "unit": "1/Month",
-    },
-    "SQL Database": {
-        "price": 183.96,
-        "source": "estimated",
-        "note": "Azure SQL DB General Purpose 2 vCores: ~$184/mo",
         "unit": "1/Month",
     },
     # Azure Database for MySQL — Flexible Server, 2 vCores
     "Azure Database for MySQL": {
         "price": 68.64,
         "source": "estimated",
-        "note": "Azure DB for MySQL Flexible Server 2 vCores: ~$69/mo",
-        "unit": "1/Month",
-    },
-    "Azure Database for MySQL Flexible Server": {
-        "price": 68.64,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Azure DB for MySQL Flexible Server 2 vCores: ~$69/mo",
         "unit": "1/Month",
     },
@@ -160,12 +174,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Database for PostgreSQL": {
         "price": 68.64,
         "source": "estimated",
-        "note": "Azure DB for PostgreSQL Flexible Server 2 vCores: ~$69/mo",
-        "unit": "1/Month",
-    },
-    "Azure Database for PostgreSQL Flexible Server": {
-        "price": 68.64,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Azure DB for PostgreSQL Flexible Server 2 vCores: ~$69/mo",
         "unit": "1/Month",
     },
@@ -173,6 +182,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Key Vault": {
         "price": 5.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Key Vault Standard: ~$5/mo base + $0.03/10K operations (10K ops/mo assumed)",
         "unit": "1/Month",
     },
@@ -180,12 +190,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Application Insights": {
         "price": 11.48,
         "source": "estimated",
-        "note": "Application Insights: ~$2.30/GB ingested, 5 GB/mo assumed",
-        "unit": "1/Month",
-    },
-    "Azure Application Insights": {
-        "price": 11.48,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Application Insights: ~$2.30/GB ingested, 5 GB/mo assumed",
         "unit": "1/Month",
     },
@@ -193,6 +198,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure DevOps": {
         "price": 30.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure DevOps Basic plan: $6/user/mo, 5 users assumed",
         "unit": "1/Month",
     },
@@ -200,6 +206,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Power Automate": {
         "price": 75.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Power Automate per-user plan: $15/user/mo, 5 users assumed",
         "unit": "1/Month",
     },
@@ -207,6 +214,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Power Apps": {
         "price": 100.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Power Apps per-user plan: $20/user/mo, 5 users assumed",
         "unit": "1/Month",
     },
@@ -214,32 +222,23 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Spring Apps": {
         "price": 98.15,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure Spring Apps Standard: ~$98/mo per instance (2 vCPU, 4 GB)",
-        "unit": "1/Month",
-    },
-    "Azure Spring Cloud": {
-        "price": 98.15,
-        "source": "estimated",
-        "note": "Azure Spring Apps Standard: ~$98/mo per instance",
         "unit": "1/Month",
     },
     # Azure Synapse Analytics — 100 DWU
     "Azure Synapse Analytics": {
         "price": 115.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Synapse Analytics DW100c: ~$1.51/hr = ~$115/mo at 76 compute hrs/mo",
-        "unit": "1/Month",
-    },
-    "Synapse Analytics": {
-        "price": 115.0,
-        "source": "estimated",
-        "note": "Synapse Analytics DW100c: ~$115/mo",
         "unit": "1/Month",
     },
     # Azure Bastion — Standard tier
     "Azure Bastion": {
         "price": 218.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure Bastion Standard: ~$0.30/hr = ~$218/mo (730 hrs)",
         "unit": "1/Month",
     },
@@ -247,6 +246,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Firewall": {
         "price": 912.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure Firewall Standard: ~$1.25/hr = ~$912/mo (730 hrs)",
         "unit": "1/Month",
     },
@@ -254,6 +254,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure DDoS Protection": {
         "price": 2944.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure DDoS Network Protection: ~$2,944/mo (per-VNet plan)",
         "unit": "1/Month",
     },
@@ -261,6 +262,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Policy": {
         "price": 0.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure Policy is free to use",
         "unit": "1/Month",
     },
@@ -268,6 +270,7 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Microsoft Defender for Cloud": {
         "price": 15.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Defender for Cloud Servers P1: ~$5/server/mo, 3 servers assumed",
         "unit": "1/Month",
     },
@@ -275,30 +278,21 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure IoT Hub": {
         "price": 250.0,
         "source": "estimated",
-        "note": "IoT Hub S2: ~$250/mo (1.5M msgs/day)",
-        "unit": "1/Month",
-    },
-    "IoT Hub": {
-        "price": 250.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "IoT Hub S2: ~$250/mo (1.5M msgs/day)",
         "unit": "1/Month",
     },
     "Azure IoT Edge": {
         "price": 0.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "IoT Edge runtime free; cost is in underlying compute/VMs",
         "unit": "1/Month",
     },
     "Azure Stream Analytics": {
         "price": 80.0,
         "source": "estimated",
-        "note": "Stream Analytics: ~$0.11/SU/hr, 1 SU assumed",
-        "unit": "1/Month",
-    },
-    "Stream Analytics": {
-        "price": 80.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Stream Analytics: ~$0.11/SU/hr, 1 SU assumed",
         "unit": "1/Month",
     },
@@ -306,37 +300,22 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Functions": {
         "price": 25.0,
         "source": "estimated",
-        "note": "Functions consumption: ~$0.20/M executions + compute",
-        "unit": "1/Month",
-    },
-    "Functions": {
-        "price": 25.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Functions consumption: ~$0.20/M executions + compute",
         "unit": "1/Month",
     },
     # ── Storage & Analytics ───────────────────────────────────────
-    "Azure Data Lake Storage Gen2": {
-        "price": 55.0,
-        "source": "estimated",
-        "note": "ADLS Gen2: ~$0.018/GB/mo, ~3TB stored",
-        "unit": "1/Month",
-    },
     "Azure Data Lake Storage": {
         "price": 55.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "ADLS Gen2: ~$0.018/GB/mo, ~3TB stored",
         "unit": "1/Month",
     },
     "Power BI": {
         "price": 4995.0,
         "source": "estimated",
-        "note": "Power BI Premium P1 capacity: ~$4,995/mo",
-        "unit": "1/Month",
-    },
-    "Power BI Premium": {
-        "price": 4995.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Power BI Premium P1 capacity: ~$4,995/mo",
         "unit": "1/Month",
     },
@@ -344,54 +323,35 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Monitor": {
         "price": 25.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Azure Monitor: ~$2.30/GB ingested, ~10GB/mo assumed",
         "unit": "1/Month",
     },
     "Azure Event Hubs": {
         "price": 1175.0,
         "source": "estimated",
-        "note": "Event Hubs Premium: ~$1,175/mo per PU",
-        "unit": "1/Month",
-    },
-    "Event Hubs": {
-        "price": 1175.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Event Hubs Premium: ~$1,175/mo per PU",
         "unit": "1/Month",
     },
     "Azure Cache for Redis": {
         "price": 73.0,
         "source": "estimated",
-        "note": "Redis Cache Standard C1 (1GB): ~$73/mo",
-        "unit": "1/Month",
-    },
-    "Redis Cache": {
-        "price": 73.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Redis Cache Standard C1 (1GB): ~$73/mo",
         "unit": "1/Month",
     },
     "Azure Front Door": {
         "price": 335.0,
         "source": "estimated",
-        "note": "Front Door Premium: ~$335/mo base + transfer",
-        "unit": "1/Month",
-    },
-    "Front Door": {
-        "price": 335.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Front Door Premium: ~$335/mo base + transfer",
         "unit": "1/Month",
     },
     "Azure Databricks": {
         "price": 450.0,
         "source": "estimated",
-        "note": "Databricks Standard: ~$0.40/DBU, ~3 DBUs assumed",
-        "unit": "1/Month",
-    },
-    "Databricks": {
-        "price": 450.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Databricks Standard: ~$0.40/DBU, ~3 DBUs assumed",
         "unit": "1/Month",
     },
@@ -399,54 +359,28 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Cosmos DB": {
         "price": 275.0,
         "source": "estimated",
-        "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
-        "unit": "1/Month",
-    },
-    "Cosmos DB": {
-        "price": 275.0,
-        "source": "estimated",
-        "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
-        "unit": "1/Month",
-    },
-    "Azure Cosmos DB for NoSQL": {
-        "price": 275.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Cosmos DB serverless: ~1M RU/s burst, ~$0.25/M RU + $0.25/GB storage",
         "unit": "1/Month",
     },
     "Azure AI Search": {
         "price": 250.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "AI Search S1: ~$250/mo (25 partitions, 50GB storage)",
-        "unit": "1/Month",
-    },
-    "Azure Cognitive Search": {
-        "price": 250.0,
-        "source": "estimated",
-        "note": "Cognitive Search S1: ~$250/mo",
         "unit": "1/Month",
     },
     "Azure Blob Storage": {
         "price": 42.0,
         "source": "estimated",
-        "note": "Blob Storage Hot LRS: ~$0.018/GB, 2TB assumed + transactions",
-        "unit": "1/Month",
-    },
-    "Blob Storage": {
-        "price": 42.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Blob Storage Hot LRS: ~$0.018/GB, 2TB assumed + transactions",
         "unit": "1/Month",
     },
     "Azure Bot Service": {
         "price": 50.0,
         "source": "estimated",
-        "note": "Bot Service S1: ~$0.50/1K messages, 100K msgs/mo assumed",
-        "unit": "1/Month",
-    },
-    "Bot Service": {
-        "price": 50.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Bot Service S1: ~$0.50/1K messages, 100K msgs/mo assumed",
         "unit": "1/Month",
     },
@@ -454,30 +388,28 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure App Service": {
         "price": 146.0,
         "source": "estimated",
-        "note": "App Service P1v3: ~$146/mo (Linux)",
-        "unit": "1/Month",
-    },
-    "App Service": {
-        "price": 146.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "App Service P1v3: ~$146/mo (Linux)",
         "unit": "1/Month",
     },
     "Azure Kubernetes Service": {
         "price": 292.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "AKS: $0 control plane + 2× D4s v5 nodes (~$146/mo each)",
         "unit": "1/Month",
     },
     "Azure Machine Learning": {
         "price": 350.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "AML Enterprise: managed endpoint D4s v5 (~$146) + compute instance (~$200)",
         "unit": "1/Month",
     },
     "Azure Digital Twins": {
         "price": 100.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Digital Twins: ~$0.001/operation, ~100M ops/mo assumed",
         "unit": "1/Month",
     },
@@ -485,48 +417,35 @@ ESTIMATED_PRICES: dict[str, dict] = {
     "Azure Logic Apps": {
         "price": 35.0,
         "source": "estimated",
-        "note": "Logic Apps Consumption: ~$0.000025/action, ~1M actions/mo",
-        "unit": "1/Month",
-    },
-    "Logic Apps": {
-        "price": 35.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Logic Apps Consumption: ~$0.000025/action, ~1M actions/mo",
         "unit": "1/Month",
     },
     "Azure API Management": {
         "price": 290.0,
         "source": "estimated",
-        "note": "API Management Standard: ~$290/mo per unit",
-        "unit": "1/Month",
-    },
-    "API Management": {
-        "price": 290.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "API Management Standard: ~$290/mo per unit",
         "unit": "1/Month",
     },
     "Microsoft Purview": {
         "price": 200.0,
         "source": "estimated",
-        "note": "Purview Data Map: ~$0.25/CU + governance features",
-        "unit": "1/Month",
-    },
-    "Azure Purview": {
-        "price": 200.0,
-        "source": "estimated",
+        "confidence": "low",
         "note": "Purview Data Map: ~$0.25/CU + governance features",
         "unit": "1/Month",
     },
     "Azure Site Recovery": {
         "price": 25.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Site Recovery: ~$25/protected instance/mo",
         "unit": "1/Month",
     },
     "Dynamics 365": {
         "price": 210.0,
         "source": "estimated",
+        "confidence": "low",
         "note": "Dynamics 365 Customer Service Professional: ~$50/user/mo, ~4 users",
         "unit": "1/Month",
     },
@@ -657,6 +576,12 @@ def _query_azure_pricing_uncached(
         span.set_attribute("pricing.sku", sku)
         span.set_attribute("pricing.region", region)
 
+        # Resolve aliases via SERVICE_NAME_MAP before checking ESTIMATED_PRICES
+        # (e.g. "Cosmos DB" → "Azure Cosmos DB", "Functions" → "Azure Functions")
+        canonical = SERVICE_NAME_MAP.get(service_name)
+        if canonical and canonical in ESTIMATED_PRICES:
+            service_name = canonical
+
         # Return a known estimate for services not in the Retail Prices API
         # Only exact match here — services that genuinely don't have API data
         if service_name in ESTIMATED_PRICES:
@@ -701,6 +626,7 @@ def _query_azure_pricing_uncached(
             return {
                 "price": price,
                 "source": source,
+                "confidence": "high",
                 "note": None if exact else f"Matched to {matched_sku}",
                 "unit": unit,
             }
@@ -712,6 +638,7 @@ def _query_azure_pricing_uncached(
                 est = dict(est_data)
                 if est["price"] is None:
                     est["price"] = per_request_cost()
+                est.setdefault("confidence", "low")
                 span.set_attribute("pricing.source", "estimated-fuzzy")
                 logger.info("Fuzzy match: '%s' → '%s'", service_name, est_name)
                 return est
@@ -724,6 +651,69 @@ def _query_azure_pricing_uncached(
         return {
             "price": 0.0,
             "source": "unavailable",
+            "confidence": "low",
             "note": f"No pricing data for {service_name} ({sku}). Check Azure Pricing Calculator.",
             "unit": "1/Month",
         }
+
+
+# ── Reservation / Savings Plan pricing ───────────────────────────────
+
+def _query_api_with_term(service_name: str, region: str, reservation_term: str) -> dict | None:
+    """Query the Retail Prices API for reservation pricing with a specific term."""
+    api_name = SERVICE_NAME_MAP.get(service_name, service_name)
+    filter_str = (
+        f"serviceName eq '{api_name}' and armRegionName eq '{region}' "
+        f"and reservationTerm eq '{reservation_term}'"
+    )
+    try:
+        resp = _http_client.get(
+            PRICING_API,
+            params={"$filter": filter_str, "currencyCode": "USD"},
+        )
+        if resp.status_code == 200:
+            items = resp.json().get("Items", [])
+            # Find the cheapest non-zero reservation price
+            non_zero = [i for i in items if i.get("retailPrice", 0) > 0]
+            if non_zero:
+                best = min(non_zero, key=lambda i: i["retailPrice"])
+                return {
+                    "price": best["retailPrice"],
+                    "unit": best.get("unitOfMeasure", "1 Month"),
+                    "sku": best.get("skuName", ""),
+                    "term": reservation_term,
+                }
+    except Exception as e:
+        logger.warning("Reservation pricing query failed for %s (%s): %s",
+                       service_name, reservation_term, e)
+    return None
+
+
+def query_reservation_pricing(
+    service_name: str, sku: str = "", region: str = "eastus"
+) -> dict:
+    """Query Azure Retail API for reservation pricing (1yr and 3yr).
+
+    Returns pay-as-you-go price alongside 1-year and 3-year reserved prices
+    with computed savings percentages.
+    """
+    paygo = query_azure_pricing_sync(service_name, sku, region)
+    ri_1yr = _query_api_with_term(service_name, region, "1 Year")
+    ri_3yr = _query_api_with_term(service_name, region, "3 Years")
+
+    paygo_price = paygo.get("price", 0) or 0
+
+    def _savings_pct(ri: dict | None) -> int | None:
+        if ri and ri.get("price") and paygo_price > 0.01:
+            return round((1 - ri["price"] / paygo_price) * 100)
+        return None
+
+    return {
+        "paygo": paygo,
+        "reserved_1yr": ri_1yr,
+        "reserved_3yr": ri_3yr,
+        "savings_potential": {
+            "1yr_pct": _savings_pct(ri_1yr),
+            "3yr_pct": _savings_pct(ri_3yr),
+        },
+    }
