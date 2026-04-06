@@ -338,6 +338,17 @@ async def test_reset():
 
 
 # ---------------------------------------------------------------------------
+# Iteration History
+# ---------------------------------------------------------------------------
+
+@app.get("/api/projects/{project_id}/iterations")
+async def get_iterations(project_id: str, x_user_id: str = Depends(_get_user_id)):
+    """Return the iteration history (before/after snapshots) for a project."""
+    state = orchestrator.get_state(project_id)
+    return {"iterations": state.iteration_history if state else []}
+
+
+# ---------------------------------------------------------------------------
 # PPTX Download
 # ---------------------------------------------------------------------------
 

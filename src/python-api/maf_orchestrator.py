@@ -13,7 +13,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from agents.state import AgentState
 from agents.pm_agent import ProjectManager, AGENT_INFO, Intent
@@ -221,6 +221,9 @@ class MAFOrchestrator:
             agents_to_rerun = self._retry_agents_for(target_agent)
             state.clarifications += f"\nDirect request for {target_agent}: {cleaned_message}"
 
+            # Capture before snapshot for iteration tracking
+            self._record_iteration_before(state, agents_to_rerun, cleaned_message)
+
             rerun_set = set(agents_to_rerun)
             with state._lock:
                 state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
@@ -246,6 +249,12 @@ class MAFOrchestrator:
             self.phases[project_id] = "executing"
             async for msg in self._run_workflow(project_id, state, list(rerun_set)):
                 yield msg
+
+            # Capture after snapshot and emit diff summary
+            self._record_iteration_after(state)
+            if state.iteration_history:
+                diff_summary = self._format_iteration_diff(state.iteration_history[-1])
+                yield self._msg(project_id, diff_summary, {"type": "iteration_diff"})
             return
         elif target_agent and phase == "executing":
             state.queued_messages.append({
@@ -534,6 +543,9 @@ class MAFOrchestrator:
                 agents_to_rerun = self._retry_agents_for(retry_target)
                 state.clarifications += f"\nRetry: {message}"
 
+                # Capture before snapshot for iteration tracking
+                self._record_iteration_before(state, agents_to_rerun, message)
+
                 rerun_set = set(agents_to_rerun)
                 with state._lock:
                     state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
@@ -572,12 +584,21 @@ class MAFOrchestrator:
                 async for msg in self._run_workflow(project_id, state, list(rerun_set)):
                     yield msg
 
+                # Capture after snapshot and emit diff summary
+                self._record_iteration_after(state)
+                if state.iteration_history:
+                    diff_summary = self._format_iteration_diff(state.iteration_history[-1])
+                    yield self._msg(project_id, diff_summary, {"type": "iteration_diff"})
+
             elif Intent.ITERATION in intents:
                 # Multi-intent: if PROCEED is also present, acknowledge approval first
                 if Intent.PROCEED in intents:
                     yield self._msg(project_id, "✅ Current step approved. Now applying your iteration feedback...")
                 agents_to_rerun = meta.get("agents_to_rerun") or pm.get_agents_to_rerun(message)
                 state.clarifications += f"\nIteration: {message}"
+
+                # Capture before snapshot for iteration tracking
+                self._record_iteration_before(state, agents_to_rerun, message)
 
                 rerun_set = set(agents_to_rerun)
                 with state._lock:
@@ -611,6 +632,12 @@ class MAFOrchestrator:
                 self.phases[project_id] = "executing"
                 async for msg in self._run_workflow(project_id, state, list(rerun_set)):
                     yield msg
+
+                # Capture after snapshot and emit diff summary
+                self._record_iteration_after(state)
+                if state.iteration_history:
+                    diff_summary = self._format_iteration_diff(state.iteration_history[-1])
+                    yield self._msg(project_id, diff_summary, {"type": "iteration_diff"})
 
             elif intent == Intent.BRAINSTORM:
                 self._cleanup_project(project_id)

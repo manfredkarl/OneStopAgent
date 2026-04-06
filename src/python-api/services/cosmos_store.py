@@ -7,7 +7,9 @@ Falls back to in-memory ProjectStore if Cosmos is unavailable.
 from __future__ import annotations
 
 import logging
+import time
 import dataclasses
+from datetime import datetime
 from typing import Any, Optional
 
 from azure.cosmos.aio import CosmosClient
@@ -87,6 +89,48 @@ class CosmosProjectStore:
         try:
             doc = await self._agent_state.read_item(project_id, partition_key=project_id)
             return _doc_to_agent_state(doc)
+        except Exception:
+            return None
+
+    # ── State checkpoints ─────────────────────────────────────────────
+
+    async def save_checkpoint(self, project_id: str, step_name: str, state: AgentState) -> str:
+        """Save a state snapshot before an agent runs. Returns checkpoint ID."""
+        checkpoint_id = f"{project_id}_{step_name}_{int(time.time())}"
+        state_dict = _agent_state_to_doc(project_id, state)
+        # Remove Cosmos-level keys that belong to the outer envelope
+        state_dict.pop("id", None)
+        state_dict.pop("projectId", None)
+        item = {
+            "id": checkpoint_id,
+            "projectId": project_id,
+            "stepName": step_name,
+            "state": state_dict,
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": "checkpoint",
+        }
+        await self._agent_state.upsert_item(item)
+        return checkpoint_id
+
+    async def list_checkpoints(self, project_id: str) -> list[dict]:
+        """List all checkpoints for a project, newest first."""
+        query = (
+            "SELECT c.id, c.stepName, c.timestamp FROM c "
+            "WHERE c.projectId = @pid AND c.type = 'checkpoint' "
+            "ORDER BY c.timestamp DESC"
+        )
+        items: list[dict] = []
+        async for item in self._agent_state.query_items(
+            query, parameters=[{"name": "@pid", "value": project_id}],
+        ):
+            items.append(item)
+        return items
+
+    async def restore_checkpoint(self, project_id: str, checkpoint_id: str) -> Optional[AgentState]:
+        """Restore state from a checkpoint."""
+        try:
+            item = await self._agent_state.read_item(checkpoint_id, partition_key=project_id)
+            return _doc_to_agent_state(item["state"])
         except Exception:
             return None
 
