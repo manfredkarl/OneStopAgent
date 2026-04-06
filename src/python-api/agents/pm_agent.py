@@ -711,7 +711,7 @@ RULES:
                 parts.append("### Per-Service Cost Breakdown\n")
                 parts.append("| Service | SKU | Monthly |")
                 parts.append("|---------|-----|--------:|")
-                for item in sorted_items:
+                for item in top5:
                     cost = item.get("monthlyCost", 0)
                     note = item.get("pricingNote") or ""
                     if cost == 0 and note:

@@ -169,8 +169,8 @@ class PresentationAgent:
                 ],
             }
 
-        if state.roi:
-            roi = state.roi
+        roi = state.roi or {}
+        if roi:
             data["roi"] = {
                 "percent": roi.get("roi_percent"),
                 "paybackMonths": roi.get("payback_months"),

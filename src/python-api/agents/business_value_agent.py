@@ -293,7 +293,10 @@ CATEGORY RULES:
                 raise ValueError("LLM returned unparseable JSON for value drivers")
 
             # Safety cap at 5 drivers (prompt asks for 2-4)
-            drivers = result.get("drivers", [])[:5]
+            drivers = result.get("drivers") or []
+            if not isinstance(drivers, list):
+                drivers = []
+            drivers = drivers[:5]
             for d in drivers:
                 d.setdefault("name", "")
                 d.setdefault("metric", "")

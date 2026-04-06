@@ -225,6 +225,13 @@ Keep it to 3-5 questions max. Be specific to the architecture and use case."""},
         if not user_assumptions:
             # Phase 1: Generate usage assumption questions
             assumptions = self.generate_usage_assumptions(state)
+            if not assumptions:
+                # Provide default assumptions if LLM returned empty
+                assumptions = [
+                    {"id": "concurrent_users", "label": "Concurrent Users", "default": 1000, "unit": "users"},
+                    {"id": "data_volume_gb", "label": "Data Volume", "default": 500, "unit": "GB"},
+                    {"id": "api_calls_per_month", "label": "Monthly API Calls", "default": 100000, "unit": "calls"},
+                ]
             state.costs = {
                 "phase": "needs_input",
                 "assumptions_needed": assumptions,

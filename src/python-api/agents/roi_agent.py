@@ -68,7 +68,9 @@ class ROIAgent:
             def _norm(v: float | None, default: float) -> float:
                 if v is None:
                     return default
-                return v / 100 if v > 1 else v
+                if v > 1:
+                    v = v / 100
+                return max(0.0, min(1.0, v))  # Clamp to 0-1
             return [
                 _norm(sa.adoption_year1, 0.50),
                 _norm(sa.adoption_year2, 0.85),
@@ -666,6 +668,7 @@ class ROIAgent:
             if migration_scaled > impl_cost_total:
                 # Use timeline-based estimate if larger
                 scale_factor = migration_scaled / max(impl_cost_total, 1)
+                scale_factor = min(scale_factor, 3.0)  # Cap at 3x the baseline
                 for item in impl_line_items:
                     item["amount"] = round(item["amount"] * scale_factor)
                 impl_cost_total = sum(i["amount"] for i in impl_line_items)
@@ -1403,7 +1406,11 @@ class ROIAgent:
     # ── Needs-info helper ────────────────────────────────────────────
     def _needs_info(self, reason: str, questions: list[str],
                     qualitative: list[str] | None = None) -> dict:
-        """Return an ROI result that signals we need user input to calculate."""
+        """Return an ROI result signaling insufficient data.
+
+        Only reachable when cost estimate is zero/missing (no Cost agent output).
+        In normal flow, _estimate_impact_range() provides fallback values.
+        """
         return {
             "annual_cost": 0,
             "annual_value": None,
