@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -214,6 +215,24 @@ class AgentState:
     # ── Message queue (messages received during execution) ────────
     queued_messages: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Recent chat (transient — not persisted to Cosmos) ────────
+    recent_chat: list[dict[str, str]] = field(default_factory=list, repr=False)
+
+    # ── Iteration tracking ───────────────────────────────────────────
+    iteration_history: list[dict[str, Any]] = field(default_factory=list)
+    # Each entry: {
+    #   "iteration": 1,
+    #   "timestamp": "...",
+    #   "trigger": "make it cheaper",
+    #   "agents_rerun": ["cost", "roi", "presentation"],
+    #   "before": {"cost": {...}, "roi": {...}},
+    #   "after": {"cost": {...}, "roi": {...}},
+    # }
+
+    # ── Conversational mode ──────────────────────────────────────────
+    conversation_agent: str = ""   # When set, all messages route to this agent
+    conversation_turns: int = 0    # Track how many turns in current conversation
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:
@@ -225,12 +244,21 @@ class AgentState:
         """Typed view of shared_assumptions — cached per state instance.
 
         The cache is invalidated when ``shared_assumptions`` is reassigned
-        (which happens once, in the orchestrator).  After that point the
-        dict is effectively immutable for the lifetime of a pipeline run.
+        (which happens once, in the orchestrator) or when
+        ``invalidate_sa_cache()`` is called after in-place dict updates.
         """
         if self._sa_cache is None:
             self._sa_cache = SharedAssumptions.from_dict(self.shared_assumptions)
         return self._sa_cache
+
+    def invalidate_sa_cache(self) -> None:
+        """Force re-parse of shared_assumptions on next ``.sa`` access.
+
+        Call this after modifying ``shared_assumptions`` dict in-place
+        (e.g. ``state.shared_assumptions[key] = new_val``) since in-place
+        mutations don't trigger ``__setattr__``.
+        """
+        super().__setattr__("_sa_cache", None)
 
     def __setattr__(self, name: str, value: Any) -> None:
         super().__setattr__(name, value)
@@ -242,10 +270,11 @@ class AgentState:
                 pass  # during __init__, _sa_cache doesn't exist yet
 
     def __getstate__(self) -> dict:
-        """Exclude non-picklable lock and transient cache from serialization."""
+        """Exclude non-picklable lock, transient cache, and chat from serialization."""
         state = self.__dict__.copy()
         state.pop("_lock", None)
         state.pop("_sa_cache", None)
+        state.pop("recent_chat", None)
         return state
 
     def __setstate__(self, state: dict) -> None:
@@ -254,8 +283,15 @@ class AgentState:
         self._lock = threading.Lock()
         self._sa_cache = None
 
-    def to_context_string(self) -> str:
-        """Build a context string for LLM prompts with everything known so far."""
+    def to_context_string(self, chat_history: list[dict] | None = None) -> str:
+        """Build a context string for LLM prompts with everything known so far.
+
+        Parameters
+        ----------
+        chat_history:
+            Optional list of ``{"role": ..., "content": ...}`` dicts.
+            When provided these take precedence over ``self.recent_chat``.
+        """
         parts = [f"User request: {self.user_input}"]
         if self.company_profile:
             p = self.company_profile
@@ -300,6 +336,21 @@ class AgentState:
             roi_pct = self.roi.get("roi_percent")
             if roi_pct is not None:
                 parts.append(f"ROI: {roi_pct:.0f}%")
+
+        # Append recent conversation history
+        history = chat_history if chat_history is not None else self.recent_chat
+        if history:
+            recent = history[-6:]  # Last 6 messages (~3 turns)
+            history_parts = []
+            for msg in recent:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                history_parts.append(f"  [{role}]: {content}")
+            if history_parts:
+                parts.append("Recent conversation:\n" + "\n".join(history_parts))
+
         return "\n".join(parts)
 
     def mark_step_running(self, step: str) -> None:

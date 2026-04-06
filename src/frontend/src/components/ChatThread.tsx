@@ -127,6 +127,30 @@ export default function ChatThread({ messages, onSend, projectId, isThinking }: 
             );
           }
 
+          if (msg.metadata?.type === 'agent_conversation') {
+            const actions = msg.metadata.actions ?? [
+              { id: 'done', label: '✅ Done chatting', variant: 'primary' as const },
+            ];
+            return (
+              <div key={msg.id} className="flex gap-3 items-start">
+                <span className="text-xl shrink-0 mt-0.5">{EMOJIS[agentId] || '\uD83D\uDD27'}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-blue-400 mb-1">
+                    💬 Chatting with {getAgentName(agentId)} (turn {msg.metadata.turn})
+                  </div>
+                  <div className="prose-content border-l-2 border-blue-400 pl-3">
+                    <MessageContent content={msg.content} />
+                  </div>
+                  <ActionButtons
+                    actions={actions}
+                    onAction={(id) => onSend?.(id)}
+                    disabled={isThinking}
+                  />
+                </div>
+              </div>
+            );
+          }
+
           if (msg.metadata?.type === 'approval') {
             const actions = msg.metadata.actions ?? [
               { id: 'proceed', label: '✅ Proceed', variant: 'primary' as const },

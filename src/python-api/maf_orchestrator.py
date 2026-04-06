@@ -7,10 +7,12 @@ needs zero changes.
 """
 
 import asyncio
+import copy
 import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from agents.state import AgentState
@@ -37,6 +39,40 @@ _AGENT_STATE_FIELDS = {
 # @mention regex for targeting specific agents
 _AGENT_MENTION_RE = re.compile(
     r'@(architect|cost|business[_\s]?value|bv|roi|presentation|pm)\b',
+    re.IGNORECASE,
+)
+
+# Regex for detecting numeric assumption corrections in user messages
+_NUMERIC_UPDATE_RE = re.compile(
+    r'(?:actually|changed?\s+to|now|updated?\s+to|correct(?:ion)?:?|should\s+be)\s+'
+    r'(\d[\d,]*(?:\.\d+)?)\s*'
+    r'(users?|employees?|spend|budget|gb|tb|months?|revenue)',
+    re.IGNORECASE,
+)
+
+# Map captured keyword → SharedAssumptions field name
+_ASSUMPTION_FIELD_MAP: dict[str, str] = {
+    "user": "total_users",
+    "employee": "affected_employees",
+    "spend": "current_annual_spend",
+    "budget": "current_annual_spend",
+    "gb": "data_volume_gb",
+    "tb": "data_volume_gb",
+    "month": "timeline_months",
+    "revenue": "monthly_revenue",
+}
+
+# Which assumption fields affect which downstream agents
+_ASSUMPTION_AGENT_IMPACT: dict[str, list[str]] = {
+    "total_users": ["cost", "roi", "presentation"],
+    "concurrent_users": ["cost", "roi", "presentation"],
+    "current_annual_spend": ["business_value", "roi", "presentation"],
+    "monthly_revenue": ["business_value", "roi", "presentation"],
+}
+
+# Conversational mode entry regex
+_CHAT_WITH_RE = re.compile(
+    r'(?:chat|talk|discuss|speak)\s+(?:with|to)\s+(architect|cost|business[_\s]?value|bv|roi|presentation)',
     re.IGNORECASE,
 )
 
@@ -95,6 +131,27 @@ class MAFOrchestrator:
             except Exception:
                 logger.warning("Failed to persist state for %s", project_id, exc_info=True)
 
+    async def _save_checkpoint(self, project_id: str, step_name: str) -> None:
+        """Save a state checkpoint before an agent runs."""
+        if self._store and hasattr(self._store, "save_checkpoint"):
+            try:
+                await self._store.save_checkpoint(
+                    project_id, step_name, self.get_state(project_id),
+                )
+            except Exception:
+                logger.warning("Failed to save checkpoint for %s/%s", project_id, step_name)
+
+    async def _inject_chat_history(self, project_id: str, state: AgentState) -> None:
+        """Load recent chat messages from the store into state.recent_chat."""
+        if self._store and hasattr(self._store, "get_messages"):
+            try:
+                msgs = await self._store.get_messages(project_id)
+                state.recent_chat = [
+                    {"role": m.role, "content": m.content} for m in msgs[-6:]
+                ]
+            except Exception:
+                logger.debug("Could not load chat history for %s", project_id)
+
     def _msg(self, project_id: str, content: str, metadata: dict | None = None,
              agent_id: str = "pm") -> ChatMessage:
         return ChatMessage(
@@ -112,6 +169,30 @@ class MAFOrchestrator:
 
         # Track user messages for context-aware classification
         self._chat_histories.setdefault(project_id, []).append(message)
+
+        # ── Conversational mode: exit check ─────────────────────────
+        if state.conversation_agent:
+            if message.strip().lower() in ("done", "exit", "proceed", "stop", "back"):
+                agent = state.conversation_agent
+                state.conversation_agent = ""
+                state.conversation_turns = 0
+                yield self._msg(project_id, f"Left conversation with {agent}. What would you like to do next?")
+                return
+
+            async for msg in self._handle_conversation(project_id, state, message):
+                yield msg
+            return
+
+        # ── Conversational mode: entry check ────────────────────────
+        chat_match = _CHAT_WITH_RE.search(message)
+        if chat_match:
+            agent = chat_match.group(1).lower().replace(" ", "_")
+            if agent == "bv":
+                agent = "business_value"
+            state.conversation_agent = agent
+            state.conversation_turns = 0
+            yield self._msg(project_id, f"💬 You're now chatting with the **{agent}** agent. Say **done** or click the button when finished.")
+            return
 
         # Attach company profile to state on first message (phase == "new")
         if phase == "new" and company_profile and not state.company_profile:
@@ -286,6 +367,9 @@ class MAFOrchestrator:
                 yield self._msg(project_id, "Got it. What else would you like to adjust, or say **proceed** to start?")
 
             else:
+                # Check for numeric assumption updates in clarifications
+                self._detect_assumption_updates(message, state)
+
                 if state.clarifications:
                     state.clarifications += f"\n{message}"
                 else:
@@ -339,6 +423,12 @@ class MAFOrchestrator:
 
         # ── Phase: executing (workflow paused for HITL) ─────────────
         elif phase == "executing":
+            # Detect and apply numeric assumption corrections mid-pipeline
+            updated_fields = self._detect_assumption_updates(message, state)
+            if updated_fields:
+                yield self._msg(project_id, f"📊 Updated assumptions: {', '.join(updated_fields)}. "
+                                f"Affected agents will be refreshed.")
+
             pending = self.pending_requests.get(project_id, {})
             if pending:
                 # Feed user response to the paused workflow
@@ -380,6 +470,63 @@ class MAFOrchestrator:
 
         # ── Phase: done ─────────────────────────────────────────────
         elif phase == "done":
+            # Detect and apply numeric assumption corrections post-pipeline
+            updated_fields = self._detect_assumption_updates(message, state)
+            if updated_fields:
+                # Determine affected agents and trigger re-run
+                agents_affected: set[str] = set()
+                for field in updated_fields:
+                    agents_affected.update(
+                        _ASSUMPTION_AGENT_IMPACT.get(field, ["cost", "business_value", "roi", "presentation"])
+                    )
+
+                rerun_set = agents_affected & set(self._PIPELINE_ORDER)
+                with state._lock:
+                    state.completed_steps = [s for s in state.completed_steps if s not in rerun_set]
+                    state.failed_steps = [s for s in state.failed_steps if s not in rerun_set]
+                    state.skipped_steps = [s for s in state.skipped_steps if s not in rerun_set]
+                for agent_name in rerun_set:
+                    if agent_name == "cost" and "phase" in state.costs:
+                        del state.costs["phase"]
+                    if agent_name == "business_value" and "phase" in state.business_value:
+                        del state.business_value["phase"]
+                    field_key = _AGENT_STATE_FIELDS.get(agent_name)
+                    if field_key:
+                        if field_key == "presentation_path":
+                            state.presentation_path = ""
+                        else:
+                            setattr(state, field_key, {})
+
+                ordered = [a for a in self._PIPELINE_ORDER if a in rerun_set]
+                names = [AGENT_INFO.get(a, {"name": a})["name"] for a in ordered]
+                yield self._msg(project_id, f"📊 Updated assumptions: {', '.join(updated_fields)}. "
+                                f"Re-running {', '.join(names)}...")
+                state.clarifications += f"\nAssumption update: {message}"
+                self.phases[project_id] = "executing"
+                async for msg in self._run_workflow(project_id, state, ordered):
+                    yield msg
+                return
+
+            # Undo / revert to previous checkpoint
+            if message.strip().lower() in ("undo", "revert", "go back"):
+                if self._store and hasattr(self._store, "list_checkpoints"):
+                    try:
+                        checkpoints = await self._store.list_checkpoints(project_id)
+                    except Exception:
+                        checkpoints = []
+                    if len(checkpoints) >= 2:
+                        prev = checkpoints[1]  # [0] is current, [1] is previous
+                        try:
+                            restored = await self._store.restore_checkpoint(project_id, prev["id"])
+                        except Exception:
+                            restored = None
+                        if restored:
+                            self.states[project_id] = restored
+                            yield self._msg(project_id, f"⏪ Reverted to before **{prev['stepName']}** step.")
+                            return
+                yield self._msg(project_id, "No checkpoints available to revert to.")
+                return
+
             # AC-4: Detect granular retry commands ("retry cost", "retry roi", etc.)
             retry_target = self._parse_retry_command(message)
             if retry_target:
@@ -659,6 +806,136 @@ class MAFOrchestrator:
         cleaned = message[:match.start()] + message[match.end():]
         return agent, cleaned.strip()
 
+    async def _handle_conversation(
+        self, project_id: str, state: AgentState, message: str,
+    ) -> AsyncGenerator[ChatMessage, None]:
+        """Handle a message in conversational mode — route to the specified agent."""
+        agent_name = state.conversation_agent
+
+        context = state.to_context_string()
+        agent_context = {
+            "architect": "You are an Azure solution architect. Help the user refine the architecture.",
+            "cost": "You are an Azure cost specialist. Help the user understand and optimize costs.",
+            "business_value": "You are a business value consultant. Help the user understand value drivers.",
+            "roi": "You are an ROI analyst. Help the user understand the return on investment.",
+            "presentation": "You are a presentation specialist. Help the user refine the slide deck.",
+        }
+
+        system_prompt = agent_context.get(agent_name, f"You are the {agent_name} specialist.")
+
+        try:
+            response = await asyncio.wait_for(llm.ainvoke([
+                {"role": "system", "content": f"{system_prompt}\n\nProject context:\n{context}"},
+                {"role": "user", "content": message},
+            ]), timeout=60)
+            reply = response.content
+        except asyncio.TimeoutError:
+            reply = "I'm having trouble processing that right now. Could you try again?"
+
+        state.conversation_turns += 1
+
+        yield self._msg(project_id, reply, metadata={
+            "type": "agent_conversation",
+            "agent": agent_name,
+            "turn": state.conversation_turns,
+            "actions": [
+                {"id": "done", "label": "✅ Done chatting", "variant": "primary"},
+            ],
+        }, agent_id=agent_name.replace("_", "-"))
+
+    @staticmethod
+    def _detect_assumption_updates(message: str, state: AgentState) -> list[str]:
+        """Parse numeric corrections from user message and update shared_assumptions.
+
+        Scans *message* for patterns like "actually 5000 users" or "changed to
+        2TB" and patches ``state.shared_assumptions`` in-place.  Returns a list
+        of updated field names (empty if nothing matched).
+        """
+        updated: list[str] = []
+        for match in _NUMERIC_UPDATE_RE.finditer(message):
+            value_str = match.group(1).replace(",", "")
+            value = float(value_str)
+            keyword = match.group(2).lower().rstrip("s")  # normalize plural
+
+            sa_field = _ASSUMPTION_FIELD_MAP.get(keyword)
+            if sa_field:
+                if keyword == "tb":
+                    value *= 1024  # TB → GB
+                state.shared_assumptions[sa_field] = value
+                updated.append(sa_field)
+                logger.info("Updated assumption %s = %s from user message", sa_field, value)
+
+        if updated:
+            state.invalidate_sa_cache()
+        return updated
+
+    # ── Iteration tracking helpers ─────────────────────────────────
+
+    def _capture_snapshot(self, state: AgentState, agents: list[str]) -> dict[str, Any]:
+        """Capture a deep copy of agent output fields for the given agents."""
+        snapshot: dict[str, Any] = {}
+        for agent_name in agents:
+            field_name = _AGENT_STATE_FIELDS.get(agent_name)
+            if field_name and field_name != "presentation_path":
+                val = getattr(state, field_name, {})
+                if val:
+                    snapshot[agent_name] = copy.deepcopy(val)
+        return snapshot
+
+    def _record_iteration_before(
+        self, state: AgentState, agents: list[str], trigger: str,
+    ) -> None:
+        """Record a 'before' snapshot in iteration_history."""
+        before_snapshot = self._capture_snapshot(state, agents)
+        entry = {
+            "iteration": len(state.iteration_history) + 1,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "trigger": trigger,
+            "agents_rerun": list(agents),
+            "before": before_snapshot,
+            "after": {},
+        }
+        state.iteration_history.append(entry)
+
+    def _record_iteration_after(self, state: AgentState) -> None:
+        """Fill in the 'after' snapshot for the most recent iteration entry."""
+        if not state.iteration_history:
+            return
+        current = state.iteration_history[-1]
+        if current.get("after"):
+            return  # already filled
+        current["after"] = self._capture_snapshot(state, current["agents_rerun"])
+
+    def _format_iteration_diff(self, entry: dict) -> str:
+        """Format a brief summary of what changed in this iteration."""
+        parts = [f"**Iteration #{entry['iteration']}** — _{entry['trigger']}_\n"]
+
+        for agent in entry["agents_rerun"]:
+            before = entry["before"].get(agent, {})
+            after = entry["after"].get(agent, {})
+
+            if agent == "cost":
+                before_total = before.get("estimate", {}).get("totalMonthlyCost", 0)
+                after_total = after.get("estimate", {}).get("totalMonthlyCost", 0)
+                if before_total and after_total:
+                    diff = after_total - before_total
+                    pct = (diff / before_total * 100) if before_total else 0
+                    arrow = "📉" if diff < 0 else "📈"
+                    parts.append(
+                        f"- {arrow} **Cost**: ${before_total:,.0f} → ${after_total:,.0f}/mo ({pct:+.1f}%)"
+                    )
+
+            elif agent == "roi":
+                before_roi = before.get("threeYearROI", 0)
+                after_roi = after.get("threeYearROI", 0)
+                if before_roi or after_roi:
+                    parts.append(f"- **ROI**: {before_roi:.0f}% → {after_roi:.0f}%")
+
+        if len(parts) == 1:
+            parts.append("- Agents re-run: " + ", ".join(entry["agents_rerun"]))
+
+        return "\n".join(parts)
+
     async def _drain_queue(self, project_id: str, state: AgentState):
         """Process queued messages after a step completes."""
         if not state.queued_messages:
@@ -680,6 +957,9 @@ class MAFOrchestrator:
         self, project_id: str, state: AgentState, active_agents: list[str],
     ) -> AsyncGenerator[ChatMessage, None]:
         """Start a new MAF workflow and stream events as ChatMessages."""
+        # Inject recent chat history into state for agent context
+        await self._inject_chat_history(project_id, state)
+
         wf = create_pipeline_workflow()
         self.workflows[project_id] = wf
 
@@ -776,6 +1056,8 @@ class MAFOrchestrator:
                         step = data.get("step", "")
 
                         if etype == "agent_start":
+                            # Save checkpoint before agent runs
+                            await self._save_checkpoint(project_id, step)
                             msg_id = data.get("msg_id", str(uuid.uuid4()))
                             # Normalize step name for frontend (underscores → hyphens)
                             agent_id = step.replace("_", "-")
@@ -854,7 +1136,7 @@ class MAFOrchestrator:
                             step = event.data.step
                             yield ChatMessage(
                                 project_id=project_id, role="agent", agent_id="pm",
-                                content=f"{summary}\n\nSay **proceed** to continue, **skip** to skip, or provide feedback to refine.",
+                                content=f"{summary}\n\nSay **proceed** to continue, **skip** to skip, or provide feedback to refine. You can also say **chat with {step}** to discuss further.",
                                 metadata={
                                     "type": "approval",
                                     "step": step,
