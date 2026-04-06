@@ -98,15 +98,22 @@ class MAFOrchestrator:
         self._pending_assumptions: dict[str, list] = {}  # project_id → generated assumptions
         self._locks: dict[str, asyncio.Lock] = {}  # per-project concurrency guard (for future use)
         self._chat_histories: dict[str, list[str]] = {}  # project_id → user messages
+        self._deferred_rerun: dict[str, set[str]] = {}  # agents flagged by _drain_queue for re-run
         self._store = store  # optional persistence store (CosmosProjectStore)
 
     def _cleanup_project(self, project_id: str) -> None:
-        """Remove workflow and pending requests for completed project."""
+        """Remove workflow and pending requests for completed project.
+
+        Clears all per-project dicts except states/phases (user may query
+        state after pipeline is done) and _chat_histories (post-completion
+        context).
+        """
         self.workflows.pop(project_id, None)
         self.pending_requests.pop(project_id, None)
         self._pending_assumptions.pop(project_id, None)
+        self._chat_histories.pop(project_id, None)
         self._locks.pop(project_id, None)
-        # Keep _chat_histories for post-completion context
+        self._deferred_rerun.pop(project_id, None)
 
     def _recent_messages(self, project_id: str, count: int = 3) -> list[str]:
         """Return the last ``count`` user messages for a project."""
@@ -164,6 +171,7 @@ class MAFOrchestrator:
         active_agents: list[str], description: str,
         company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
+      try:
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
 
@@ -396,6 +404,10 @@ class MAFOrchestrator:
                 except (asyncio.TimeoutError, json.JSONDecodeError, ValueError, TypeError, RuntimeError):
                     ack_text = "Got it. Anything else, or say **proceed** to start?"
                 yield self._msg(project_id, ack_text)
+
+            # After processing primary intent, check for secondary iteration intent
+            if len(intents) > 1 and Intent.ITERATION in intents[1:]:
+                state.clarifications += f"\nPending iteration: {message}"
 
         # ── Phase: collecting_assumptions ──────────────────────────────
         elif phase == "collecting_assumptions":
@@ -659,6 +671,10 @@ class MAFOrchestrator:
                 except asyncio.TimeoutError:
                     follow_up_text = "I'm having trouble processing that right now. Could you try again?"
                 yield self._msg(project_id, follow_up_text)
+
+      except Exception:
+        logger.exception("Unhandled error in handle_message for project %s", project_id)
+        yield self._msg(project_id, "⚠️ An unexpected error occurred. Please try again.")
 
     # ── Shared assumption generation ───────────────────────────────
 
@@ -1014,6 +1030,16 @@ class MAFOrchestrator:
         async for chat_msg in self._process_workflow_events(project_id, stream):
             yield chat_msg
 
+        # After the workflow finishes, re-run any agents flagged by
+        # _drain_queue during execution (avoids recursive _run_workflow).
+        drained = self._deferred_rerun.pop(project_id, None)
+        if drained:
+            rerun_list = list(drained)
+            logger.info("Re-running deferred agents after workflow: %s", rerun_list)
+            self.phases[project_id] = "executing"
+            async for msg in self._run_workflow(project_id, state, rerun_list):
+                yield msg
+
     _APPROVAL_KEYWORDS = frozenset({
         "proceed", "skip", "refine", "yes", "ok", "continue",
         "skip this", "next", "redo", "again", "retry",
@@ -1121,10 +1147,14 @@ class MAFOrchestrator:
                                 project_id=project_id, role="agent",
                                 agent_id=agent_id, content=content, metadata=metadata,
                             )
-                            # Drain queued messages after each agent completes
+                            # Drain queued messages after each agent completes.
+                            # Store flagged agents — they are re-run AFTER the
+                            # current workflow event loop finishes to avoid
+                            # recursive _run_workflow() calls.
                             drained_agents = await self._drain_queue(project_id, self.get_state(project_id))
                             if drained_agents:
                                 logger.info("Drain queue flagged agents for re-run: %s", drained_agents)
+                                self._deferred_rerun.setdefault(project_id, set()).update(drained_agents)
                             # Persist state after each agent completes
                             await self._persist_state(project_id)
 

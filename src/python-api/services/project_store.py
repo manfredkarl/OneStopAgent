@@ -56,9 +56,9 @@ class ProjectStore:
         """In-memory store doesn't persist state separately."""
         return None
 
-    async def save_checkpoint(self, project_id: str, step_name: str, state) -> None:
-        """No-op for in-memory store — no checkpoint persistence."""
-        pass
+    async def save_checkpoint(self, project_id: str, step_name: str, state) -> str:
+        """No-op for in-memory store — returns a synthetic checkpoint ID."""
+        return f"{project_id}_{step_name}_inmemory"
 
     async def list_checkpoints(self, project_id: str) -> list:
         """In-memory store has no persisted checkpoints."""

@@ -243,14 +243,18 @@ def mock_llm():
 
     mock = MagicMock()
     mock.invoke = MagicMock(side_effect=_side_effect)
-    mock.ainvoke = AsyncMock(side_effect=_side_effect)
+    async def _async_side_effect(messages):
+        return _side_effect(messages)
+
+    mock.ainvoke = AsyncMock(side_effect=_async_side_effect)
 
     async def _astream(messages):
         resp = _side_effect(messages)
-        for chunk in resp.content:
-            mock_chunk = MagicMock()
-            mock_chunk.content = chunk
-            yield mock_chunk
+        # Yield full content as a single chunk instead of char-by-char
+        mock_chunk = MagicMock()
+        mock_chunk.text = resp.content
+        mock_chunk.content = resp.content
+        yield mock_chunk
 
     mock.astream = _astream
 

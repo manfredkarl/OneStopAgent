@@ -37,14 +37,21 @@ jobs:
       - name: Lint (compile check)
         run: |
           cd src/python-api
-          python -m py_compile main.py
-          python -m py_compile maf_orchestrator.py
-          python -m py_compile workflow.py
-          python -m py_compile agents/roi_agent.py
-          python -m py_compile agents/architect_agent.py
-          python -m py_compile agents/business_value_agent.py
-          python -m py_compile agents/llm.py
-          python -m py_compile services/token_provider.py
+          python -c "
+          import py_compile
+          for f in [
+              'main.py', 'maf_orchestrator.py', 'workflow.py',
+              'agents/pm_agent.py', 'agents/architect_agent.py',
+              'agents/business_value_agent.py', 'agents/cost_agent.py',
+              'agents/roi_agent.py', 'agents/presentation_agent.py',
+              'agents/llm.py', 'agents/state.py',
+              'services/token_provider.py', 'services/pricing.py',
+              'services/company_intelligence.py', 'services/cosmos_store.py',
+              'services/project_store.py', 'services/presentation.py',
+          ]:
+              py_compile.compile(f, doraise=True)
+              print(f'✓ {f}')
+          "
 
       - name: Run unit tests
         run: |
@@ -59,7 +66,8 @@ jobs:
             --ignore=tests/test_mermaid_cap.py \
             -m "not integration" \
             --tb=short \
-            --junitxml=../../test-results/unit-results.xml
+            --junitxml=../../test-results/unit-results.xml \
+            --cov=agents --cov=services --cov-report=term-missing
 
       - name: Test Summary
         if: always()

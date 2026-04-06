@@ -6,6 +6,8 @@ const BASE_URL = import.meta.env.VITE_API_URL || (
     : 'http://localhost:8000'
 );
 
+const USER_ID = import.meta.env.VITE_USER_ID || 'demo-user';
+
 function normalizeMessage(msg: any): ChatMessage {
   return {
     id: msg.id,
@@ -21,7 +23,7 @@ function normalizeMessage(msg: any): ChatMessage {
 export async function createProject(description: string, customerName?: string, activeAgents?: string[], companyProfile?: CompanyProfile) {
   const res = await fetch(`${BASE_URL}/api/projects`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
+    headers: { 'Content-Type': 'application/json', 'x-user-id': USER_ID },
     body: JSON.stringify({ description, customer_name: customerName, active_agents: activeAgents, company_profile: companyProfile }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -30,7 +32,7 @@ export async function createProject(description: string, customerName?: string, 
 
 export async function searchCompany(query: string): Promise<CompanyProfile[]> {
   const res = await fetch(`${BASE_URL}/api/company/search?q=${encodeURIComponent(query)}`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -38,7 +40,7 @@ export async function searchCompany(query: string): Promise<CompanyProfile[]> {
 
 export async function getCompanyFallback(size: 'small' | 'mid-market' | 'enterprise', name: string): Promise<CompanyProfile> {
   const res = await fetch(`${BASE_URL}/api/company/fallback/${size}?name=${encodeURIComponent(name)}`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -47,7 +49,7 @@ export async function getCompanyFallback(size: 'small' | 'mid-market' | 'enterpr
 
 export async function listProjects() {
   const res = await fetch(`${BASE_URL}/api/projects`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -55,7 +57,7 @@ export async function listProjects() {
 
 export async function getProject(id: string) {
   const res = await fetch(`${BASE_URL}/api/projects/${id}`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -63,7 +65,7 @@ export async function getProject(id: string) {
 
 export async function getChatHistory(projectId: string): Promise<ChatMessage[]> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
@@ -72,7 +74,7 @@ export async function getChatHistory(projectId: string): Promise<ChatMessage[]> 
 
 export async function getAgents(projectId: string): Promise<AgentStatus[]> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agents`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
@@ -82,7 +84,7 @@ export async function getAgents(projectId: string): Promise<AgentStatus[]> {
 export async function toggleAgent(projectId: string, agentId: string, active: boolean) {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/agents/${agentId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'x-user-id': 'demo-user' },
+    headers: { 'Content-Type': 'application/json', 'x-user-id': USER_ID },
     body: JSON.stringify({ active }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -100,7 +102,7 @@ export async function sendMessageStreaming(
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
-      'x-user-id': 'demo-user',
+      'x-user-id': USER_ID,
     },
     body: JSON.stringify({ message }),
   });
@@ -126,11 +128,23 @@ export async function sendMessageStreaming(
       } catch { /* skip */ }
     }
   }
+
+  // Process any remaining data in the buffer after stream ends
+  if (buffer.trim()) {
+    const remaining = buffer.trim();
+    const dataLine = remaining.startsWith('data: ') ? remaining.slice(6).trim()
+      : remaining.startsWith('data:') ? remaining.slice(5).trim() : null;
+    if (dataLine && dataLine !== '[DONE]') {
+      try {
+        onMessage(normalizeMessage(JSON.parse(dataLine)));
+      } catch { /* ignore parse errors on final chunk */ }
+    }
+  }
 }
 
 export async function downloadPptx(projectId: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/export/pptx`, {
-    headers: { 'x-user-id': 'demo-user' },
+    headers: { 'x-user-id': USER_ID },
   });
   if (!res.ok) {
     const err = await res.text();

@@ -68,7 +68,8 @@ export default function Chat({ agents, onAgentsChange }: Props) {
         }
 
         // Unlock input when an approval/conversation gate arrives
-        if (metaType === 'approval' || metaType === 'agent_conversation' || metaType === 'approval_request') {
+        if ((metaType === 'approval' || metaType === 'agent_conversation' || metaType === 'approval_request')
+            && requestIdRef.current === thisRequestId) {
           setSending(false);
         }
 

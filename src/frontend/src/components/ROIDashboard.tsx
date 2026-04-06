@@ -80,6 +80,10 @@ interface ROIDashboardData {
   projection: Projection;
   methodology: string;
   businessCase?: BusinessCase;
+  roiSubtitle?: string;
+  roiSteadyStateText?: string;
+  futureAnnualOpex?: number;
+  plausibilityWarnings?: string[];
 }
 
 interface Props {
@@ -235,7 +239,7 @@ export default function ROIDashboard({ data }: Props) {
             {roiDisplay}
           </p>
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-            {(data as any).roiSubtitle || "Year 1 return on total investment"}
+            {data.roiSubtitle || "Year 1 return on total investment"}
           </p>
           {data.confidenceLevel && (
             <div className="mt-1.5"><ConfidenceBadge level={data.confidenceLevel} /></div>
@@ -245,9 +249,9 @@ export default function ROIDashboard({ data }: Props) {
               {paybackMonths < 1 ? "<1 mo" : paybackMonths > 36 ? ">3 yr" : `${paybackMonths.toFixed(0)} mo`} payback
             </p>
           )}
-          {(data as any).roiSteadyStateText && (
+          {data.roiSteadyStateText && (
             <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-              Steady-state: {(data as any).roiSteadyStateText}
+              Steady-state: {data.roiSteadyStateText}
             </p>
           )}
         </div>
@@ -505,17 +509,17 @@ export default function ROIDashboard({ data }: Props) {
             <div className="border border-[var(--border)] rounded-lg p-4">
               <h4 className="text-sm font-bold text-green-400 uppercase tracking-wider mb-2">Future State (with Azure)</h4>
               <p className="text-2xl font-bold text-[var(--text-primary)] mb-3">
-                ${fmt((data as any).futureAnnualOpex ?? businessCase.futureState.azurePlatformAnnual)}
+                ${fmt(data.futureAnnualOpex ?? businessCase.futureState.azurePlatformAnnual)}
                 <span className="text-sm font-normal text-[var(--text-muted)]">/yr total opex</span>
               </p>
               <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                 <span>Azure platform (annual)</span>
                 <span className="text-[var(--text-secondary)]">${fmt(businessCase.futureState.azurePlatformAnnual)}</span>
               </div>
-              {(data as any).futureAnnualOpex && (data as any).futureAnnualOpex > businessCase.futureState.azurePlatformAnnual && (
+              {data.futureAnnualOpex && data.futureAnnualOpex > businessCase.futureState.azurePlatformAnnual && (
                 <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
                   <span>Carried labor &amp; overhead</span>
-                  <span className="text-[var(--text-secondary)]">${fmt((data as any).futureAnnualOpex - businessCase.futureState.azurePlatformAnnual)}</span>
+                  <span className="text-[var(--text-secondary)]">${fmt(data.futureAnnualOpex - businessCase.futureState.azurePlatformAnnual)}</span>
                 </div>
               )}
               <div className="flex justify-between text-xs text-[var(--text-muted)] mb-1">
@@ -784,10 +788,10 @@ export default function ROIDashboard({ data }: Props) {
       )}
 
       {/* ── Plausibility Warnings ──────────────────────────────── */}
-      {(data as any).plausibilityWarnings && (data as any).plausibilityWarnings.length > 0 && (
+      {data.plausibilityWarnings && data.plausibilityWarnings.length > 0 && (
         <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4 space-y-1">
           <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-wider mb-2">⚠ Reconciliation Notes</h3>
-          {(data as any).plausibilityWarnings.map((w: string, i: number) => (
+          {data.plausibilityWarnings.map((w: string, i: number) => (
             <p key={i} className="text-xs text-[var(--text-muted)]">• {w}</p>
           ))}
         </div>

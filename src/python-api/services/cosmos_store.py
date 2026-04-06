@@ -58,6 +58,7 @@ class CosmosProjectStore:
             doc = await self._projects.read_item(project_id, partition_key=user_id)
             return _doc_to_project(doc)
         except Exception:
+            logger.exception("Failed to get_project %s", project_id)
             return None
 
     async def list_projects(self, user_id: str) -> list[Project]:
@@ -90,6 +91,7 @@ class CosmosProjectStore:
             doc = await self._agent_state.read_item(project_id, partition_key=project_id)
             return _doc_to_agent_state(doc)
         except Exception:
+            logger.exception("Failed to load_state %s", project_id)
             return None
 
     # ── State checkpoints ─────────────────────────────────────────────
@@ -132,6 +134,7 @@ class CosmosProjectStore:
             item = await self._agent_state.read_item(checkpoint_id, partition_key=project_id)
             return _doc_to_agent_state(item["state"])
         except Exception:
+            logger.exception("Failed to restore_checkpoint %s/%s", project_id, checkpoint_id)
             return None
 
     # ── Testing helper ───────────────────────────────────────────────
