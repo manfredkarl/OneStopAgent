@@ -19,6 +19,37 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "output")
 NODE_MODULES = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "node_modules"))
 
 
+def _sanitize_pptxgenjs_script(script: str) -> str:
+    """Fix common LLM-generated PptxGenJS script issues."""
+    import re
+
+    # Fix invalid layout values — PptxGenJS only accepts these:
+    # LAYOUT_16x9, LAYOUT_16x10, LAYOUT_4x3, LAYOUT_WIDE, LAYOUT_USER
+    valid_layouts = {"LAYOUT_16x9", "LAYOUT_16x10", "LAYOUT_4x3", "LAYOUT_WIDE", "LAYOUT_USER"}
+
+    # Find pres.layout = "..." and validate
+    layout_match = re.search(r'pres\.layout\s*=\s*["\']([^"\']+)["\']', script)
+    if layout_match:
+        layout_val = layout_match.group(1)
+        if layout_val not in valid_layouts:
+            # Replace with default
+            script = script[:layout_match.start()] + 'pres.layout = "LAYOUT_16x9"' + script[layout_match.end():]
+            logger.warning("Fixed invalid PptxGenJS layout '%s' → 'LAYOUT_16x9'", layout_val)
+    elif "pres.layout" not in script:
+        # No layout set — inject default after pres creation
+        script = script.replace(
+            "const pres = new pptxgen();",
+            'const pres = new pptxgen();\npres.layout = "LAYOUT_16x9";',
+            1,
+        )
+
+    # Fix hex colors with # prefix (PptxGenJS wants bare hex)
+    script = re.sub(r'color:\s*["\']#([0-9a-fA-F]{6})["\']', r'color: "\1"', script)
+    script = re.sub(r'background:\s*\{\s*color:\s*["\']#([0-9a-fA-F]{6})["\']', r'background: { color: "\1"', script)
+
+    return script
+
+
 def execute_pptxgenjs(script: str, customer_name: str = "Customer") -> str:
     """Write a PptxGenJS script to a temp file, execute it, return the .pptx path.
 
@@ -38,6 +69,9 @@ def execute_pptxgenjs(script: str, customer_name: str = "Customer") -> str:
     # Inject the real output path — use forward slashes for Node on all platforms
     abs_output = os.path.abspath(output_path).replace("\\", "/")
     script = script.replace("OUTPUT_PATH", f'"{abs_output}"')
+
+    # Sanitize common LLM script issues (invalid layouts, # in hex colors)
+    script = _sanitize_pptxgenjs_script(script)
 
     # Write script to temp file
     script_fd, script_path = tempfile.mkstemp(suffix=".js", prefix="pptxgen_")
