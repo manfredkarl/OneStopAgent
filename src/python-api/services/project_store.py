@@ -58,7 +58,7 @@ class ProjectStore:
             self.chat_histories.pop(project_id, None)
             return True
 
-    async def save_state(self, project_id: str, state) -> None:
+    async def save_state(self, project_id: str, state, phase: str = "done") -> None:
         """No-op for in-memory store — state is already in memory."""
         pass
 

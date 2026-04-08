@@ -104,14 +104,18 @@ class CosmosProjectStore:
 
     # ── Agent state persistence ──────────────────────────────────────
 
-    async def save_state(self, project_id: str, state: AgentState) -> None:
+    async def save_state(self, project_id: str, state: AgentState, phase: str = "done") -> None:
         doc = _agent_state_to_doc(project_id, state)
+        doc["phase"] = phase  # Persist the orchestrator phase alongside state
         await self._agent_state.upsert_item(doc)
 
-    async def load_state(self, project_id: str) -> Optional[AgentState]:
+    async def load_state(self, project_id: str) -> Optional[tuple[AgentState, str]]:
+        """Load state + phase from Cosmos. Returns (AgentState, phase) or None."""
         try:
             doc = await self._agent_state.read_item(project_id, partition_key=project_id)
-            return _doc_to_agent_state(doc)
+            phase = doc.pop("phase", "done")
+            state = _doc_to_agent_state(doc)
+            return state, phase
         except Exception:
             logger.exception("Failed to load_state %s", project_id)
             return None

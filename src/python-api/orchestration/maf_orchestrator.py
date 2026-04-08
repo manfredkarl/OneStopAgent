@@ -182,10 +182,12 @@ class MAFOrchestrator:
                         setattr(state, field, {})
 
     async def _persist_state(self, project_id: str) -> None:
-        """Save agent state to Cosmos DB if a store is configured."""
+        """Save agent state + phase to Cosmos DB if a store is configured."""
         if self._store and hasattr(self._store, "save_state"):
             try:
-                await self._store.save_state(project_id, self.get_state(project_id))
+                state = self.get_state(project_id)
+                phase = self.phases.get(project_id, "new")
+                await self._store.save_state(project_id, state, phase=phase)
             except Exception:
                 logger.warning("Failed to persist state for %s", project_id, exc_info=True)
 
@@ -235,6 +237,19 @@ class MAFOrchestrator:
         company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
       try:
+        # Load state from Cosmos if not in memory
+        if project_id not in self.states and self._store and hasattr(self._store, "load_state"):
+            try:
+                loaded = await self._store.load_state(project_id)
+                if loaded:
+                    self.states[project_id] = loaded[0] if isinstance(loaded, tuple) else loaded
+                    phase = loaded[1] if isinstance(loaded, tuple) and len(loaded) > 1 else "done"
+                    self.phases[project_id] = phase
+                    self._project_order.append(project_id)
+                    logger.info("Restored state for %s from Cosmos (phase=%s)", project_id, phase)
+            except Exception:
+                logger.warning("Failed to load state from Cosmos for %s", project_id, exc_info=True)
+
         state = self.get_state(project_id)
         phase = self.phases.get(project_id, "new")
 
