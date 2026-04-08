@@ -47,6 +47,25 @@ def _sanitize_pptxgenjs_script(script: str) -> str:
     script = re.sub(r'color:\s*["\']#([0-9a-fA-F]{6})["\']', r'color: "\1"', script)
     script = re.sub(r'background:\s*\{\s*color:\s*["\']#([0-9a-fA-F]{6})["\']', r'background: { color: "\1"', script)
 
+    # Fix ShapeType references — LLM often uses pptxgen.ShapeType.rect which doesn't exist.
+    # PptxGenJS exports shapes via pres.ShapeType or the module's ShapeType.
+    # Safest: replace all pptxgen.ShapeType.X and pres.shapes.X with inline shape strings.
+    shape_map = {
+        "rect": '"rect"', "rectangle": '"rect"',
+        "ellipse": '"ellipse"', "oval": '"ellipse"',
+        "roundRect": '"roundRect"', "roundedRect": '"roundRect"',
+        "triangle": '"triangle"',
+        "line": '"line"',
+        "arrow": '"rightArrow"',
+    }
+    for old_name, new_val in shape_map.items():
+        # Match pptxgen.ShapeType.X, pres.ShapeType.X, pptxgen.shapes.X
+        script = re.sub(
+            rf'(?:pptxgen|pres)\.(?:ShapeType|shapes)\.{old_name}\b',
+            new_val,
+            script,
+        )
+
     # Fix writeFile Promise not awaited — PptxGenJS writeFile returns a Promise.
     # If the script doesn't await it, Node exits before the file is written.
     # Replace bare `pres.writeFile(...)` with `.then(() => {}).catch(e => { ... process.exit(1) })`

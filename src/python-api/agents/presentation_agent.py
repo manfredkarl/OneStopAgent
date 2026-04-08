@@ -256,10 +256,12 @@ Add a small note explaining confidence: High = most prices from live Azure API, 
 
 ## RULES:
 - Start with: const pptxgen = require("pptxgenjs");
-- End with: pres.writeFile({{ fileName: OUTPUT_PATH }});
+- End with: pres.writeFile({{ fileName: OUTPUT_PATH }}).then(() => {{}}).catch(e => {{ console.error(e); process.exit(1); }});
 - Use LAYOUT_16x9 (10" x 5.625")
 - NEVER use "#" prefix with hex colors
 - NEVER use unicode/emoji characters -- use text labels instead
+- NEVER use pptxgen.ShapeType or pres.ShapeType -- use string shape names like "rect", "ellipse", "roundRect"
+- For addShape use: slide.addShape("rect", {{...}}) NOT slide.addShape(pptxgen.ShapeType.rect, {{...}})
 - Use breakLine: true between array items
 - Use paraSpaceAfter not lineSpacing
 - NEVER reuse option objects
