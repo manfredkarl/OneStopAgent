@@ -54,13 +54,16 @@ export default function OnboardingTour() {
   const [transitioning, setTransitioning] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
-  // Always show onboarding on page load (for demo purposes)
+  // Show onboarding once per browser session (resets on hard refresh / new tab)
   useEffect(() => {
-    const timer = setTimeout(() => setActive(true), 600);
-    return () => clearTimeout(timer);
+    if (sessionStorage.getItem(STORAGE_KEY) !== 'true') {
+      const timer = setTimeout(() => setActive(true), 600);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   const finish = useCallback(() => {
+    sessionStorage.setItem(STORAGE_KEY, 'true');
     setActive(false);
   }, []);
 
