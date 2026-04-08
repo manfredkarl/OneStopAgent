@@ -54,17 +54,13 @@ export default function OnboardingTour() {
   const [transitioning, setTransitioning] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
-  // Check localStorage on mount
+  // Always show onboarding on page load (for demo purposes)
   useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY) !== 'true') {
-      // Short delay to let the page render so elements exist
-      const timer = setTimeout(() => setActive(true), 600);
-      return () => clearTimeout(timer);
-    }
+    const timer = setTimeout(() => setActive(true), 600);
+    return () => clearTimeout(timer);
   }, []);
 
   const finish = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, 'true');
     setActive(false);
   }, []);
 
