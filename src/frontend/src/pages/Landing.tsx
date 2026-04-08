@@ -384,6 +384,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         {/* Input form */}
         <div className="bg-[var(--bg-input)] border border-[var(--border-light)] rounded-2xl p-6 space-y-4 shadow-[var(--shadow-float)]">
           <textarea
+            data-tour="description"
             value={description}
             onChange={e => { setDescription(e.target.value); if (descError) setDescError(''); }}
             placeholder="Describe your project requirements..."
@@ -394,7 +395,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
           {descError && <p className="text-xs text-red-500 mt-1">{descError}</p>}
 
           {/* Customer name + search */}
-          <div className="space-y-3">
+          <div data-tour="company-search" className="space-y-3">
             <div className="flex gap-3 items-center">
               <div className="flex-1 relative">
                 <input
@@ -510,7 +511,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         </div>
 
         {/* My Opportunities */}
-        <div className="space-y-4">
+        <div data-tour="msx-opportunities" className="space-y-4">
           {!oppsLoaded ? (
             <button
               onClick={fetchOpportunities}
@@ -559,7 +560,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         </div>
 
         {/* Industry selector */}
-        <div className="space-y-4">
+        <div data-tour="industry-templates" className="space-y-4">
           <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Select an industry</p>
           <div className="flex flex-wrap gap-2">
             {INDUSTRIES.map(ind => (

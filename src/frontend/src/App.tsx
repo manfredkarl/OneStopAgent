@@ -5,6 +5,7 @@ import Chat from './pages/Chat';
 import Architecture from './pages/Architecture';
 import ErrorBoundary from './components/layout/ErrorBoundary';
 import AgentSidebar from './components/layout/AgentSidebar';
+import OnboardingTour from './components/layout/OnboardingTour';
 import { listProjects, deleteProject } from './api';
 import { AGENT_REGISTRY } from './types';
 import type { AgentStatus } from './types';
@@ -39,6 +40,7 @@ function AppContent() {
 
   return (
     <div className="h-screen flex flex-col">
+      <OnboardingTour />
       {/* Top nav — fixed */}
       <header className="h-12 bg-[var(--bg-primary)] border-b border-[var(--border)] flex items-center justify-between px-5 shrink-0 z-10">
         <a href="/" className="text-sm font-bold text-[var(--accent)] no-underline">OneStopAgent</a>
@@ -53,7 +55,7 @@ function AppContent() {
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar — fixed, internal scroll */}
-        <aside className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col min-h-0">
+        <aside data-tour="agents" className="w-64 shrink-0 bg-[var(--bg-primary)] border-r border-[var(--border)] flex flex-col min-h-0">
           {/* Agents — scrolls independently */}
           <div className="shrink-0 overflow-y-auto max-h-[55vh]">
             <AgentSidebar

@@ -224,12 +224,13 @@ class MAFOrchestrator:
         active_agents: list[str], description: str,
         company_profile: dict | None = None,
     ) -> AsyncGenerator[ChatMessage, None]:
-        lock = self._get_lock(project_id)
-        async with lock:
-            async for msg in self._handle_message_inner(
-                project_id, message, active_agents, description, company_profile,
-            ):
-                yield msg
+        # NOTE: No per-project lock here — async generators hold locks across
+        # yields, which would deadlock when the SSE stream pauses at an approval
+        # gate and the user's next message tries to acquire the same lock.
+        async for msg in self._handle_message_inner(
+            project_id, message, active_agents, description, company_profile,
+        ):
+            yield msg
 
     async def _handle_message_inner(
         self, project_id: str, message: str,
@@ -244,6 +245,10 @@ class MAFOrchestrator:
                 if loaded:
                     self.states[project_id] = loaded[0] if isinstance(loaded, tuple) else loaded
                     phase = loaded[1] if isinstance(loaded, tuple) and len(loaded) > 1 else "done"
+                    # Can't resume mid-pipeline from Cosmos (workflow not persisted),
+                    # so treat executing/collecting_assumptions as "done" for iteration
+                    if phase in ("executing", "collecting_assumptions"):
+                        phase = "done"
                     self.phases[project_id] = phase
                     self._project_order.append(project_id)
                     logger.info("Restored state for %s from Cosmos (phase=%s)", project_id, phase)
