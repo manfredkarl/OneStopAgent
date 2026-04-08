@@ -27,7 +27,8 @@ export function useDemoReplay() {
     setIsComplete(false);
   }, []);
 
-  /** Return the next batch of *agent* messages up to (and including) the next approval gate. */
+  /** Return the next batch of messages up to (and including) the next approval gate.
+   *  Includes user messages for context but doesn't stop at them. */
   const getNextBatch = useCallback((): ChatMessage[] => {
     if (!isDemoRef.current) return [];
 
@@ -37,18 +38,13 @@ export function useDemoReplay() {
 
     while (i < msgs.length) {
       const msg = msgs[i];
-
-      // Skip user messages — the real user drives those
-      if (msg.role === 'user') {
-        i++;
-        continue;
-      }
-
-      batch.push(msg);
       i++;
 
+      // Include ALL messages (user + agent) for realistic replay
+      batch.push(msg);
+
       // Pause at approval / assumptions gates so the user can click Proceed
-      if (msg.metadata?.type === 'approval' || msg.metadata?.type === 'assumptions_input') {
+      if (msg.role === 'agent' && (msg.metadata?.type === 'approval' || msg.metadata?.type === 'assumptions_input')) {
         break;
       }
     }

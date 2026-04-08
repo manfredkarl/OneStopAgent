@@ -46,9 +46,18 @@ export default function Chat({ agents, onAgentsChange }: Props) {
       demoInitialized.current = true;
       initialSent.current = true; // suppress the normal auto-send
       startDemo();
+      // Stagger the initial batch for a natural feel
       const initial = getNextBatch();
       if (initial.length) {
-        setMessages(prev => [...prev, ...initial]);
+        setSending(true);
+        let delay = 0;
+        initial.forEach((msg, idx) => {
+          delay += msg.role === 'user' ? 100 : 300;
+          setTimeout(() => {
+            setMessages(prev => [...prev, msg]);
+            if (idx === initial.length - 1) setSending(false);
+          }, delay);
+        });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
