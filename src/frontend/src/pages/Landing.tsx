@@ -295,15 +295,15 @@ export default function Landing({ agents, onProjectCreated }: Props) {
       },
       {
         customer: "Associated British Foods",
-        title: "AI Transformation Offer (ATO)",
-        workloads: "Azure AI & Apps",
-        prompt: "Build an AI-powered retail and food production optimization platform for a multinational food, ingredients, and retail group. Agents should automate demand forecasting, production scheduling, and supply chain coordination across 50+ countries. Deploy on Azure with integration to existing ERP systems.",
+        title: "Agentic Asset Orchestration",
+        workloads: "Azure IoT, Digital Twins, Azure AI",
+        prompt: "Design an agentic asset orchestration platform for an energy utility managing 10,000+ distributed assets (turbines, solar arrays, substations). AI agents should autonomously monitor asset health, optimize generation schedules, predict failures, and coordinate maintenance crews using Azure IoT, Digital Twins, and AI services.",
       },
       {
         customer: "Nike",
         title: "Agentic Commerce Platform",
         workloads: "Azure AI Foundry, Azure CDN, Cosmos DB, Azure OpenAI",
-        prompt: "Build an agentic commerce platform for Nike with 10K concurrent users. AI agents should personalize shopping experiences in real-time, manage dynamic pricing, orchestrate omnichannel inventory, and handle conversational commerce via chat and voice. Build on Azure with CDN-accelerated global delivery.",
+        prompt: "Design an agentic commerce platform for a retail chain with 10K concurrent users. AI agents should personalize shopping experiences in real-time, manage dynamic pricing, orchestrate omnichannel inventory, and handle conversational commerce via chat and voice. Build on Azure with CDN-accelerated global delivery.",
       },
     ]);
     setLoadingOpps(false);
