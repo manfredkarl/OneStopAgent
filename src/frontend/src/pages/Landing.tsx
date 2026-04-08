@@ -294,10 +294,10 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         prompt: "Expand an existing AI platform for a global chemical company to support multi-region deployment across EU and US. Agents should handle R&D knowledge retrieval, supply chain optimization, and regulatory document processing. Use Azure OpenAI, Cosmos DB, and AI Search with Private Link networking.",
       },
       {
-        customer: "Associated British Foods",
-        title: "Agentic Asset Orchestration",
-        workloads: "Azure IoT, Digital Twins, Azure AI",
-        prompt: "Design an agentic asset orchestration platform for an energy utility managing 10,000+ distributed assets (turbines, solar arrays, substations). AI agents should autonomously monitor asset health, optimize generation schedules, predict failures, and coordinate maintenance crews using Azure IoT, Digital Twins, and AI services.",
+        customer: "Nike",
+        title: "AI Shopping Agent — Intent-Driven Discovery",
+        workloads: "Azure AI Foundry, Azure AI Search, Cosmos DB",
+        prompt: "Design an AI shopping agent that lets customers describe goals (e.g., marathon training or everyday wear) without knowing product names. It interprets language, behavior, and context in real time to infer intent and map it to catalog, inventory, and merchandising priorities. Using semantic retrieval and reasoning, it returns relevant products, refinements, and landing experiences that drive conversion. The system continuously learns from weak-intent signals and improves discovery via three agents: intent, matching, and optimization.",
       },
       {
         customer: "Nike",
