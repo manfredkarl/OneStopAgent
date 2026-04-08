@@ -6,6 +6,7 @@ import ChatThread from '../components/chat/ChatThread';
 import ChatInput from '../components/chat/ChatInput';
 import CompanyCard from '../components/company/CompanyCard';
 import CompanyDetailModal from '../components/company/CompanyDetailModal';
+import { useDemoReplay } from '../hooks/useDemoReplay';
 
 interface Props {
   agents: AgentStatus[];
@@ -24,6 +25,8 @@ export default function Chat({ agents, onAgentsChange }: Props) {
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const requestIdRef = useRef(0);
+  const { isDemoMode, startDemo, getNextBatch, handleDemoMessage } = useDemoReplay();
+  const demoInitialized = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -37,11 +40,24 @@ export default function Chat({ agents, onAgentsChange }: Props) {
     }).catch(() => {});
   }, [projectId]);
 
+  // Demo mode: if ?demo=nike, start demo replay and show initial batch
+  useEffect(() => {
+    if (searchParams.get('demo') === 'nike' && !demoInitialized.current) {
+      demoInitialized.current = true;
+      initialSent.current = true; // suppress the normal auto-send
+      startDemo();
+      const initial = getNextBatch();
+      if (initial.length) {
+        setMessages(prev => [...prev, ...initial]);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const handleSend = useCallback(async (message: string) => {
     if (!projectId || sending) return;
-    const thisRequestId = ++requestIdRef.current;
-    setSending(true);
 
+    // Add user message to UI
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       projectId,
@@ -50,6 +66,24 @@ export default function Chat({ agents, onAgentsChange }: Props) {
       timestamp: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
+
+    // Demo mode: replay cached messages instead of calling the API
+    if (isDemoMode) {
+      const demoResult = handleDemoMessage(message);
+      if (demoResult !== null) {
+        setSending(true);
+        for (const msg of demoResult) {
+          await new Promise(r => setTimeout(r, 150));
+          setMessages(prev => [...prev, msg]);
+        }
+        setSending(false);
+        return;
+      }
+      // demoResult === null → exited demo, fall through to live API
+    }
+
+    const thisRequestId = ++requestIdRef.current;
+    setSending(true);
 
     try {
       await sendMessageStreaming(projectId, message, (incoming) => {
@@ -120,7 +154,7 @@ export default function Chat({ agents, onAgentsChange }: Props) {
         }
       }
     }
-  }, [projectId, sending]);
+  }, [projectId, sending, isDemoMode, handleDemoMessage]);
 
   // Auto-send the initial message from the landing page
   useEffect(() => {

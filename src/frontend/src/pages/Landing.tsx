@@ -181,6 +181,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
   const [showSizePicker, setShowSizePicker] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSubmittingRef = useRef(false);
+  const pendingDemoRef = useRef<string | null>(null);
 
   // Debounced company search triggered on customer name change
   useEffect(() => {
@@ -355,7 +356,9 @@ export default function Landing({ agents, onProjectCreated }: Props) {
       const result = await createProject(text, customer, activeAgents, profile);
       const projectId = result.projectId || result.id;
       onProjectCreated?.();
-      navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}`);
+      const demoParam = pendingDemoRef.current ? `&demo=${pendingDemoRef.current}` : '';
+      pendingDemoRef.current = null;
+      navigate(`/project/${projectId}?msg=${encodeURIComponent(text)}${demoParam}`);
     } catch (err) {
       console.error('Failed to create project:', err);
     } finally {
@@ -543,7 +546,7 @@ export default function Landing({ agents, onProjectCreated }: Props) {
                 {opportunities.map((opp, i) => (
                   <button
                     key={i}
-                    onClick={() => { setDescription(opp.prompt); setCustomerName(opp.customer); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                    onClick={() => { setDescription(opp.prompt); setCustomerName(opp.customer); pendingDemoRef.current = (opp.customer === 'Nike' && opp.title === 'Agentic Commerce Platform') ? 'nike' : null; window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                     disabled={loading}
                     className="text-left bg-[var(--bg-subtle)] border border-[var(--border-light)] rounded-xl p-4 hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer disabled:opacity-50 group"
                   >
