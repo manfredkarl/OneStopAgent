@@ -300,10 +300,10 @@ export default function Landing({ agents, onProjectCreated }: Props) {
         prompt: "Build an AI-powered retail and food production optimization platform for a multinational food, ingredients, and retail group. Agents should automate demand forecasting, production scheduling, and supply chain coordination across 50+ countries. Deploy on Azure with integration to existing ERP systems.",
       },
       {
-        customer: "HAVI",
-        title: "Partner-led AI Implementation (EY)",
-        workloads: "Azure AI Platform, Apps That Matter",
-        prompt: "Design an agentic AI platform for a global supply chain company in the food service industry. AI agents should optimize logistics routing, warehouse operations, and sustainability tracking. Partner-led implementation with EY on Azure.",
+        customer: "Nike",
+        title: "Agentic Commerce Platform",
+        workloads: "Azure AI Foundry, Azure CDN, Cosmos DB, Azure OpenAI",
+        prompt: "Build an agentic commerce platform for Nike with 10K concurrent users. AI agents should personalize shopping experiences in real-time, manage dynamic pricing, orchestrate omnichannel inventory, and handle conversational commerce via chat and voice. Build on Azure with CDN-accelerated global delivery.",
       },
     ]);
     setLoadingOpps(false);
