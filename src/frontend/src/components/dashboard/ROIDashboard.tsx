@@ -241,7 +241,7 @@ export default function ROIDashboard({ data }: Props) {
           <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
             {data.roiSubtitle || "Year 1 return on total investment"}
           </p>
-          {data.confidenceLevel && (
+          {data.confidenceLevel && data.confidenceLevel !== 'low' && (
             <div className="mt-1.5"><ConfidenceBadge level={data.confidenceLevel} /></div>
           )}
           {paybackMonths != null && (
