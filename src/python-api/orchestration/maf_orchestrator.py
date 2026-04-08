@@ -542,6 +542,20 @@ class MAFOrchestrator:
                 # Feed user response to the paused workflow
                 async for msg in self._resume_workflow(project_id, state, message, pending):
                     yield msg
+            elif self._is_approval_keyword(message) or self._is_refine_keyword(message):
+                # Approval/refine keyword but no pending request yet — the workflow
+                # hasn't registered the approval gate yet (race condition with SSE).
+                # Wait briefly for it to appear, then retry.
+                for _ in range(10):
+                    await asyncio.sleep(0.5)
+                    pending = self.pending_requests.get(project_id, {})
+                    if pending:
+                        async for msg in self._resume_workflow(project_id, state, message, pending):
+                            yield msg
+                        break
+                else:
+                    # Still no pending after 5s — workflow may have finished or errored
+                    yield self._msg(project_id, "The current step is still processing. Please wait a moment and try again.")
             elif Intent.QUESTION in intents:
                 # Answer the question first
                 try:
