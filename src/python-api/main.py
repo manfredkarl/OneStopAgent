@@ -221,6 +221,19 @@ async def delete_project(project_id: str, x_user_id: str = Depends(_get_user_id)
     return {"deleted": True}
 
 
+@app.patch("/api/projects/{project_id}")
+async def update_project(project_id: str, request: Request, x_user_id: str = Depends(_get_user_id)):
+    project = await store.get_project(project_id, x_user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    body = await request.json()
+    if "description" in body:
+        project.description = body["description"]
+    if hasattr(store, "update_project"):
+        await store.update_project(project)
+    return project.model_dump()
+
+
 @app.post("/api/projects/{project_id}/chat")
 async def send_message(
     project_id: str,

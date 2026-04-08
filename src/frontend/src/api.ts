@@ -72,6 +72,16 @@ export async function deleteProject(id: string) {
   return res.json();
 }
 
+export async function renameProject(id: string, description: string) {
+  const res = await fetch(`${BASE_URL}/api/projects/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': USER_ID },
+    body: JSON.stringify({ description }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export async function getChatHistory(projectId: string): Promise<ChatMessage[]> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
     headers: { 'x-user-id': USER_ID },

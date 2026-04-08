@@ -36,6 +36,10 @@ class ProjectStore:
             return project
         return None
 
+    async def update_project(self, project: Project) -> None:
+        with self._lock:
+            self.projects[project.id] = project
+
     async def list_projects(self, user_id: str) -> list[Project]:
         with self._lock:
             return [p for p in self.projects.values() if p.user_id == user_id]

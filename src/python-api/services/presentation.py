@@ -47,6 +47,17 @@ def _sanitize_pptxgenjs_script(script: str) -> str:
     script = re.sub(r'color:\s*["\']#([0-9a-fA-F]{6})["\']', r'color: "\1"', script)
     script = re.sub(r'background:\s*\{\s*color:\s*["\']#([0-9a-fA-F]{6})["\']', r'background: { color: "\1"', script)
 
+    # Fix writeFile Promise not awaited — PptxGenJS writeFile returns a Promise.
+    # If the script doesn't await it, Node exits before the file is written.
+    # Replace bare `pres.writeFile(...)` with `.then(() => {}).catch(e => { ... process.exit(1) })`
+    if 'pres.writeFile(' in script and '.then(' not in script and 'await ' not in script:
+        script = re.sub(
+            r'pres\.writeFile\(([^)]+)\)\s*;?',
+            r'pres.writeFile(\1).then(() => { console.log("PPTX written"); }).catch(e => { console.error(e); process.exit(1); });',
+            script,
+        )
+        logger.info("Fixed PptxGenJS writeFile Promise (added .then/.catch)")
+
     return script
 
 

@@ -67,6 +67,12 @@ class CosmosProjectStore:
         items = self._projects.query_items(query, parameters=params, partition_key=user_id)
         return [_doc_to_project(doc) async for doc in items]
 
+    async def update_project(self, project: Project) -> None:
+        doc = project.model_dump()
+        doc["id"] = project.id
+        doc["userId"] = project.user_id  # partition key
+        await self._projects.upsert_item(doc)
+
     # ── Chat messages ────────────────────────────────────────────────
 
     async def add_message(self, project_id: str, message: ChatMessage) -> None:

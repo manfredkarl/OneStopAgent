@@ -6,7 +6,7 @@ import Architecture from './pages/Architecture';
 import ErrorBoundary from './components/layout/ErrorBoundary';
 import AgentSidebar from './components/layout/AgentSidebar';
 import OnboardingTour from './components/layout/OnboardingTour';
-import { listProjects, deleteProject } from './api';
+import { listProjects, deleteProject, renameProject } from './api';
 import { AGENT_REGISTRY } from './types';
 import type { AgentStatus } from './types';
 
@@ -25,6 +25,8 @@ function AppContent() {
 
   // Recent projects for sidebar
   const [recentProjects, setRecentProjects] = useState<any[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
   useEffect(() => {
     listProjects()
@@ -77,23 +79,47 @@ function AppContent() {
               <p className="text-xs text-[var(--text-muted)] px-1">No projects yet</p>
             ) : (
               <div className="space-y-1">
-                {recentProjects.slice(0, 20).map((p: any) => (
+                {recentProjects.slice(0, 20).map((p: any) => {
+                  const pid = p.projectId || p.id;
+                  const isEditing = editingId === pid;
+                  return (
                   <div
-                    key={p.projectId || p.id}
+                    key={pid}
                     className="group flex items-center gap-1"
                   >
-                    <button
-                      onClick={() => navigate(`/project/${p.projectId || p.id}`)}
-                      className="flex-1 text-left px-2 py-1.5 rounded-md text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] truncate cursor-pointer transition-colors"
-                      title={p.description}
-                    >
-                      {p.description?.slice(0, 50) || 'Untitled project'}
-                    </button>
+                    {isEditing ? (
+                      <input
+                        autoFocus
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        onBlur={async () => {
+                          if (editText.trim() && editText !== (p.description || '')) {
+                            try { await renameProject(pid, editText.trim()); refreshProjects(); } catch {}
+                          }
+                          setEditingId(null);
+                        }}
+                        onKeyDown={async e => {
+                          if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
+                          if (e.key === 'Escape') { setEditingId(null); }
+                        }}
+                        className="flex-1 px-2 py-1 rounded-md text-xs bg-[var(--bg-input)] text-[var(--text-primary)] border border-[var(--accent)] outline-none"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => navigate(`/project/${pid}`)}
+                        onDoubleClick={(e) => { e.preventDefault(); setEditingId(pid); setEditText(p.description?.slice(0, 80) || ''); }}
+                        className="flex-1 text-left px-2 py-1.5 rounded-md text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] truncate cursor-pointer transition-colors"
+                        title={`${p.description || 'Untitled'} — double-click to rename`}
+                      >
+                        {p.description?.slice(0, 50) || 'Untitled project'}
+                      </button>
+                    )}
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
+                        if (!window.confirm('Delete this project?')) return;
                         try {
-                          await deleteProject(p.projectId || p.id);
+                          await deleteProject(pid);
                           refreshProjects();
                         } catch { /* ignore */ }
                       }}
@@ -103,7 +129,8 @@ function AppContent() {
                       ×
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
