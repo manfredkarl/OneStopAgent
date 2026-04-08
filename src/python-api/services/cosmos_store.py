@@ -80,6 +80,28 @@ class CosmosProjectStore:
         items = self._messages.query_items(query, parameters=params, partition_key=project_id)
         return [_doc_to_message(doc) async for doc in items]
 
+    async def delete_project(self, project_id: str, user_id: str) -> bool:
+        """Delete a project, its messages, and state from Cosmos."""
+        try:
+            # Delete from projects container (partitioned by userId)
+            await self._projects.delete_item(project_id, partition_key=user_id)
+        except Exception:
+            logger.exception("Failed to delete project %s", project_id)
+            return False
+
+        # Best-effort cleanup of messages and state (partitioned by projectId)
+        try:
+            query = "SELECT c.id FROM c WHERE c.projectId = @pid"
+            params: list[dict[str, Any]] = [{"name": "@pid", "value": project_id}]
+            async for doc in self._messages.query_items(query, parameters=params, partition_key=project_id):
+                await self._messages.delete_item(doc["id"], partition_key=project_id)
+            async for doc in self._agent_state.query_items(query, parameters=params, partition_key=project_id):
+                await self._agent_state.delete_item(doc["id"], partition_key=project_id)
+        except Exception:
+            logger.warning("Partial cleanup for project %s", project_id, exc_info=True)
+
+        return True
+
     # ── Agent state persistence ──────────────────────────────────────
 
     async def save_state(self, project_id: str, state: AgentState) -> None:

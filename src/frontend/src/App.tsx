@@ -5,7 +5,7 @@ import Chat from './pages/Chat';
 import Architecture from './pages/Architecture';
 import ErrorBoundary from './components/layout/ErrorBoundary';
 import AgentSidebar from './components/layout/AgentSidebar';
-import { listProjects } from './api';
+import { listProjects, deleteProject } from './api';
 import { AGENT_REGISTRY } from './types';
 import type { AgentStatus } from './types';
 
@@ -76,14 +76,31 @@ function AppContent() {
             ) : (
               <div className="space-y-1">
                 {recentProjects.slice(0, 20).map((p: any) => (
-                  <button
+                  <div
                     key={p.projectId || p.id}
-                    onClick={() => navigate(`/project/${p.projectId || p.id}`)}
-                    className="w-full text-left px-2 py-1.5 rounded-md text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] truncate cursor-pointer transition-colors"
-                    title={p.description}
+                    className="group flex items-center gap-1"
                   >
-                    {p.description?.slice(0, 50) || 'Untitled project'}
-                  </button>
+                    <button
+                      onClick={() => navigate(`/project/${p.projectId || p.id}`)}
+                      className="flex-1 text-left px-2 py-1.5 rounded-md text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] truncate cursor-pointer transition-colors"
+                      title={p.description}
+                    >
+                      {p.description?.slice(0, 50) || 'Untitled project'}
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await deleteProject(p.projectId || p.id);
+                          refreshProjects();
+                        } catch { /* ignore */ }
+                      }}
+                      className="opacity-0 group-hover:opacity-100 shrink-0 w-5 h-5 rounded flex items-center justify-center text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all cursor-pointer"
+                      title="Delete project"
+                    >
+                      ×
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

@@ -63,6 +63,15 @@ export async function getProject(id: string) {
   return res.json();
 }
 
+export async function deleteProject(id: string) {
+  const res = await fetch(`${BASE_URL}/api/projects/${id}`, {
+    method: 'DELETE',
+    headers: { 'x-user-id': USER_ID },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export async function getChatHistory(projectId: string): Promise<ChatMessage[]> {
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/chat`, {
     headers: { 'x-user-id': USER_ID },

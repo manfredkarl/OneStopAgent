@@ -48,6 +48,16 @@ class ProjectStore:
         with self._lock:
             return self.chat_histories.get(project_id, [])
 
+    async def delete_project(self, project_id: str, user_id: str) -> bool:
+        """Delete a project and its chat history. Returns True if deleted."""
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project or project.user_id != user_id:
+                return False
+            del self.projects[project_id]
+            self.chat_histories.pop(project_id, None)
+            return True
+
     async def save_state(self, project_id: str, state) -> None:
         """No-op for in-memory store — state is already in memory."""
         pass

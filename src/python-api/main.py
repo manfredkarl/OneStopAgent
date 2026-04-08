@@ -77,7 +77,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "x-user-id", "Accept"],
 )
 
@@ -208,6 +208,17 @@ async def get_project(project_id: str, x_user_id: str = Depends(_get_user_id)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project.model_dump()
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str, x_user_id: str = Depends(_get_user_id)):
+    deleted = await store.delete_project(project_id, x_user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Also clean up orchestrator state
+    orchestrator.states.pop(project_id, None)
+    orchestrator.phases.pop(project_id, None)
+    return {"deleted": True}
 
 
 @app.post("/api/projects/{project_id}/chat")
