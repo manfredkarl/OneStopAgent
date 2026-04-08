@@ -432,6 +432,10 @@ class MAFOrchestrator:
 
         # ── Phase: plan_shown ───────────────────────────────────────
         elif phase == "plan_shown":
+            # Quick keyword check — common proceed words that LLM may misclassify
+            _msg_lower = message.strip().lower()
+            if _msg_lower in ("go", "start", "run", "begin", "let's go", "lets go", "do it", "execute"):
+                intent = Intent.PROCEED
             if intent in (Intent.PROCEED, Intent.FAST_RUN):
                 state.clarifications = message if intent == Intent.PROCEED else ""
                 state.mode = "solution"
@@ -1095,7 +1099,7 @@ class MAFOrchestrator:
 
     _APPROVAL_KEYWORDS = frozenset({
         "proceed", "skip", "yes", "ok", "continue",
-        "skip this", "next",
+        "skip this", "next", "go", "start",
     })
 
     _REFINE_KEYWORDS = frozenset({
