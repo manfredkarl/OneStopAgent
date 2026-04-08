@@ -314,10 +314,3 @@ def search_local_patterns(query: str, top_k: int = 5) -> list[dict]:
         return []
     return [r for _, r in scored[:top_k]]
 
-
-def find_matching_scenarios(description: str, top_k: int = 3) -> list[dict]:
-    """Return the top-k patterns whose fields match the description.
-
-    Kept for backward compatibility – delegates to ``search_local_patterns``.
-    """
-    return search_local_patterns(description, top_k=top_k)
