@@ -17,6 +17,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
   tags: tags
   properties: {
     databaseAccountOfferType: 'Standard'
+    publicNetworkAccess: 'Enabled'
     consistencyPolicy: {
       defaultConsistencyLevel: 'Session'
     }
