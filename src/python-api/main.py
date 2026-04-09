@@ -36,9 +36,13 @@ setup_telemetry()
 
 _cosmos_endpoint = os.environ.get("COSMOS_ENDPOINT")
 if _cosmos_endpoint:
-    from services.cosmos_store import CosmosProjectStore
-    store = CosmosProjectStore(_cosmos_endpoint)
-    logging.getLogger(__name__).info("Using Cosmos DB store: %s", _cosmos_endpoint)
+    try:
+        from services.cosmos_store import CosmosProjectStore
+        store = CosmosProjectStore(_cosmos_endpoint)
+        logging.getLogger(__name__).info("Using Cosmos DB store: %s", _cosmos_endpoint)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Cosmos DB init failed (%s) — falling back to in-memory store", e)
+        from services.project_store import store  # noqa: F811
 else:
     from services.project_store import store  # noqa: F811 — module-level singleton
     logging.getLogger(__name__).info("COSMOS_ENDPOINT not set — using in-memory store")

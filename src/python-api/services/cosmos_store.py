@@ -32,6 +32,9 @@ class CosmosProjectStore:
         self._projects = self._db.get_container_client("projects")
         self._messages = self._db.get_container_client("chat_messages")
         self._agent_state = self._db.get_container_client("agent_state")
+        # In-memory fallback when Cosmos is unreachable
+        self._local_projects: dict[str, Project] = {}
+        self._local_messages: dict[str, list[ChatMessage]] = {}
 
     # ── Projects ─────────────────────────────────────────────────────
 
@@ -48,12 +51,22 @@ class CosmosProjectStore:
             customer_name=customer_name,
             company_profile=company_profile,
         )
-        doc = project.model_dump(mode="json")
-        doc["userId"] = user_id  # partition key
-        await self._projects.create_item(doc)
+        try:
+            doc = project.model_dump(mode="json")
+            doc["userId"] = user_id  # partition key
+            await self._projects.create_item(doc)
+        except Exception:
+            logger.exception("Cosmos create_project failed — project exists in-memory only")
+            # Store in local fallback so the project is still usable this session
+            self._local_projects[project.id] = project
+            self._local_messages[project.id] = []
         return project
 
     async def get_project(self, project_id: str, user_id: str) -> Optional[Project]:
+        # Check local fallback first
+        local = self._local_projects.get(project_id)
+        if local and local.user_id == user_id:
+            return local
         try:
             doc = await self._projects.read_item(project_id, partition_key=user_id)
             return _doc_to_project(doc)
@@ -62,10 +75,20 @@ class CosmosProjectStore:
             return None
 
     async def list_projects(self, user_id: str) -> list[Project]:
-        query = "SELECT * FROM c WHERE c.userId = @uid ORDER BY c.created_at DESC"
-        params: list[dict[str, Any]] = [{"name": "@uid", "value": user_id}]
-        items = self._projects.query_items(query, parameters=params, partition_key=user_id)
-        return [_doc_to_project(doc) async for doc in items]
+        try:
+            query = "SELECT * FROM c WHERE c.userId = @uid ORDER BY c.created_at DESC"
+            params: list[dict[str, Any]] = [{"name": "@uid", "value": user_id}]
+            items = self._projects.query_items(query, parameters=params, partition_key=user_id)
+            results = [_doc_to_project(doc) async for doc in items]
+        except Exception:
+            logger.exception("Failed to list_projects for %s — using local only", user_id)
+            results = []
+        # Merge local fallback projects
+        cosmos_ids = {p.id for p in results}
+        for p in self._local_projects.values():
+            if p.user_id == user_id and p.id not in cosmos_ids:
+                results.append(p)
+        return results
 
     async def update_project(self, project: Project) -> None:
         doc = project.model_dump()
@@ -76,15 +99,26 @@ class CosmosProjectStore:
     # ── Chat messages ────────────────────────────────────────────────
 
     async def add_message(self, project_id: str, message: ChatMessage) -> None:
-        doc = message.model_dump(mode="json")
-        doc["projectId"] = project_id  # partition key
-        await self._messages.create_item(doc)
+        try:
+            doc = message.model_dump(mode="json")
+            doc["projectId"] = project_id  # partition key
+            await self._messages.create_item(doc)
+        except Exception:
+            logger.warning("Cosmos add_message failed — storing locally")
+            self._local_messages.setdefault(project_id, []).append(message)
 
     async def get_messages(self, project_id: str) -> list[ChatMessage]:
-        query = "SELECT * FROM c WHERE c.projectId = @pid ORDER BY c.timestamp ASC"
-        params: list[dict[str, Any]] = [{"name": "@pid", "value": project_id}]
-        items = self._messages.query_items(query, parameters=params, partition_key=project_id)
-        return [_doc_to_message(doc) async for doc in items]
+        results: list[ChatMessage] = []
+        try:
+            query = "SELECT * FROM c WHERE c.projectId = @pid ORDER BY c.timestamp ASC"
+            params: list[dict[str, Any]] = [{"name": "@pid", "value": project_id}]
+            items = self._messages.query_items(query, parameters=params, partition_key=project_id)
+            results = [_doc_to_message(doc) async for doc in items]
+        except Exception:
+            logger.warning("Cosmos get_messages failed — using local only")
+        # Append local messages
+        results.extend(self._local_messages.get(project_id, []))
+        return results
 
     async def delete_project(self, project_id: str, user_id: str) -> bool:
         """Delete a project, its messages, and state from Cosmos."""
