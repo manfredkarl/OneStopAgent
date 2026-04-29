@@ -25,4 +25,7 @@ RUN mkdir -p output
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Single worker — required because we use in-memory ProjectStore.
+# Multiple workers each have their own Python process and independent state,
+# which would cause 'project not found' errors across requests.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
