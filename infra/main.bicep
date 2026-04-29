@@ -155,6 +155,7 @@ module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
     containerMemory: '2.0Gi'
     targetPort: 8000
     containerMinReplicas: 1
+    containerMaxReplicas: 1
     ingressEnabled: true
     containerName: 'main'
     userAssignedIdentityResourceId: apiIdentity.outputs.resourceId
