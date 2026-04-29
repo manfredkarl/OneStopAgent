@@ -120,18 +120,6 @@ module apiIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.
   }
 }
 
-// Cosmos DB — serverless NoSQL for project persistence
-module cosmos 'core/database/cosmos.bicep' = {
-  name: 'cosmos'
-  scope: rg
-  params: {
-    accountName: '${abbrs.documentDBDatabaseAccounts}${resourceToken}'
-    location: location
-    tags: tags
-    apiPrincipalId: apiIdentity.outputs.principalId
-  }
-}
-
 // Api backend
 module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
   name: 'api-container-app'
@@ -156,10 +144,6 @@ module api 'br/public:avm/ptn/azd/container-app-upsert:0.1.1' = {
       {
         name: 'CORS_ORIGINS'
         value: web.outputs.uri
-      }
-      {
-        name: 'COSMOS_ENDPOINT'
-        value: cosmos.outputs.endpoint
       }
     ]
     containerAppsEnvironmentName: containerApps.outputs.environmentName
